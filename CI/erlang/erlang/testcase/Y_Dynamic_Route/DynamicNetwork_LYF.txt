@@ -1,0 +1,73 @@
+*** Settings ***
+Suite Setup       LYF_Setup
+Suite Teardown    LYF_Teardown
+Resource          ../resource/SshKeyword.txt
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/DynamicRouteKeyword.txt
+
+*** Variables ***
+${dyn_route_wait}    5s
+
+*** Test Cases ***
+Dynamic_routing_receive_delete_bond_delete
+    [Tags]    SDWANDEV-4465
+    ${nets}=    create list    172.19.14.0/24
+    check_dynamic_routing_not_in_cpe    wuhan    ${nets}
+
+CPE_all_traffic_to_IDC
+    [Tags]    SDWANDEV-4446
+    ${should_contain}=    create list    172.19.17.2    172.21.14.25    172.21.14.1
+    Wait Until Keyword Succeeds    5s    200ms    traceroute_on_pc    nanchang    192.168.0.100    ${should_contain}
+
+static_route_cpe_to_IDC
+    [Tags]    SDWANDEV-4447
+    ${should_contain}=    create list    172.19.43.1    172.21.14.25    172.21.14.1    &{nanjing_pc}[inner_ip]
+    Wait Until Keyword Succeeds    3x    200ms    traceroute_on_pc    guangzhou    &{nanjing_pc}[inner_ip]    ${should_contain}
+
+When_nanjing_cpe_wan_down_nexthop_wuhan_LYF
+    [Tags]    SDWANDEV-4448
+    ${should_contain}=    create list    172.19.17.2    172.21.14.25    172.21.14.1    10.0.200.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    3x    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    shutdown_nanjing_port    &{nanjing_switch}[nanjing_wan_if]
+    ${should_contain}=    create list    172.19.17.2    172.21.15.27    172.21.15.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    3x    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    [Teardown]    run keywords    unshutdown_nanjing_port    &{nanjing_switch}[nanjing_wan_if]
+    ...    AND    Wait Until Keyword Succeeds    ${dyn_route_wait}    200ms    check_dynamic_routing_endpoint_status_in_cpe    nanchang
+    ...    &{nanjing_cpe}[chassis_id]    ${true}
+
+When_nanjing_cpe_lan_down_nexthop_wuhan_LYF
+    [Tags]    SDWANDEV-4449
+    ${should_contain}=    create list    172.19.17.2    172.21.14.25    172.21.14.1    10.0.200.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    3x    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    shutdown_nanjing_port    &{nanjing_switch}[nanjing_lan_if]
+    ${should_contain}=    create list    172.19.17.2    172.21.15.27    172.21.15.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    3x    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    [Teardown]    run keywords    unshutdown_nanjing_port    &{nanjing_switch}[nanjing_lan_if]
+    ...    AND    Wait Until Keyword Succeeds    ${dyn_route_wait}    200ms    check_dynamic_routing_endpoint_status_in_cpe    nanchang
+    ...    &{nanjing_cpe}[chassis_id]    ${true}
+
+When_wuhan_cpe_wan_down_LYF
+    [Tags]    SDWANDEV-4450
+    ${should_contain}=    create list    172.19.17.2    172.21.14.25    172.21.14.1    10.0.200.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    5s    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    shutdown_wuhan_wan_port
+    Wait Until Keyword Succeeds    3x    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    [Teardown]    run keywords    unshutdown_wuhan_wan_port
+    ...    AND    Wait Until Keyword Succeeds    ${dyn_route_wait}    200ms    check_dynamic_routing_endpoint_status_in_cpe    nanchang
+    ...    &{wuhan_cpe}[chassis_id]    ${true}
+
+*** Keywords ***
+LYF_Setup
+    add_default_route_on_cpe    nanchang    nanjing    wuhan
+    ${c_name}=    evaluate    '&{nanjing_pc}[site_name]-&{wuhan_pc}[site_name]'
+    delete_company_unions    ${suite_company_id}    ${suite_${c_name}_union_id}
+    Wait Until Keyword Succeeds    2s    500ms    Check End2End Bond Deleted    nanjing    &{nanjing_cpe}[chassis_id]    &{wuhan_cpe}[chassis_id]
+    ${nets}=    create list    0.0.0.0/1    128.0.0.0/1
+    Wait Until Keyword Succeeds    10s    1s    check_iptables_mangle_aiwan_chain_from_cpe    nanchang    ${nets}    ${4}
+
+LYF_Teardown
+    delete_default_route_on_cpe    nanchang    nanjing    wuhan
+    ${c_name}=    evaluate    '&{nanjing_pc}[site_name]-&{wuhan_pc}[site_name]'
+    create_company_union_set_suite_id    ${suite_company_id}    ${c_name}    ${False}    ${suite_&{nanjing_pc}[site_name]_site_id}    ${suite_&{wuhan_pc}[site_name]_site_id}
+    ${bond_number}=    Wait Until Keyword Succeeds    2s    500ms    Check End2End Bond    nanjing    &{nanjing_cpe}[chassis_id]
+    ...    &{wuhan_cpe}[chassis_id]

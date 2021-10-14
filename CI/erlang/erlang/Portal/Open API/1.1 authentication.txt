@@ -1,0 +1,37 @@
+*** Settings ***
+Documentation     POST /api/v1/tokens
+Suite Setup
+Suite Teardown
+Library           Collections
+Library           ../../libs/portal/RequestApi.py
+Library           ../../libs/portal/JsonValidate.py
+
+*** Test Cases ***
+1. normal test
+    [Tags]    SDWANDEV-4500
+    ${code}    ${res}    authorize    test6_1@qq.com    test66!    #渠道账户鉴权    #期待成功，返回公司列表中包括渠道下所有公司
+    should be equal as integers    ${code}    201
+    log    ${res}
+    ${companies}=    create list
+    @{company_list}    convert to list    ${res}[companyList]
+    length should be    ${res}[companyList]    2
+    ${target}    create list    测试公司6    测试公司7
+    : FOR    ${i}    IN    @{company_list}
+    \    append to list    ${companies}    ${i}[name]
+    should be equal    ${companies}    ${target}
+    check response format    ${res}    auth info
+    ${code}    ${res}    authorize    test5_1@qq.com    test55!    #公司账户鉴权    #期待成功，返回公司列表为空
+    should be equal as integers    ${code}    201
+    should be empty    ${res}[companyList]
+    check response format    ${res}    auth info
+
+2. abnormal test
+    [Tags]    SDWANDEV-4536
+    ${code}    ${res}    authorize    test6_3@qq.com    test66!    #冻结账户鉴权    #期待失败
+    should be equal as integers    ${code}    401
+    ${code}    ${res}    authorize    test6_6@qq.com    test66!    #错误用户名    #期待失败
+    should be equal as integers    ${code}    401
+    ${code}    ${res}    authorize    test6_1@qq.com    test61!    #错误密码    #期待失败
+    should be equal as integers    ${code}    401
+
+*** Keywords ***

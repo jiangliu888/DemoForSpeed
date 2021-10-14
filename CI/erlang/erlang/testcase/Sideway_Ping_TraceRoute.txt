@@ -1,0 +1,69 @@
+*** Settings ***
+Resource          resource/UranusKeyword.txt
+Resource          resource/SshKeyword.txt
+Library           ../libs/uranus/UranusKeyword.py
+Library           ../libs/configCenter/ConsulKeyword.py
+
+Suite Setup     Prepare SSH Sessions
+Suite Teardown  close all connections
+
+*** Variables ***
+${wuhan_wan_tcpdump_file}    GWPing_Wan.pcap
+
+*** Test Cases ***
+Sideway WAN LAN Ping Gateway
+    [Tags]    SDWANDEV-1220
+    [Setup]    switch connection   ${sess_wuhan_cpe}
+    # LAN ping GW
+    write    ping &{wuhan_cpe}[lan_gw] -c 5 -i 0.2
+    ${res}=    read until prompt
+    should contain    ${res}    , 0% packet loss
+
+Sideway Gateway Ping WAN LAN
+    [Tags]    SDWANDEV-1291    long
+    # GW ping LAN
+    ${ping_res}=    Ping_From_Switch    wuhan_switch    &{wuhan_cpe}[lan_ip]
+    should contain    ${ping_res}    0.00% packet loss
+    # GW ping WAN
+    ${wan_ips}=    set variable    &{wuhan_cpe}[wan_ips]
+    : FOR    ${wan_ip}    IN    @{wan_ips}
+    \    switch connection   ${sess_wuhan_cpe}
+    \    Start Tcpdump    &{wuhan_cpe}[internet_if]    ${wuhan_wan_tcpdump_file}    &{wuhan_pc}[passwd]
+    \    ${ping_res}=    Ping_From_Switch    wuhan_switch    ${wan_ip}
+    \    switch connection   ${sess_wuhan_cpe}
+    \    Write Sudo Cmd    killall tcpdump    &{wuhan_cpe}[passwd]
+    \    Check Tcpdump log    ${wuhan_wan_tcpdump_file}    5    ${wan_ip}
+    [Teardown]    run keywords    close_all_net_telnet_connections
+
+Sideway WAN Trace Route
+    [Tags]    SDWANDEV-1282
+    [Setup]    switch connection   ${sess_wuhan_cpe}
+    ${wan_ips}=    set variable    &{wuhan_cpe}[wan_ips]
+    : FOR    ${wan_ip}    IN    @{wan_ips}
+    \    write    mtr &{internet_host}[ip] -n -r -c 5 -a ${wan_ip}
+    \    ${res}=    read until prompt
+    \    ${last_line}=    Get Line    ${res}    -2
+    \    should contain    ${last_line}    &{internet_host}[ip]
+    \    should contain    ${last_line}    0.0%
+
+Sideway WAN LAN Ping PC
+    [Tags]    SDWANDEV-1283
+    [Setup]    switch connection   ${sess_wuhan_cpe}
+    write    ping &{mirror_pc_103}[wh_lan_ip] -c 5 -i 0.2 -I &{wuhan_cpe}[intranet_if]
+    ${res}=    read until prompt
+    should contain    ${res}    , 0% packet loss
+    write    ping &{mirror_pc_103}[wh_wan_ip] -c 5 -i 0.2 -I &{wuhan_cpe}[internet_if]
+    ${res}=    read until prompt
+    should contain    ${res}    , 0% packet loss
+
+Sideway WAN Ping Internet
+    [Tags]    SDWANDEV-1284
+    [Setup]    switch connection   ${sess_wuhan_cpe}
+    write    ping 114.114.114.114 -c 5 -i 0.2 -I &{wuhan_cpe}[internet_if]
+    ${res}=    read until prompt
+    should contain    ${res}    , 0% packet loss
+
+*** Keywords ***
+Prepare SSH Sessions
+    ssh_cpe  wuhan   sess_wuhan_cpe
+    set suite variable   ${sess_wuhan_cpe}  sess_wuhan_cpe

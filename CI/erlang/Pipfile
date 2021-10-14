@@ -1,0 +1,32 @@
+[[source]]
+
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+verify_ssl = true
+name = "pypi"
+
+
+[dev-packages]
+
+mock = "*"
+pykwalify = "*"
+pytest = "*"
+pytest-cov = "*"
+pytest-faker = "*"
+pytest-mock = "*"
+
+
+[packages]
+
+pbr = "*"
+requests = "*"
+paramiko = "*"
+xmltodict = "*"
+deepdiff = "*"
+netmiko = "*"
+influxdb = "*"
+prometheus_client = "*"
+
+
+[requires]
+
+python_version = "2.7"

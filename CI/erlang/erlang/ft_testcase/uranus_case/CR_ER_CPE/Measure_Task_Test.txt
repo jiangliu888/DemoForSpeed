@@ -1,0 +1,984 @@
+*** Settings ***
+Suite Setup       FT_Suit_startup
+Suite Teardown
+Test Setup        TestSetup
+Resource          ../../../testcase/resource/UranusKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+Library           ../../../libs/configCenter/ConsulKeyword.py
+Library           ../../../libs/manager/ManagerKeyword.py
+Library           ../../../libs/prism/PrismKeyword.py
+Resource          ../../resource/FtNeKeyword.txt
+Library           ../../../libs/fake_ne/interface/FakeNeKeyword.py
+Library           ../../../libs/fake_ne/topo/loadTopo.py
+Resource          ../../resource/topoKeyword.txt
+Variables         ../../../config/ft_topo_check/measure_tasks_check.py
+Variables         ../../../config/ft_topo_check/flows_check.py
+Library           ../../../libs/uranus/interface/EsInterface.py
+Library           ../../../libs/uranus/GaeaKeyword.py
+
+*** Variables ***
+${select_area_wait_timer}    120s
+${maintain_wait_time}    60s
+@{cpe_wan_if}     enp0s3
+@{cac_5}          5
+@{eac_11}         11
+@{eac_1}          1
+@{cac_4}          4
+@{eac_12}         12
+
+*** Test Cases ***
+CPE_Select_CR_Add_Delete
+    [Tags]    SDWANDEV-155    SDWANDEV-2300    SDWANDEV-2301
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_Pop_Tasks_and_Tunnels}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_tunnels_check}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    ${site16208_id}=    Start_A_CPE    16208    5    22    3
+    ${cpes}=    create list    16192    16208
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16208    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_CPE16208_tunnels_check}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_CPE16208_POP_TO_CPE_Flows}
+    stop_A_Ne    CPE    16208    5    22    ${site16208_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_tunnels_check}
+    ${cpes}=    create list    16192
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+Change_CPE_IP
+    [Tags]    SDWANDEV-156
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    register_cpe_config_to_change_ip    16192    enp0s3    9
+    sleep    30s
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    ${cpes}=    create list    16192
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+Delete_CR_When_has_CPE
+    [Tags]    SDWANDEV-159    SDWANDEV-2338
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_Pop_Tasks_and_Tunnels}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_tunnels_check}
+    ${er_list}=    create list    8038
+    ${cac_list}=    create list    4
+    ${eac_list}=    create list    11
+    put_er_cac_eac    ${er_list}    ${cac_list}    ${eac_list}
+    stop_a_ne    CR    8566    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    4    11
+    Tunnel_check    ${CR8550_CPE16192_ER8038_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8038_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+Add_Delete_CPE_Check_Flows
+    [Tags]    SDWANDEV-205    SDWANDEV-264
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    1
+    Ensure_CPE_Select_Right_EAC    16208    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE16192_CPE16208_POP_TO_CPE_Flows}    ${UN16192_16208_CPE_Flows}
+    ${site16224_id}=    Start_A_CPE    16224    5    23    3
+    ${site16192_id}=    get from list    ${sites_id_list}    0
+    ${cpes_add16224}=    create list    ${site16192_id}    ${site16224_id}
+    ${cpe16192_16224}    create list    16192    16224
+    ${union16192_16224_id_list}=    create_company_union    ${cpe16192_16224}    ${cpes_add16224}    ${suite_company_id}
+    ${union16192_16224_id}=    get from list    ${union16192_16224_id_list}    0
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16224    5    1
+    Tunnel_check    ${CR8550_CPE16192_CR8566_CPE16208_CPE16224_ALL_tunnels}
+    ${cpe16224}    create list    16224
+    CPE_Flows_check    ${cpe16224}    ${Add_CPE16224_IN_ER8566_POP_Flows}    ${UN16192_16208_UN16192_16224_CPE_Flows}
+    delete_company_unions    ${suite_company_id}    ${union16192_16224_id}
+    wait until keyword succeeds    10s    1s    Delete_CPE16224_IN_ER8566_Flows_Check
+    wait until keyword succeeds    10s    1s    CPE_Flows_check    ${cpe16224}    ${Add_CPE16224_IN_ER8566_POP_Flows}    ${UN16192_16208_CPE_Flows}
+    stop_A_Ne    CPE    16224    5    23    ${site16224_id}
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_ALL_tunnels}
+    Delete_CPE16224_IN_ER8566_Flows_Check
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+Change_CPE_neid_Check_Flows
+    [Tags]    SDWANDEV-3650    remove
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    1
+    Ensure_CPE_Select_Right_EAC    16208    5    1
+    ${site16192_id}=    get from list    ${sites_id_list}    0
+    patch_company_sites    ${suite_company_id}    ${site16192_id}    16224    16224
+    start_A_Ne    CPE    16224    4    20    5
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16224    4    1
+    ${cpes}=    create list    16208    16224
+    Tunnel_check    ${CR8550_CR8566_CPE16192_change16224_CPE16208_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE16192_change16224_CPE16208_POP_TO_CPE_Flows}    ${UN16192_change16224_16208_CPE_Flows}
+    stop_A_Ne    CPE    16224    4    20
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+Change_CPE_IP_Check_Flows
+    [Tags]    SDWANDEV-211
+    ${switchs}=    create list    8550    8566    8022    8038    16192
+    ...    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566    8022    8038
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2er_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    11
+    Ensure_CPE_Select_Right_EAC    16208    5    12
+    Tunnel_check    ${CR8550_ER8022_CPE16192_CR8566_ER8038_CPE16208_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_CPE16192_CR8566_ER8038_CPE16208_POP_TO_CPE_Flows}
+    register_cpe_config_to_change_ip    16192    enp0s3    9
+    sleep    40s
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_CPE16192_CR8566_ER8038_CPE16208_POP_TO_CPE_Flows}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_Change_CAC_Check_Flows
+    [Tags]    SDWANDEV-265
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    1
+    Ensure_CPE_Select_Right_EAC    16208    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE16192_CPE16208_POP_TO_CPE_Flows}
+    stop_a_ne    CR    8566    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16208    4    1
+    Tunnel_check    ${CR8550_CPE16192_CPE16208_ALL_tunnels}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    CPE_Flows_check    ${cpes}    ${CR8550_CPE16192_CPE16208_POP_TO_CPE_Flows}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_Change_EAC_Check_Flows
+    [Tags]    SDWANDEV-266    SDWANDEV-2068
+    ${switchs}=    create list    8550    8566    8022    8038    16192
+    ...    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566    8022    8038
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2er_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    11
+    Ensure_CPE_Select_Right_EAC    16208    5    12
+    Tunnel_check    ${CR8550_ER8022_CPE16192_CR8566_ER8038_CPE16208_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_CPE16192_CR8566_ER8038_CPE16208_POP_TO_CPE_Flows}
+    stop_a_ne    ER    8038    5    12
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16208    5    1
+    Tunnel_check    ${CR8550_ER8022_CPE16192_CR8566_CPE16208_ALL_tunnels}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_CPE16192_CR8566_CPE16208_POP_TO_CPE_Flows}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_Put_CAC_Check_Tunnels
+    [Tags]    SDWANDEV-2296
+    ${switchs}=    create list    8550    8566    8022    8038    16192
+    ...    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566    8022    8038
+    ${wan_list}=    create_list    enp0s3
+    ${cac_list}=    create_list    4
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2er_2cpe_topo.json    ${switchs}    ${cpes}
+    unregister_and_register_cpe_config    16208
+    put_ne_coreCode    16208    ${wan_list}    ${cac_list}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    11
+    Ensure_CPE_Select_Right_EAC    16208    4    11
+    Tunnel_check    ${CR8550_ER8022_CPE16192_CPE16208_CR8566_ER8038_putCac_tunnels}
+    [Teardown]    Case_tear_down
+
+Add_CR_When_has_CPE
+    [Tags]    SDWANDEV-158
+    change_running_measure_config    upperBandwidth    200
+    change_running_measure_config    lowerBandwidth    1
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    Start_A_NE    CR    8582    6    1    2
+    wait until keyword succeeds    ${m_tasks_wait_time}    2s    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_CR8582_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_ADD_CR8582_POP_TO_CPE_Flows}
+    ${site16208_id}=    Start_A_CPE    16208    5    22    3
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16208    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_CPE16208_CR8582_ALL_tunnels}
+    ${cpes}=    create list    16192    16208
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_CPE16208_CR8582_POP_TO_CPE_Flows}
+    [Teardown]    run keywords    change_running_measure_config    upperBandwidth    100
+    ...    AND    change_running_measure_config    lowerBandwidth    2.5
+    ...    AND    Case_tear_down
+
+Delete_ER_When_has_CPE
+    [Tags]    SDWANDEV-162
+    ${switchs}=    create list    8550    8022    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/1cr_2er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    12
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ER8038_CPE16192_POP_TO_CPE_Flows}
+    stop_a_ne    ER    8038    4    12
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    4    11
+    Tunnel_check    ${CR8550_ER8022_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_No_reslect_with_historyLoss
+    [Tags]    SDWANDEV-1827
+    ${switchs}=    create list    8550    8022    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/1cr_2er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    12
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ER8038_CPE16192_POP_TO_CPE_Flows}
+    ${jitter}=    create list    5    0    0    0
+    ${loss}=    create list    1    1    0    0
+    ${delay}=   create list    0    0    0    0
+    ${target_cac}=    create list    4
+    Create_Ne_Measure_Shake_loss_result    8038    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    unregister_and_register_cpe_config    16192
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    4    12
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_ALL_tunnels}
+    ${cpes}=    create list    16192
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ER8038_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+Change_ER_PortNum
+    [Tags]    SDWANDEV-160
+    ${switchs}=    create list    8550    8022    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/1cr_2er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    12
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ER8038_CPE16192_POP_TO_CPE_Flows}
+    Ne_Change_Port_Num    ER    8038    4    12    3
+    sleep    8s
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Tunnel_check    ${CR8550_ER8022_ER8038_PORT3_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ER8038_CPE16192_POP_TO_CPE_Flows}
+    Ne_Change_Port_Num    ER    8038    4    12    2
+    sleep    8s
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ER8038_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+Add_ER_When_has_CPE
+    [Tags]    SDWANDEV-161
+    ${switchs}=    create list    8550    8022    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/1cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    11
+    Tunnel_check    ${CR8550_ER8022_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_CPE16192_POP_TO_CPE_Flows}
+    Start_a_ne    ER    8038    4    12    2
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Tunnel_check    ${CR8550_ER8022_ADD_ER8038_CPE16192_ALL_tunnels}
+    ${site16208_id}=    Start_A_CPE    16208    5    22    3
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16208    4    12
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_CPE16208_ALL_tunnels}
+    ${cpes}=    create list    16192    16208
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ADD_ER8038_CPE16192_CPE16208_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_PORT_In_Default_Group
+    [Tags]    SDWANDEV-532
+    ${switchs}=    create list    13350    13366    12838    20992
+    ${cpes}=    create list    20992
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_with_group_topo.json    ${switchs}    ${cpes}
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2]
+    register_pop_config_to_change_group    12838    &{fake_pop}[phy_port]    &{fake_pop}[group_list_port3]
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    20992    4    11
+    Tunnel_check    ${CR13350_CR13366_ER12838_CPE20992_with_group_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR13350_CR13366_ER12838_CPE20992_with_group_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_Reselect_EAC_to_Area_Prefer
+    [Tags]    SDWANDEV-538
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_5}    ${eac_1}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_Reselect_CAC_to_Area_Prefer
+    [Tags]    SDWANDEV-539
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_5}    ${eac_1}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_POP_TO_CPE_Flows}
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_4}    ${eac_1}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    4    1
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_Prefer_4_1_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_4_1_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_Reselect_EAC_When_delete_Prefer
+    [Tags]    SDWANDEV-540    SDWANDEV-541
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_5}    ${eac_1}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    ${cpes}=    create list    16192
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_POP_TO_CPE_Flows}
+    delete_cpe_home_code_prefer    16192    ${cpe_wan_if}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+Prefer_POP_Abnormal_CPE_Not_reselect
+    [Tags]    SDWANDEV-542
+    ${switchs}=    create list    8550    8022    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/1cr_2er_1cpe_topo.json    ${switchs}    ${cpes}
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_4}    ${eac_12}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    12
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_ER8022_ER8038_CPE16192_POP_TO_CPE_Flows}
+    Abnormal_Stop_A_Ne    ER    8038    4    12
+    wait until keyword succeeds    2s    200ms    check_ne_selection    16192
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    4    12
+    Tunnel_check    ${CR8550_ER8022_ER8038_CPE16192_ALL_tunnels}
+    [Teardown]    Case_tear_down
+
+POP_Set_Status_Maintain_And_Deleted
+    [Tags]    SDWANDEV-552
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    Set_POP_Status    8038    MAINTENANCE
+    wait until keyword succeeds    ${maintain_wait_time}    2s    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    unregister_ne    8038
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_PORT_In_Dedicate_Group
+    [Tags]    SDWANDEV-759
+    ${switchs}=    create list    13350    13366    12838    20992
+    ${cpes}=    create list    20992
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_with_group_topo.json    ${switchs}    ${cpes}
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2_4]
+    register_pop_config_to_change_group    12838    &{fake_pop}[phy_port]    &{fake_pop}[group_list_port3]
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    20992    4    11
+    Tunnel_check    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_POP_TO_CPE_Flows}
+    ${group}=    create list    group4
+    Change_Cpe_Address_Group    20992    enp0s3    ${group}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    20992    4    3
+    Tunnel_check    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_grp4_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_grp4_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_PORT_In_Dedicate_Group_in_FirstTime
+    [Tags]    SDWANDEV-760
+    ${switchs}=    create list    13350    13366    12838    20992
+    ${cpes}=    create list    20992
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_with_group_topo.json    ${switchs}    ${cpes}
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2_4]
+    register_pop_config_to_change_group    12838    &{fake_pop}[phy_port]    &{fake_pop}[group_list_port3]
+    ${group}=    create list    group4
+    Change_Cpe_Address_Group    20992    enp0s3    ${group}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    20992    4    3
+    Tunnel_check    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_grp4_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_grp4_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+POP_Group_Change_CPE_Reselect
+    [Tags]    SDWANDEV-758
+    ${switchs}=    create list    13350    13366    12838    20992
+    ${cpes}=    create list    20992
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_with_group_topo.json    ${switchs}    ${cpes}
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2_4]
+    register_pop_config_to_change_group    12838    &{fake_pop}[phy_port]    &{fake_pop}[group_list_port3]
+    ${group}=    create list    group4
+    Change_Cpe_Address_Group    20992    enp0s3    ${group}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    20992    4    3
+    Tunnel_check    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_grp4_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR13350_CR13366_grp1_4_ER12838_grp1_2_3_CPE20992_grp4_POP_TO_CPE_Flows}
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2]
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    20992    4    1
+    Tunnel_check    ${CR13350_CR13366_grp1_2_ER12838_grp1_2_3_CPE20992_grp4_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR13350_CR13366_grp1_2_ER12838_grp1_2_3_CPE20992_grp4_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_Prefer_CAC_And_PORT
+    [Tags]    SDWANDEV-770
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_5}    ${eac_1}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_POP_TO_CPE_Flows}
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_5}    ${eac_1}
+    sleep    2s
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_Reselect_CAC_When_delete_Prefer_PORT
+    [Tags]    SDWANDEV-771    SDWANDEV-876
+    ${switchs}=    create list    8550    8566    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1cpe_topo.json    ${switchs}    ${cpes}
+    ${ip_l}=    create_list    30.5.1.2
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_5}    ${eac_1}    ${ip_l}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    sleep    1s
+    start_A_Ne    ER    8038    5    11    2
+    delete_cpe_home_code_prefer    16192    ${cpe_wan_if}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    11
+    Tunnel_check    ${CR8550_CR8566_ER8038_CPE16192_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_POP_TO_CPE_Flows}
+    [Teardown]    Case_tear_down
+
+CPE_Perfer_CAC_And_PORT_When_PathLoss
+    [Tags]    SDWANDEV-769
+    ${switchs}=    create list    8550    8566    8038    16192
+    ${cpes}=    create list    16192  
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_1cpe_topo.json    ${switchs}    ${cpes}
+    ${ip_l}=    create list    30.4.1.2
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_4}    ${eac_1}    ${ip_l}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    4    1
+    sleep    1s
+    ${jitter}=    create list    5    0    0    0
+    ${loss}=    create list    1    1    1    0
+    ${delay}=   create list    0    0    0    0
+    ${target_cac}=    create list    4
+    Create_Ne_Measure_Shake_loss_result    16192    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    sleep    5s
+    [Teardown]    Case_tear_down
+
+CPE_Check_TOPN_Pop_Tunnels
+    [Tags]    SDWANDEV-2442
+    ${switchs}=    create list    8550    8566    8022    8038    8054
+    ...    8070    8086    8102    16192
+    ${cpes}=    create list    16192
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_6er_1cpe_topo.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    4    13
+    Tunnel_check    ${CR8550_CR8566_ER8022_ER8038_ER8054_ER8070_ER8086_ER8102_CPE16192_ALL_tunnels}
+    [Teardown]    Case_tear_down
+
+CPE_multiWan_MPLS_POP_Without_Tunnels
+    [Tags]    SDWANDEV-1558
+    ${switchs}=    create list    8550    8566    8022    8038    16192
+    ...    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2er_2cpe_topo_withMode.json    ${switchs}    ${cpes}
+    ${types}=    create list    DIA    FIA
+    register_cpe_config_to_change_wanType    16192    ${types}
+    ${types}=    create list    FIA    DIA
+    register_cpe_config_to_change_wanType    16208    ${types}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    1
+    ...    4    11
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    12
+    Tunnel_check    ${CR8550_ER8022_CPE16192_2wan_CR8566_ER8038_CPE16208_2wan_ALL_tunnels}
+    [Teardown]    Case_tear_down
+
+CPE_multiWan_check_MPLS_Links
+    [Tags]    SDWANDEV-1560
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_with2Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    ${types}=    create list    FIA    DIA
+    register_cpe_config_to_change_wanType    16192    ${types}
+    register_cpe_config_to_change_wanType    16208    ${types}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    3x    2s    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_2WanPort_FIA_DIA_ALL_tunnels}
+    Check_e2e_link_Total_NUM    16192    16208    3
+    ${dstwan_list}=    create list    ${2}
+    Check_e2e_links_with_port    16192    16208    2    ${dstwan_list}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_Check_link_FIA_without_matched_wanGrp
+    [Tags]    SDWANDEV-1602
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_with2Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    ${group1}=    create list    group1
+    ${group2}=    create list    group2
+    ${group3}=    create list    group3
+    ${group4}=    create list    group4
+    Change_Cpe_Address_Group    16192    enp0s3    ${group1}    0
+    Change_Cpe_Address_Group    16192    enp0s3    ${group2}    1
+    Change_Cpe_Address_Group    16208    enp0s3    ${group3}    0
+    Change_Cpe_Address_Group    16208    enp0s3    ${group4}    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    1
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    1
+    ...    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_with2Mode_withoutMatch_ALL_tunnels}
+    Check_e2e_link_Total_NUM    16192    16208    8
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_Check_link_FIA_with_matched_wanGrp
+    [Tags]    SDWANDEV-1601
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_with2Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    ${group1}=    create list    group1
+    ${group2}=    create list    group2
+    ${group3}=    create list    group3
+    Change_Cpe_Address_Group    16192    enp0s3    ${group1}    0
+    Change_Cpe_Address_Group    16192    enp0s3    ${group2}    1
+    Change_Cpe_Address_Group    16208    enp0s3    ${group2}    0
+    Change_Cpe_Address_Group    16208    enp0s3    ${group3}    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    1
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    1
+    ...    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_with2Mode_ALL_tunnels}
+    Check_e2e_link_Total_NUM    16192    16208    5
+    ${dstwan_list}=    create list    ${1}    ${2}
+    Check_e2e_links_with_port    16192    16208    1    ${dstwan_list}
+    ${dstwan_list}=    create list    ${1}    ${1}    ${2}
+    Check_e2e_links_with_port    16192    16208    2    ${dstwan_list}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_multiWan_Site_with_2DIA
+    [Tags]    SDWANDEV-1600
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_with2_3Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    ${group1}=    create list    group1
+    ${group2}=    create list    group2
+    ${types}=    create list    FIA    DIA
+    register_cpe_config_to_change_wanType    16192    ${types}
+    ${types}=    create list    FIA    DIA    DIA
+    register_cpe_config_to_change_wanType    16208    ${types}
+    Change_Cpe_Address_Group    16192    enp0s3    ${group1}    1
+    Change_Cpe_Address_Group    16208    enp0s3    ${group1}    1
+    Change_Cpe_Address_Group    16208    enp0s3    ${group2}    2
+    wait until keyword succeeds    80s    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    3x    2s    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_with2_3Mode_ALL_tunnels}
+    wait until keyword succeeds    3x    2s    Check_e2e_link_Total_NUM    16192    16208    3
+    ${site16224_id}=    Start_A_CPE    16224.1.2    5    23    3
+    ${types}=    create list    FIA    DIA
+    register_cpe_config_to_change_wanType    16224    ${types}
+    Change_Cpe_Address_Group    16224    enp0s3    ${group2}    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16224    enp0s3    0
+    ...    5    1
+    ${site16224_id}=    create_company_sites    ${suite_company_id}    16224    16224
+    ${site16208_id}=    get from list    ${sites_id_list}    1
+    ${cpes_add16224}=    create list    ${site16208_id}    ${site16224_id}
+    sleep    5s
+    ${cpe16208_16224}    create list    16208    16224
+    ${union16208_16224_id_list}=    create_company_union    ${cpe16208_16224}    ${cpes_add16224}    ${suite_company_id}
+    Tunnel_check    ${CR8550_CPE16192_CR8566_CPE16208_CPE16224_withMode_ALL_tunnels}
+    Check_e2e_link_Total_NUM    16208    16224    3
+    ${union16208_16224_id}=    get from list    ${union16208_16224_id_list}    0
+    delete_company_unions    ${suite_company_id}    ${union16208_16224_id}
+    sleep    5s
+    delete_company_sites    ${suite_company_id}    ${site16224_id}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_multiWan_4G_POP_Without_Some_Tunnels
+    [Tags]    SDWANDEV-1605
+    ${switchs}=    create list    8550    8566    8022    8038    16192
+    ...    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2er_2cpe_topo_gw_withMode.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    11
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s4    0
+    ...    4    11
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    12
+    Tunnel_check    ${CR8550_ER8022_CPE16192_2wan_CR8566_ER8038_CPE16208_2wan_with4G_ALL_tunnels}
+    [Teardown]    Case_tear_down
+
+CPE_multiWan_check_No_4G_Links
+    [Tags]    SDWANDEV-1604
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_gw_with2Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s4    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s4    0
+    ...    5    1
+    wait until keyword succeeds    3x    2s    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_2WanPort_gw_ALL_tunnels}
+    Check_e2e_link_Total_NUM    16192    16208    7
+    Check_e2e_links_without_remote_port    16192    16208    1    ${True}    ${1}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_multiWan_4G_MIA_With_Match_FIA_Without_Match
+    [Tags]    SDWANDEV-1606
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_gw_parallel_with2Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    ${types}=    create list    FIA    FIA    MIA
+    register_cpe_config_to_change_wanType    16208    ${types}
+    ${group1}=    create list    group1
+    ${group2}=    create list    group2
+    ${group3}=    create list    group3
+    Change_Cpe_Address_Group    16192    enp0s3    ${group1}    0
+    Change_Cpe_Address_Group    16192    enp0s4    ${group3}    0
+    Change_Cpe_Address_Group    16208    enp0s3    ${group1}    0
+    Change_Cpe_Address_Group    16208    enp0s3    ${group2}    1
+    Change_Cpe_Address_Group    16208    enp0s3    ${group3}    2
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s4    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    1
+    ...    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    2
+    ...    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_MIA_Match_ALL_tunnels}
+    Check_e2e_link_Total_NUM    16192    16208    10
+    Check_e2e_links_without_remote_port    16192    16208    1    ${True}    ${2}
+    Check_e2e_links_without_remote_port    16192    16208    1    ${True}    ${3}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_multiWan_4G_MIA_Without_Match_FIA_With_Match
+    [Tags]    SDWANDEV-1607
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_gw_parallel_with3Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    ${types}=    create list    FIA    FIA    DIA
+    register_cpe_config_to_change_wanType    16208    ${types}
+    ${group1}=    create list    group1
+    ${group2}=    create list    group2
+    ${group3}=    create list    group3
+    ${group4}=    create list    MPLS
+    Change_Cpe_Address_Group    16192    enp0s3    ${group1}    0
+    Change_Cpe_Address_Group    16192    enp0s4    ${group3}    0
+    Change_Cpe_Address_Group    16192    enp0s5    ${group4}    0
+    Change_Cpe_Address_Group    16208    enp0s3    ${group2}    0
+    Change_Cpe_Address_Group    16208    enp0s3    ${group3}    1
+    Change_Cpe_Address_Group    16208    enp0s3    ${group4}    2
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s4    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    1
+    ...    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_FIA_Match_ALL_tunnels}
+    Check_e2e_link_Total_NUM    16192    16208    8
+    ${dstwan_list}=    create list    ${1}    ${1}    ${2}    ${2}
+    Check_e2e_links_with_port    16192    16208    1    ${dstwan_list}
+    ${dstwan_list}=    create list    ${1}    ${2}    ${2}
+    Check_e2e_links_with_port    16192    16208    2    ${dstwan_list}
+    ${dstwan_list}=    create list    ${3}
+    Check_e2e_links_with_port    16192    16208    3    ${dstwan_list}
+    Check_e2e_links_without_remote_port    16192    16208    3    ${False}    ${3}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_model0_Union_with_model1_2_3_check_flow
+    [Tags]    SDWANDEV-2351
+    ${switchs}=    create list    8550    8566    16192    17009    17026
+    ...    17043
+    ${cpes}=    create list    16192    17009    17026    17043
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_4cpe_topo_gw_gw_pa_pa.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s4    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    5    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    1    5    1
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    5    1
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    1    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE17009_CPE17026_CPE17043_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE16192_CPE17009_CPE17026_CPE17043_POP_TO_CPE_Flows}    ${UN16192_17009_UN16192_17026_UN16192_17043_CPE_Flows}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_model1_Union_with_model2_3_check_flow
+    [Tags]    SDWANDEV-2352
+    ${switchs}=    create list    8550    8566    17009    17026    17043
+    ${cpes}=    create list    17009    17026    17043
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_3cpe_topo_gw_gw_pa.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    5    1
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE17009_CPE17026_CPE17043_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE17009_CPE17026_CPE17043_POP_TO_CPE_Flows}    ${UN17009_17026_UN17009_17043_CPE_Flows}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_model2_Union_with_model3_check_flow
+    [Tags]    SDWANDEV-2353
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_pa_pa.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    5    1
+    Tunnel_check    ${CR8550_CR8566_CPE17026_CPE17043_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE17026_CPE17043_POP_TO_CPE_Flows}    ${UN17026_17043_CPE_Flows}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_Pre_Config
+    [Tags]    SDWANDEV-2065    SDWANDEV-2066    SDWANDEV-2067    SDWANDEV-2069
+    ${switchs}=    create list    8550    8566    8038
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1er_preConfig_topo.json    ${switchs}
+    ${cpes}=    create list    16192
+    ${company_id}=    create_company    &{company1}[name]    &{company1}[remark]    &{company1}[location]
+    Set Suite Variable    ${suite_company_id}    ${company_id}
+    ${site16192_id}=    Start_A_CPE    16192    5    22    3    True
+    CPE_Select_Prefer_Area    16192    ${cpe_wan_if}    ${cac_5}    ${eac_1}
+    change_cpe_netConfig    16192    1480    20    2
+    put_ne_measure_algo    16192    80    20
+    unregister_and_register_cpe_config    16192
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_withGrp_Prefer_5_1_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_POP_TO_CPE_Flows}
+    Check_MTU_In_Controller    16192    1480    20    2
+    Check_linkScore_Algo    16192    80    20
+    ${site16208_id}=    Start_A_CPE    16208    5    22    3
+    ${cpes}=    create list    16192    16208
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16208    5    11
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_withGrp_Prefer_5_1_addCPE16208_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_addCPE16208_POP_TO_CPE_Flows}
+    Check_MTU_In_Controller    16208    ${default_netConfig}[mtu]    ${default_netConfig}[keepAlive]    ${default_netConfig}[strategy]
+    Check_linkScore_Algo    16208    100    100
+    change_cpe_netConfig    16208    1490    30    1
+    put_ne_measure_algo    16208    90    30
+    wait until keyword succeeds    3    200ms    Check_MTU_In_Controller    16208    1490    30
+    ...    1
+    wait until keyword succeeds    3    200ms    Check_linkScore_Algo    16208    90    30
+    stop_A_Ne    CPE    16208    5    22    ${site16208_id}
+    unregister_and_register_cpe_config    16192
+    ${cpes}=    create list    16192
+    sleep    40s
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Select_Right_EAC    16192    5    1
+    Measure_tasks_check    ${CR8550_CR8566_ER8038_CPE16192_withGrp_Prefer_5_1_Tasks}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_ER8038_CPE16192_Prefer_5_1_POP_TO_CPE_Flows}
+    Check_MTU_In_Controller    16192    1480    20    2
+    Check_linkScore_Algo    16192    80    20
+    delete_cpe_netConfig    16192
+    delete_cpe_linkscoreAlgo    16192
+    wait until keyword succeeds    5    1s    Check_MTU_In_Controller    16192    1300    0
+    ...    1
+    wait until keyword succeeds    3    200ms    Check_linkScore_Algo    16192    100    100
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+CPE_Consul_Check_Bandwidth_Config
+    [Tags]    SDWANDEV-2070    SDWANDEV-2297    SDWANDEV-2303
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${pops}=    create list    8550    8566
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    16192    4    1
+    Ensure_CPE_Select_Right_EAC    16208    5    1
+    put_company_key    ${suite_company_id}    DES    128    cUUMG+vPbnvjUV21
+    wait until keyword succeeds    5    1s    Check_Company_encryptin    ${suite_company_id}    cUUMG+vPbnvjUV21
+    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_ALL_tunnels}
+    CPE_Flows_check    ${cpes}    ${CR8550_CR8566_CPE16192_CPE16208_POP_TO_CPE_Flows}    ${UN16192_16208_CPE_Flows}
+    Check_Cpe_Bandwidth    16192    enp0s3    0    10240000    10    10
+    ...    0
+    ${site16192_id}=    get from list    ${sites_id_list}    0
+    sleep    1s
+    ${union16192_16208_id}=    get from list    ${union_id_list}    0
+    Check_Cpe_site_Bandwidth    ${suite_company_id}    ${site16192_id}    10240000    10    10
+    Check_Cpe_union_Bandwidth    ${suite_company_id}    ${union16192_16208_id}    10240000    10    10
+    put_cpe_wan_bandwidth    16192    enp0s3    0    10240    100    10
+    ...    0
+    put_company_site_bandwidth    ${suite_company_id}    ${site16192_id}    10240    100    10
+    put_company_union_bandwidth    ${suite_company_id}    ${union16192_16208_id}    10240    100    10
+    wait until keyword succeeds    5    1s    Check_Cpe_Bandwidth    16192    enp0s3    0
+    ...    10240    100    10    0
+    wait until keyword succeeds    5    1s    Check_Cpe_site_Bandwidth    ${suite_company_id}    ${site16192_id}    10240
+    ...    100    10
+    wait until keyword succeeds    5    1s    Check_Cpe_union_Bandwidth    ${suite_company_id}    ${union16192_16208_id}    10240
+    ...    100    10
+    delete_cpe_wan_bandwidth    16192    enp0s3    0
+    delete_company_site_bandwidth    ${suite_company_id}    ${site16192_id}
+    delete_company_union_bandwidth    ${suite_company_id}    ${union16192_16208_id}
+    wait until keyword succeeds    5    1s    Check_Cpe_Bandwidth    16192    enp0s3    0
+    ...    10240000    10    10    0
+    wait until keyword succeeds    5    1s    Check_Cpe_site_Bandwidth    ${suite_company_id}    ${site16192_id}    10240000
+    ...    10    10
+    wait until keyword succeeds    5    1s    Check_Cpe_union_Bandwidth    ${suite_company_id}    ${union16192_16208_id}    10240000
+    ...    10    10
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+Check_Controller_manager_ne_total
+    [Tags]    SDWANDEV-3028
+    ${switchs}=    create list    8550    8566    8022    8038    16192
+    ...    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2er_2cpe_topo_gw_withMode.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    11
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s4    0
+    ...    4    11
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    12
+    ${expect_cpe_num}=    get length    ${cpes}
+    ${expect_pop_num}=    evaluate    len(${switchs})-len(${cpes})
+    wait until keyword succeeds    15x    2s    check_controller_manager_ne_num    ${expect_pop_num}    ${expect_cpe_num}
+    [Teardown]    run keywords    Case_tear_down
+    ...    AND    wait until keyword succeeds    50s    2s    check_controller_manager_ne_num    ${0}
+    ...    ${0}
+
+*** Keywords ***
+Delete_CPE16224_IN_ER8566_Flows_Check
+    ${ret_target_ip}    check_cpe_office_speed_up_flow_deleted    16192    10.5.23.1
+    should be True    ${ret_target_ip}
+
+Change_CPE16192_IN_ER8022_Flows_Check
+    [Arguments]    ${old_ip}    ${new_ip}
+    ${ret_target_ip}    check_cpe_office_speed_up_flow_deleted    16208    ${old_ip}
+    should be True    ${ret_target_ip}
+    Check_CPE_2CPE_Office_flows    16208    16192    8038    ${new_ip}
+
+Check_e2e_links_with_port
+    [Arguments]    ${localId}    ${remoteId}    ${src_wan}    ${dst_wan_list}
+    ${links_c} =    get_e2e_links_from_controller    ${localId}    ${remoteId}
+    ${src_wan_link}=    Evaluate    filter(lambda x:x["srcWan"]==${src_wan},${links_c})
+    ${length} =    Evaluate    len(${src_wan_link}) == len(${dst_wan_list})
+    should be true    ${length}
+    ${ret}=    Evaluate    sorted(map(lambda x:x["dstWan"],${src_wan_link})) == sorted(${dst_wan_list})
+    should be true    ${ret}
+
+Check_e2e_links_without_remote_port
+    [Arguments]    ${localId}    ${remoteId}    ${src_wan}    ${direct}    ${dst_wan}
+    ${links_c} =    get_e2e_links_from_controller    ${localId}    ${remoteId}
+    ${src_wan_link}=    Evaluate    filter(lambda x:(x["srcWan"]==${src_wan})and(x["direct"]==${direct}),${links_c})
+    ${ret}=    Evaluate    ${dst_wan} not in map(lambda x:x["dstWan"],${src_wan_link})
+    should be true    ${ret}
+
+Check_MTU_In_Controller
+    [Arguments]    ${cpe}    ${mtu}    ${keepAlive}    ${strategy}
+    ${result}=    check_netConfig_with_value    ${cpe}    ${mtu}    ${keepAlive}    ${strategy}
+    should be true    ${result}
+
+Check_linkScore_Algo
+    [Arguments]    ${cpe}    ${delay}=${None}    ${loss}=${None}    ${stdev}=${None}    ${m0}=${None}    ${m1}=${None}
+    ...    ${m2}=${None}    ${m3}=${None}
+    ${result}=    check_ne_measure_algo    ${cpe}    ${delay}    ${loss}    ${stdev}    ${m0}
+    ...    ${m1}    ${m2}    ${m3}
+    should be true    ${result}
+
+Check_Cpe_Bandwidth
+    [Arguments]    ${cpe}    ${if_name}    ${index}    ${bandwidth}    ${burst}    ${latency}
+    ...    ${ratio}
+    ${result}=    check_cpe_wan_bandwidth    ${cpe}    ${if_name}    ${index}    ${bandwidth}    ${burst}
+    ...    ${latency}    ${ratio}
+    should be true    ${result}
+
+Check_Cpe_site_Bandwidth
+    [Arguments]    ${companyId}    ${siteId}    ${bandwidth}    ${burst}    ${latency}
+    ${result}=    check_cpe_global_bandwidth    ${companyId}    ${siteId}    ${bandwidth}    ${burst}    ${latency}
+    should be true    ${result}
+
+Check_Cpe_union_Bandwidth
+    [Arguments]    ${companyId}    ${unionId}    ${bandwidth}    ${burst}    ${latency}
+    ${result}=    check_cpe_bond_bandwidth    ${companyId}    ${unionId}    ${bandwidth}    ${burst}    ${latency}
+    should be true    ${result}
+
+Check_Company_encryptin
+    [Arguments]    ${companyId}    ${key}
+    ${company_key}=    get_company_key    ${company_id}
+    should be equal    ${company_key}    ${key}
+
+POP_Saas_Service_Check
+    [Arguments]    ${ne_id}    ${entry}    ${phy}
+    portal_put_pop_saasServices    ${ne_id}    ${entry}    ${phy}
+    ${nat_agent}=    Wait Until Keyword Succeeds    5s    200ms    get_pop_saas    ${ne_id}    ${entry}
+    Length Should Be    ${nat_agent}    1
+
+Check_e2e_bond_Total_NUM
+    [Arguments]    ${localId}    ${remoteId}    ${linkNum}
+    ${links_b} =    get_e2e_dest_site_bond    ${localId}    ${remoteId}
+    ${length} =    Evaluate    len(${links_b})
+    Should Be Equal As Integers    ${length}    ${linkNum}
+
+check_controller_manager_ne_num
+    [Arguments]    ${expect_pop_num}    ${expect_cpe_num}
+    ${pop_num}=    get_controller_metric_with_key_label_value    ourea_netElement    pop    total
+    ${cpe_num}=    get_controller_metric_with_key_label_value    ourea_netElement    cpe    total
+    should be true    ${pop_num}==${expect_pop_num}
+    should be true    ${cpe_num}==${expect_cpe_num}
+
+check_ne_selection
+    [Arguments]    ${ne_id}
+    ${ret}=    get_ne_homeCodeSelection    ${ne_id}
+    Length Should Be    ${ret}    0

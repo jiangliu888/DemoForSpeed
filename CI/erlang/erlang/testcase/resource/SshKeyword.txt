@@ -1,0 +1,2572 @@
+*** Settings ***
+Library           SSHLibrary
+Library           String
+Library           ../../libs/uranus/UranusKeyword.py
+Library           Collections
+Resource          PingKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Keywords ***
+SSH Login
+    [Arguments]    ${host}    ${port}    ${user}    ${passwd}    ${prompt}=~$    ${alias}=${None}
+    ${host_local}=    Open Connection    ${host}    port=${port}    prompt=${prompt}    timeout=15    alias=${alias}
+    Login    ${user}    ${passwd}
+    [Return]    ${host_local}
+
+SSH Connection Close
+    Close Connection
+
+SSH_Execute_Command_And_Verify_Output
+    [Arguments]    ${command}    ${output}
+    ${rc}    ${stderr}=    execute command    ${command}    return_stderr=True
+    should be empty    ${stderr}
+    should be equal    ${rc}    ${output}
+
+SCP_File_From_H1_To_H2
+    [Arguments]    ${pc}    ${host2}    ${filename}    ${targetfile}
+    [Timeout]    30 seconds
+    ssh_pc    ${pc}
+    Run Keyword And Ignore Error    ssh_execute_command_and_verify_output    sshpass -p rocks ssh -o StrictHostKeyChecking=no sdn@${host2} "rm ${targetfile}"    ${EMPTY}
+    ssh_execute_command_and_verify_output    scp ${filename} ${host2}:~/${targetfile}    ${EMPTY}
+    ssh_execute_command_and_verify_output    sshpass -p rocks ssh -o StrictHostKeyChecking=no sdn@${host2} "md5sum -c DontDelete.md5"    target.o: OK
+    ssh connection close
+
+Init_Ping_From_Local_PC
+    [Arguments]    ${exec_time}    ${remote_ip}    ${r_c}=&{remote_cpe}[chassis_id]    ${r_p}=&{remote_pc}[intranet_port]    ${r_ip}=${suite_r_p_net}
+    ssh pc    local
+    ${init_packets}=    run keyword if    '${r_ip}'!='${None}'    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    ${r_c}    ${r_p}
+    ...    ${r_ip}
+    ...    ELSE    set variable    0
+    Write    ping \ ${remote_ip} -c ${exec_time} -w 2 -i 0.2 > ping_p.log &
+    [Teardown]
+    [Return]    ${init_packets}
+
+Check_Ping_Result_Form_Local_PC
+    [Arguments]    ${exec_time}    ${loss}    ${init_pkg}    ${private}=${true}
+    ${sleep_time}    evaluate    ${exec_time}*0.2*1.5
+    sleep    ${sleep_time}
+    ${stdout}    ${stderr}=    Execute Command    cat \ ping_p.log    return_stderr=True
+    Should Be Empty    ${stderr}
+    ${cmd}    Set Variable    grep 'loss' ping_p.log|awk -F '[ %]' '{print $6}'
+    ${res}    ${stderr}=    Execute Command    ${cmd}    return_stderr=True
+    Should Be True    ${res} <= ${loss}    The package should be less than ${loss}%
+    run keyword if    ${private}    wait until keyword succeeds    4s    200ms    Check_Local_CPE_Intranet_FlowTable    ${exec_time}
+    ...    ${init_pkg}
+    Close Connection
+
+Write Sudo Cmd
+    [Arguments]    ${cmd}    ${passwd}=rocks    ${delay_time}=1s
+    Write    sudo ${cmd}
+    #Set Default Configuration    timeout=1
+    ${res}=    wait until keyword succeeds    ${delay_time}    1s    read until    :
+    #Set Default Configuration    prompt=$
+    #Set Default Configuration    timeout=3
+    ${status}    ${value}=    Run Keyword And Ignore Error    Should Contain    ${res}    [sudo] password
+    Run Keyword If    '${status}' == 'PASS'    write    ${passwd}
+    ${res}=    set variable if    '${status}' == 'PASS'    ${res}\n    ${res}
+    ${res2}=    wait until keyword succeeds    ${delay_time}    1s    read until prompt
+    Return From Keyword    ${res}${res2}
+
+Nic Restart
+    [Arguments]    ${nic}    ${passwd}    ${dhcp}=1
+    Write Sudo Cmd    ifconfig ${nic} down    ${passwd}    2
+    Write    ifconfig
+    ${res}    read until prompt
+    Should Not Contain    ${res}    ${nic}
+    Write Sudo Cmd    ifconfig ${nic} up    ${passwd}    2
+    Write Sudo Cmd    pkill -9 dhclient    ${passwd}
+    run keyword if    '${dhcp}'=='1'    Write Sudo Cmd    dhclient \ ${nic}    ${passwd}
+    Comment    read until prompt
+    Wait Until Keyword Succeeds    20    1    Check Nic Up    ${nic}
+    Wait Until Keyword Succeeds    20    1    Check Route Add    ${nic}
+
+Gateway Nic Stop
+    [Arguments]    ${nic_alias}    ${logical_nic}
+    write    ifdown ${nic_alias}
+    read until prompt
+    wait until keyword succeeds    3s    500ms    Gateway Nic Down Check    ${logical_nic}
+
+Gateway Nic Down Check
+    [Arguments]    ${nic}
+    write    ifconfig -a ${nic} | grep "inet "
+    ${res}=    read until prompt
+    ${ipLine}=    get lines containing string    ${res}    .
+    should not match regexp    ${ipLine}    ([0-9]{1,3}\.){3}([0-9]{1,3})
+
+PPPOE Nic Down Check
+    [Arguments]    ${logical_nic}
+    write    ifconfig
+    ${res}=    read until prompt
+    should not contain    ${res}    ${logical_nic}
+
+Gateway WAN Nic Restore
+    [Arguments]    ${cpe}    ${wan1_alias}    ${wan2_alias}    ${wan1_logic}    ${wan2_logic}
+    ssh_cpe    ${cpe}
+    write    ifup ${wan1_alias}
+    read until prompt
+    write    ifup ${wan2_alias}
+    read until prompt
+    ${ip}=    wait until keyword succeeds    10s    500ms    Get Nic IP    ${wan1_logic}
+    ${ip}=    wait until keyword succeeds    10s    500ms    Get Nic IP    ${wan2_logic}
+
+PPPOE IP Change
+    [Arguments]    ${router_name}    ${nic_alias}    ${logical_nic}
+    Switch PPPoE Server    ${router_name}
+    write    ifdown ${nic_alias}
+    read until prompt
+    wait until keyword succeeds    3s    500ms    PPPOE Nic Down Check    ${logical_nic}
+    write    ifup ${nic_alias}
+    read until prompt
+    ${ip}=    wait until keyword succeeds    10s    500ms    Get Nic IP    ${logical_nic}
+    [Return]    ${ip}
+
+Check Nic Up
+    [Arguments]    ${nic}
+    Write    ifconfig
+    ${res}    read until prompt
+    Should Contain    ${res}    ${nic}
+
+Check Route Add
+    [Arguments]    ${nic}
+    ${ip}=    Get Nic IP    ${nic}
+    write    ip route
+    ${res}=    read until prompt
+    ${route}=    get lines containing string    ${res}    ${ip}
+    should not be empty    ${route}
+
+Get Nic IP
+    [Arguments]    ${nic}
+    write    ifconfig -a ${nic} | grep "inet " | awk '{print $2}'
+    ${res}=    read until prompt
+    ${ipLine}=    get lines containing string    ${res}    .
+    ${ip}    ${mid}    ${last}=    should match regexp    ${ipLine}    ([0-9]{1,3}\.){3}([0-9]{1,3})
+    should not be empty    ${ip}
+    [Return]    ${ip}
+
+Pingable Check
+    [Arguments]    ${peer_ip}
+    write    ping ${peer_ip} -c 1 -W 1
+    ${res}=    read until prompt
+    should contain    ${res}    1 received
+
+Series Pingable Check
+    ssh login local
+    Pingable Check    &{remote_pc}[inner_ip]
+    close connection
+
+Sideway Pingable Check
+    ssh login nanjing
+    Pingable Check    &{nanjing_pc}[inner_ip]
+    close connection
+
+Gateway Pingable Check
+    ssh login guangzhou
+    Pingable Check    &{nanjing_pc}[inner_ip]
+    close connection
+
+Mips Pingable Check
+    ssh_pc    changsha
+    Pingable Check    &{guangzhou_pc}[inner_ip]
+    close connection
+
+Arm Pingable Check
+    ssh_pc    changsha
+    Pingable Check    &{guangzhou_pc}[inner_ip]
+    close connection
+
+Check_Ping_Packet_All_Loss
+    [Arguments]    ${remote_ip}
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    ${cmd}    Set Variable    ping -c3 ${remote_ip} -w 1 -i 0.2 &>/dev/null;echo $?
+    Write    ${cmd}
+    SSH_Execute_Command_And_Verify_Output    ${cmd}    1
+    Close Connection
+
+Start Iperf Internet Server
+    [Arguments]    ${port}
+    ${con}=    SSH Login With Key    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[key]
+    ${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    nohup /usr/bin/iperf3 -s -p ${port} > /tmp/listen.txt 2>&1 &    return_stderr=True
+    should be empty    ${stderr}
+    [Return]    ${con}
+
+Init_Iperfs_Server_In_PC
+    [Arguments]    ${pc}    ${port}=5201
+    ${server_connection}=    wait until keyword succeeds    2x    200ms    ssh login    &{${pc}}[ip]    &{${pc}}[ssh_port]
+    ...    &{${pc}}[user]    &{${pc}}[passwd]
+    ${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    nohup git/iperf/src/iperf3 -s -p ${port} --forceflush > /tmp/listen.txt 2>&1 &    return_stderr=True
+    should be empty    ${stderr}
+    [Return]    ${server_connection}
+
+Iperf3_From_PC
+    [Arguments]    ${remote_ip}    ${band}    ${pc}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    git/iperf/src/iperf3 -c \ ${remote_ip} -u -b ${band} -l 512 -t 5s --forceflush > iperf.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    git/iperf/src/iperf3 -c \ ${remote_ip} -t 5s --forceflush > iperf_band.log    return_stderr=True
+    should be empty    ${stderr}
+
+Iperf3_Tcp_Time
+    [Arguments]    ${peer_ip}    ${time}    ${pc}
+    ssh_pc    ${pc}
+    #${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    #should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    git/iperf/src/iperf3 -c ${peer_ip} -t ${time} --forceflush > iperf_times.log &    return_stderr=True
+    should be empty    ${stderr}
+
+Iperf3_Udp_Time
+    [Arguments]    ${peer_ip}    ${port}    ${time}    ${pc}    ${flag}=${true}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    git/iperf/src/iperf3 -c ${peer_ip} -t ${time} -u -p ${port} --forceflush > iperf_udp_times.log    return_stderr=True
+    run keyword if    '${flag}' == '${true}'    should be empty    ${stderr}
+    ...    ELSE    should contain    ${stderr}    Resource temporarily unavailable
+
+Close_Iperfs_Server_In_LocalPC
+    [Arguments]    ${server_connection}
+    switch connection    ${server_connection}
+    ${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    should be empty    ${stderr}
+
+Check Iperf Udp Log
+    [Arguments]    ${loss}
+    write    grep "%" iperf_udp_times.log | grep "receiver" | awk -F '%' '{print $1}' | awk -F '(' '{print $2}'
+    ${res}=    read until prompt
+    ${receiver}=    get line    ${res}    0
+    should be equal    ${receiver}    ${loss}
+
+check_iperf_result
+    [Arguments]    ${loss}    ${band}
+    ${rc}    ${stderr}=    execute command    cat iperf.log    return_stderr=True
+    ${cmd}    Set Variable    grep '%' iperf.log|grep "receiver" |awk -F '[(%]' '{print $2}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${loss}
+    ${cmd}    Set Variable    grep '%' iperf.log|grep "sender"|awk -F '[(%]' '{print $2}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${loss}
+    ${rc}    ${stderr}=    execute command    cat iperf_band.log    return_stderr=True
+    ${cmd}    Set Variable    grep "receiver" \ iperf_band.log | awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    >${band}
+    ${cmd}    Set Variable    grep "sender" \ iperf_band.log | awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    >${band}
+
+SSH_Write_Command_And_Check_Num
+    [Arguments]    ${cmd}    ${check}    ${delay_time}=0.5s
+    Write    ${cmd}
+    ${res}    Read Until Prompt
+    ${avg}    Get Line    ${res}    0
+    Should Be True    ${avg} ${check}
+    [Return]    ${avg}
+
+Start Tcpdump
+    [Arguments]    ${nic}    ${file}    ${passwd}
+    # Before the tcpdump, need to enter the sudo passwd as it's the background process
+    Write Sudo Cmd    rm -rf ${file}    ${passwd}
+    write    sudo tcpdump -n -i ${nic} -s 0 -w ${file} &
+    read until prompt
+    read
+
+Start_Tcpdump_With_From_Internet_Host
+    [Arguments]    ${nic}    ${file}    ${protocol}    ${ip}
+    [Timeout]    30 seconds
+    run keyword if    '&{internet_host}[ip]' == '192.168.0.8'    SSH Login With Key    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[key]
+    ...    ELSE    ssh login    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[passwd]
+    Write Sudo Cmd    tcpdump -i ${nic} -n "src host ${ip}" \ -c 3 and ${protocol} > ${file} \ 2>&1    &{internet_host}[passwd]
+
+Stop_Controller
+    ssh login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    service aiwan-gaea stop    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    docker restart aiwan-uranus    &{uranus_host}[ssh_passwd]    30s
+    close connection
+
+Start_Controller
+    ssh login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    service aiwan-gaea start    &{uranus_host}[ssh_passwd]
+    Comment    Write Sudo Cmd    service aiwan-uranus start    &{uranus_host}[ssh_passwd]    120s
+    close connection
+
+Restart_Pop
+    Ssh_Pop    local
+    Write Sudo Cmd    service aiwan-moon restart; sudo service netopeer2-server restart; sudo service aiwan-planet restart    &{local_pop}[passwd]
+    close connection
+
+SSH_Write_Command_And_Check_String
+    [Arguments]    ${cmd}    ${check}    ${delay_time}=0.5s
+    Write    ${cmd}
+    wait until keyword succeeds    ${delay_time}    1s    ReadUntil    ${check}
+
+Restart_Cpe
+    [Arguments]    ${cpe}=local
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword if    ${openwrt}    Write OpenWrt Cmd    /etc/init.d/aiwan-cpe restart    ${pwd}
+    ...    ELSE    Write Sudo Cmd    service aiwan-cpe restart    ${pwd}
+    close connection
+
+Restart_Thurster
+    [Arguments]    ${cpe}=local
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword if    ${openwrt}    Write OpenWrt Cmd    /etc/init.d/aiwan-thruster restart    ${pwd}
+    ...    ELSE    Write Sudo Cmd    service aiwan-thruster restart    ${pwd}
+    close connection
+
+Clear_Cpe_config
+    [Arguments]    ${cpe}=local
+    ${pwd}=    ssh_cpe    ${cpe}
+    write sudo cmd    rm /etc/aiwan.json -rf; rm /etc/ne.json -rf; rm /opt/aiwan/config/learn_enp1s0f0.json -rf    ${pwd}
+    write sudo cmd    mv /home/sdn/NoDelete/startup_cpe_base.json /opt/aiwan/config/startup_cpe.json    ${pwd}
+    close connection
+
+check_file_exist
+    [Arguments]    ${file}    ${delay_time}=0.5s
+    Write    ls ${file}|wc -l
+    ${res}    Read Until Prompt
+    ${num}    Get Line    ${res}    -2
+    Should Be True    '${num}'=='1'
+
+Check_Cpe_config
+    [Arguments]    ${cpe}=local
+    ${pwd}=    ssh_cpe    ${cpe}
+    check_file_exist    /etc/aiwan.json
+    check_file_exist    /etc/ne.json
+    check_file_exist    /opt/aiwan/config/learn_enp1s0f0.json
+    close connection
+
+Block_Controller_Ports
+    ssh login    &{uranus_host}[jump_ip]    &{uranus_host}[jump_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    iptables -I DOCKER-USER ! -i docker0 -o docker0 -p tcp --match multiport --dports 4335,6633,6653 -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    iptables -I DOCKER-USER ! -i docker0 -o docker0 -p tcp --sport 830 -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    iptables -I DOCKER-USER -i docker0 ! -o docker0 -p tcp --dport 830 -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    close connection
+
+UnBlock_Controller_Ports
+    ssh login    &{uranus_host}[jump_ip]    &{uranus_host}[jump_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    iptables -D DOCKER-USER ! -i docker0 -o docker0 -p tcp --match multiport --dports 4335,6633,6653 -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    iptables -D DOCKER-USER ! -i docker0 -o docker0 -p tcp --sport 830 -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    iptables -D DOCKER-USER -i docker0 ! -o docker0 -p tcp --dport 830 -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    close connection
+
+Block_Controller_Host_Ports
+    [Arguments]    ${ip}    ${block}    ${port}
+    ssh login    &{uranus_host}[jump_ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    run keyword if    '${block}'=='block'    Write Sudo Cmd    iptables -I INPUT -p tcp --dport ${port} -s ${ip} -j DROP    &{uranus_host}[ssh_passwd]
+    ...    ELSE    Write Sudo Cmd    sudo iptables -D INPUT -p tcp --dport ${port} -s ${ip} -j DROP    &{uranus_host}[ssh_passwd]
+    close connection
+
+SCP_File_From_H1_To_H2_Without_CheckSum
+    [Arguments]    ${pc}    ${host2}    ${filename}    ${targetfile}
+    [Timeout]    30 seconds
+    ssh_pc    ${pc}
+    Run Keyword And Ignore Error    ssh_execute_command_and_verify_output    sshpass -p rocks ssh -o StrictHostKeyChecking=no sdn@${host2} "rm ${targetfile}"    ${EMPTY}
+    ssh_execute_command_and_verify_output    scp ${filename} ${host2}:~/${targetfile}    ${EMPTY}
+    ssh connection close
+
+Change_CPE_Init_Config_To_Private
+    ssh login    &{local_cpe}[ip]    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    Write Sudo Cmd    cp \ /opt/aiwan/config/startup_cpe.json \ ~/startup_cpe.json.bk    &{local_cpe}[passwd]
+    Write Sudo Cmd    cp ~/NoDelete/startup_cpe.json /opt/aiwan/config/startup_cpe.json    &{local_cpe}[passwd]
+    close connection
+    Restart_Cpe    local
+    ssh login    &{remote_cpe}[ip]    &{remote_cpe}[ssh_port]    &{remote_cpe}[user]    &{remote_cpe}[passwd]
+    Write Sudo Cmd    cp \ /opt/aiwan/config/startup_cpe.json \ ~/startup_cpe.json.bk    &{remote_cpe}[passwd]
+    Write Sudo Cmd    cp ~/NoDelete/startup_cpe.json /opt/aiwan/config/startup_cpe.json    &{remote_cpe}[passwd]
+    close connection
+    Restart_Cpe    remote
+
+Teardown_Cpe_To_Init_Config
+    ssh login    &{local_cpe}[ip]    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    Write Sudo Cmd    cp \ \ ~/NoDelete/startup_cpe.json.bk /opt/aiwan/config/startup_cpe.json    &{local_cpe}[passwd]
+    close connection
+    Restart_Cpe    local
+    ssh login    &{remote_cpe}[ip]    &{remote_cpe}[ssh_port]    &{remote_cpe}[user]    &{remote_cpe}[passwd]
+    Write Sudo Cmd    cp \ ~/NoDelete/startup_cpe.json.bk \ /opt/aiwan/config/startup_cpe.json    &{remote_cpe}[passwd]
+    close connection
+    Restart_Cpe    remote
+    Check_Ping_Packet_All_Loss    &{remote_pc}[intranet_ip]
+    wait until keyword succeeds    5x    20ms    Trigger_CPE_Learn_IP
+    wait until keyword succeeds    2x    1s    Wait All netconf and of avaiable
+    wait until keyword succeeds    240s    5s    All_CPE_Learn_CAC_EAC
+    wait until keyword succeeds    30s    3s    check_all_pop_tunnels
+
+Check_CPE_Status
+    [Arguments]    ${cpe}    ${cmd}=state    ${state}=stable
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    run keyword if    ${openwrt}    Write OpenWrt Cmd    aiwan-ctl --${cmd}    ${pwd}
+    ...    ELSE    Write Sudo Cmd    aiwan-ctl --${cmd}    ${pwd}
+    close connection
+    ${r}=    get lines Containing String    ${res}    ${state}
+    should be true    '${r}'=='${state}'
+    [Return]    ${res}
+
+Change_Local_POP_Config_To_Port1_Disable
+    ssh login    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]    &{local_pop}[passwd]
+    Write Sudo Cmd    cp \ /opt/aiwan/moon/config/config.json ~/config.json.bk    &{local_pop}[passwd]
+    Write Sudo Cmd    cp ~/NoDelete/config.json /opt/aiwan/moon/config/config.json    &{local_pop}[passwd]
+    close connection
+    restart_pop_Moon    local
+
+TearDown_Local_POP_Config_To_Init_Config
+    ssh login    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]    &{local_pop}[passwd]
+    Write Sudo Cmd    cp ~/NoDelete/config.json.bak \ /opt/aiwan/moon/config/config.json    &{local_pop}[passwd]
+    close connection
+    restart_pop_Moon    local
+    ${ip_list}=    create list    &{local_pop}[ip]    &{local_pop}[ip2]    &{local_pop}[ip3]
+    wait until keyword succeeds    10x    1s    Check_POP_Measure_config    local    ${ip_list}
+    wait until keyword succeeds    60s    3s    check_all_pop_tunnels
+
+Restart_Pop_Moon
+    [Arguments]    ${pop}
+    Ssh_Pop    ${pop}
+    Write Sudo Cmd    service aiwan-moon restart    &{local_pop}[passwd]
+    close connection
+
+Ssh_Pop
+    [Arguments]    ${pop}    ${alias}=${None}
+    ssh login    &{${pop}_pop}[ctrl_ip]    &{${pop}_pop}[ssh_port]    &{${pop}_pop}[user]    &{${pop}_pop}[passwd]    ~$    ${alias}
+    ${pwd}=    set variable    &{${pop}_pop}[passwd]
+    [Return]    ${pwd}
+
+Nping_From_PC
+    [Arguments]    ${pc}    ${ip}=&{internet_host}[ip]    ${port}=22
+    ssh_pc    ${pc}
+    Write Sudo Cmd    nping --tcp-connect -c 200 --delay 30ms ${ip} -p ${port}    &{local_pc}[passwd]
+    close connection
+
+Nping_From_PC_with_Echo
+    [Arguments]    ${pc}    ${ip}=&{internet_host}[ip]    ${port}=5100
+    ssh_pc    ${pc}
+    Write Sudo Cmd    nping --udp -c 10 --delay 30ms --ec --nc ${ip} -ep ${port} > nping.log    &{local_pc}[passwd]
+    close connection
+
+Start_Nping_Server_in_PC
+    [Arguments]    ${pc}    ${server_ip}    ${protocal}    ${port}=5100
+    ssh_pc    ${pc}
+    Write Sudo Cmd    nping --ec --nc ${server_ip} --${protocal} -ep ${port} &    &{local_pc}[passwd]
+    close connection
+
+Kill_Nping_Server_in_PC
+    [Arguments]    ${pc}
+    ssh_pc    ${pc}
+    Write Sudo Cmd    pkill -9 nping    &{local_pc}[passwd]
+    close connection
+
+Filter Comp Lines
+    [Arguments]    ${log_file}    ${tmp_file}
+    write    grep 'time=.\\\... ms' ${log_file} > ${tmp_file}
+    read until prompt
+    [Return]    ${tmp_file}
+
+Check Outage Time
+    [Arguments]    ${l_file}    ${expected_max_time}    ${flag_comp}=${False}
+    write    cat ${l_file} | wc -l
+    ${res}=    read until prompt
+    ${len}=    get line    ${res}    -2
+    Should Be True    ${len} > 0
+    ${log_file}=    run keyword if    '${flag_comp}' == '${True}'    Filter Comp Lines    ${l_file}    outage_tmp.log
+    ...    ELSE    set variable    ${l_file}
+    Write    preSeq=0;list="";
+    read until prompt
+    write    a=`grep icmp_seq= ${log_file} | awk -F "=" '{print $2}'| awk '{print $1}' | while read line; do diff=$(($line-$preSeq-1)); if [ $diff -lt 0 ]; then ((diff+=65536)); fi; if [ $diff != 0 ]; then echo "$preSeq"; fi; preSeq=$line; done`
+    read until prompt
+    write    echo $a
+    ${res}=    read until prompt
+    ${lSeq}=    get line    ${res}    -2
+    ${lSeq}=    split string    ${lSeq}
+    should not be empty    ${lSeq}
+    ${i}    set variable    0
+    : FOR    ${seq}    IN    @{lSeq}
+    \    ${tail_num}=    evaluate    ${len}-${seq}
+    \    Write    tail -n ${tail_num} ${log_file} | head -n 10
+    \    ${res}=    read until prompt
+    Write    preSeq=0;list="";
+    read until prompt
+    write    a=`grep icmp_seq= ${log_file} | awk -F "=" '{print $2}'| awk '{print $1}' | while read line; do diff=$(($line-$preSeq-1)); if [ $diff -lt 0 ]; then ((diff+=65536)); fi; if [ $diff != 0 ]; then echo "$preSeq $line"; fi; preSeq=$line; done`
+    read until prompt
+    Write    echo $a
+    ${res}=    read until prompt
+    #${ltime}=    get line    ${res}    -2
+    #${ltime}=    split string    ${ltime}
+    #${i}    set variable    0
+    #: FOR    ${t}    IN    @{ltime}
+    #\    ${t}=    evaluate    ${t} * 0.2
+    #\    run keyword if    ${t} < 300    should be true    ${t} <= ${expected_max_time}
+    #\    ${i}=    EVALUATE    ${i} + 1
+    #should be true    ${i} <= 3
+    ${lSeq}=    get line    ${res}    -2
+    ${lSeq}=    split string    ${lSeq}
+    ${breakage}=    evaluate    (@{lSeq}[-1] - @{lSeq}[0] -1) * 0.2
+    should be true    ${breakage} <= ${expected_max_time}
+
+Check_CPE_No_CoreDump
+    [Arguments]    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    run keyword if    ${openwrt}    write openwrt cmd    ls /opt/aiwan/cores/* -ltr
+    ...    ELSE    Write Sudo Cmd    ls /opt/aiwan/cores/* -ltr    ${pwd}
+    close connection
+    Should Not Contain    ${res}    core.
+
+Change_DNS_Server_Config_To_MultiIp
+    ssh login    &{dns_server}[ip]    &{dns_server}[ssh_port]    &{dns_server}[user]    &{dns_server}[passwd]
+    Write Sudo Cmd    cp ~/NoDelete/db.systemtest.com \ /etc/bind/db.systemtest.com    &{dns_server}[passwd]
+    Write Sudo Cmd    sudo service bind9 restart    &{dns_server}[passwd]
+    close connection
+
+Teardown_DNS_Server_Config
+    ssh login    &{dns_server}[ip]    &{dns_server}[ssh_port]    &{dns_server}[user]    &{dns_server}[passwd]
+    Write Sudo Cmd    cp ~/NoDelete/db.systemtest.com.bk \ \ /etc/bind/db.systemtest.com    &{dns_server}[passwd]
+    Write Sudo Cmd    sudo service bind9 restart    &{dns_server}[passwd]
+    close connection
+
+Change_DNS_Server_Config_To_Timeout0
+    ssh login    &{dns_server}[ip]    &{dns_server}[ssh_port]    &{dns_server}[user]    &{dns_server}[passwd]
+    Write Sudo Cmd    cp ~/NoDelete/db.systemtest.com_timeout0 \ /etc/bind/db.systemtest.com    &{dns_server}[passwd]
+    Write Sudo Cmd    sudo service bind9 restart    &{dns_server}[passwd]
+    close connection
+
+Check_Domain_Info_From_Cpe
+    [Arguments]    ${cpe}    ${domain}    ${num}=1
+    ${ret}=    get_domain_nat_patterns_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ${find}=    run keyword if    ${ret}    evaluate    filter(lambda x:x['pattern'] == '${domain}',${ret})
+    ...    ELSE    create list
+    length should be    ${find}    ${num}
+
+Check_Saas_Rule_Dispatch_From_Cpe
+    [Arguments]    ${cpe}    ${domain}    ${dns_server}    ${index}    ${tag_id}=${suite_saas_tag_id}    ${num}=1
+    ...    ${office_check}=${False}    ${port}=0
+    ${f_domain}=    run keyword and ignore error    should match regexp    ${domain}    [a-zA-Z]
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${find}=    run keyword if    ${ret} and '@{f_domain}[0]' == 'PASS' and ${office_check} == ${False}    evaluate    filter(lambda x: x['index'] == ${index} and x['dnsServer'] == '${dns_server}',filter(lambda x: x['name'] == 'SAAS', ${ret})[0]['saases']['saas'])
+    ...    ELSE IF    ${ret} and '@{f_domain}[0]' != 'PASS' and ${office_check} == ${False}    evaluate    filter(lambda x: x['index'] == ${index} and x['code'] == ${dns_server},filter(lambda x: x['name'] == 'SAAS', ${ret})[0]['saases']['saas'])
+    ...    ELSE IF    ${office_check} and '@{f_domain}[0]' == 'PASS'    evaluate    filter(lambda x: x['index'] == ${index} and x['dnsServer'] == '${dns_server}',filter(lambda x: x['name'] == 'OFFICE', ${ret})[0]['agents']['agent'])
+    ...    ELSE IF    ${office_check}    evaluate    filter(lambda x: x['name'] == 'OFFICE', ${ret})
+    ...    ELSE    create list
+    length should be    ${find}    ${num}
+    ${ret}=    get_spi_rule_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${find}=    run keyword if    ${ret} and '@{f_domain}[0]' == 'PASS'    evaluate    filter(lambda x: x['index'] == ${index} and x['domain'] == '${domain}',${ret})
+    ...    ELSE IF    ${ret} and '@{f_domain}[0]' != 'PASS' and '${domain}' != '*'    evaluate    filter(lambda x: x['index'] == ${index} and x['dstCIDR'] == '${domain}',${ret})
+    ...    ELSE IF    ${ret} and '@{f_domain}[0]' != 'PASS' and '${domain}' == '*'    evaluate    filter(lambda x: x['index'] == ${index} and x['dstPort'] == '${port}',${ret})
+    ...    ELSE    create list
+    length should be    ${find}    ${num}
+
+Check_Office_Analyze_SPI_From_Cpe
+    [Arguments]    ${cpe}    ${rule_id}    ${tag_id}    ${field}    ${value}    ${num}=1
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${find}=    evaluate    filter(lambda x: x['name'] == 'ANALYZE', ${ret})
+    length should be    ${find}    ${num}
+    ${ret}=    get_spi_rule_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${field}=    set variable if    '${field}' == 'dstDomain'    domain    ${field}
+    ${find}=    evaluate    filter(lambda x: x['index'] == ${rule_id} and x['${field}'] == '${value}',${ret})
+    length should be    ${find}    ${num}
+
+Check_Spi_pri_Dispatch_From_Cpe
+    [Arguments]    ${cpe}    ${tag_id}    ${priority}    ${level}    ${num}=1
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${pri_ret}=    evaluate    filter(lambda x:x['name']=='PRIORITY', ${ret})
+    ${find}=    evaluate    filter(lambda x:x['priority']['level']=='${level}', ${pri_ret})
+    length should be    ${find}    ${num}
+
+Check_Spi_prefer_Dispatch_From_Cpe
+    [Arguments]    ${cpe}    ${tag_id}    ${priority}    ${prefer}    ${ports}    ${num}=1
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${wan_ret}=    evaluate    filter(lambda x:x['name']=='WAN', ${ret})
+    ${find}=    evaluate    filter(lambda x:x['wans']['policy']=='${prefer}', ${wan_ret})
+    length should be    ${find}    ${num}
+
+Check_Spi_Analyze_Dispatch_From_Cpe
+    [Arguments]    ${cpe}    ${tag_id}    ${num}=1
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${analyze_ret}=    evaluate    filter(lambda x:x['name']=='ANALYZE', ${ret})
+    length should be    ${analyze_ret}    ${num}
+
+Check_Spi_fec_Dispatch_From_Cpe
+    [Arguments]    ${cpe}    ${tag_id}    ${num}=1
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${fec_ret}=    evaluate    filter(lambda x:x['name']=='FEC', ${ret})
+    ${fec_find}=    evaluate    filter(lambda x:x['fec']['policy']=='always', ${fec_ret})
+    length should be    ${fec_find}    ${num}
+    ${qos_ret}=    evaluate    filter(lambda x:x['name']=='QOS', ${ret})
+    ${qos_find}=    evaluate    filter(lambda x:x['qos']['policy']=='reliable', ${qos_ret})
+    length should be    ${qos_find}    ${num}
+    ${saas_ret}=    evaluate    filter(lambda x:x['name']=='SAAS', ${ret})
+    length should be    ${saas_ret}    ${num}
+
+Check_Spi_Dispatch_From_Cpe
+    [Arguments]    ${cpe}    ${tag_id}    ${name}    ${policy}    ${num}=1
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${ret_name}=    evaluate    filter(lambda x:x['name']=='${name}', ${ret})
+    ${type_by_name}=    Convert To Lower Case    ${name}
+    ${find}=    evaluate    filter(lambda x:x['${type_by_name}']['policy']=='${policy}', ${ret_name})
+    length should be    ${find}    ${num}
+
+Check_Dispatch_Tag_Delete_From_Cpe
+    [Arguments]    ${cpe}    ${tag_id}
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    should be true    '${ret}'=='None'
+
+Curl_From_PC
+    [Arguments]    ${pc}    ${url}    ${expected}
+    ${pc_connection}=    run keyword if    '${pc}' == 'remote'    ssh login    &{remote_pc}[ctrl_ip]    &{remote_pc}[ctrl_port]    &{remote_pc}[user]
+    ...    &{remote_pc}[passwd]
+    ...    ELSE    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    curl -v ${url} --connect-timeout 2
+    ${res}=    read_until_prompt
+    should contain    ${res}    ${expected}
+    close connection
+
+Check_NO_PassThrough
+    [Arguments]    ${remote_ip}
+    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    ${cmd}    Set Variable    ping -c3 ${remote_ip} -w 1 -i 0.2 &>/dev/null;echo $?
+    Write    ${cmd}
+    SSH_Execute_Command_And_Verify_Output    ${cmd}    1
+    Close Connection
+
+Add_Delay_On_4G_CPE_Port
+    [Arguments]    ${port}
+    ssh login    &{guangzhou_cpe}[ip]    &{guangzhou_cpe}[ssh_port]    &{guangzhou_cpe}[user]    &{guangzhou_cpe}[passwd]
+    ${res}=    Write Sudo Cmd    tc qdisc add \ dev ${port} root netem delay 499ms    &{guangzhou_cpe}[passwd]
+    close connection
+    should not contain    ${res}    RTNETLINK
+
+Delete_Delay_On_4G_CPE_Port
+    [Arguments]    ${port}
+    ssh login    &{guangzhou_cpe}[ip]    &{guangzhou_cpe}[ssh_port]    &{guangzhou_cpe}[user]    &{guangzhou_cpe}[passwd]
+    ${res}=    Write Sudo Cmd    tc qdisc del \ dev ${port} root    &{guangzhou_cpe}[passwd]
+    close connection
+    should not contain    ${res}    RTNETLINK
+
+Ensure_CPE_Flow_Work
+    [Arguments]    ${CPE}    ${flow_type}
+    ${peer_ip_list}=    Get_CPE_Peer_IP    ${CPE}    ${flow_type}
+    : FOR    ${peer_ip}    IN    @{peer_ip_list}
+    \    exit for loop if    '${peer_ip}' == 'None'
+    \    Ping_From_CPE_To_H2    ${CPE}    ${peer_ip}    10    0
+
+SCP_File_From_CPE_To_H2
+    [Arguments]    ${cpe}    ${host2}    ${filename}    ${targetfile}
+    [Timeout]    30 seconds
+    ssh_pc    ${cpe}
+    Run Keyword And Ignore Error    ssh_execute_command_and_verify_output    sshpass -p rocks ssh -o StrictHostKeyChecking=no sdn@${host2} "rm ${targetfile}"    ${EMPTY}
+    ssh_execute_command_and_verify_output    scp ${filename} ${host2}:~/${targetfile}    ${EMPTY}
+    ssh_execute_command_and_verify_output    sshpass -p rocks ssh -o StrictHostKeyChecking=no sdn@${host2} "md5sum -c DontDelete.md5"    target.o: OK
+    ssh connection close
+
+Get_CPE_Peer_IP
+    [Arguments]    ${cpe}    ${flow_type}
+    ${peer_list}=    Set Variable if    '${flow_type}' == 'office'    &{${cpe}_cpe}[office_peer]    &{${cpe}_cpe}[intranet_peer]
+    ${peer_ip_list}=    create_list
+    : FOR    ${peer}    IN    @{peer_list}
+    \    ${peer_ip}=    Set Variable if    '${flow_type}' == 'office'    &{${peer}_pc}[inner_ip]    &{${peer}_pc}[intranet_ip]
+    \    append to list    ${peer_ip_list}    ${peer_ip}
+    [Return]    ${peer_ip_list}
+
+Ensure_All_CPE_Flow_Work
+    : FOR    ${cpe}    IN    @{cpe_check_list}
+    \    Ensure_CPE_Flow_Work    ${cpe}    office
+    \    Ensure_CPE_Flow_Work    ${cpe}    intranet
+
+Restart_All_CPE
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    Restart_Cpe    ${cpe}
+
+Clear_Check_CPE_config_restart_cpe_thurster
+    : FOR    ${cpe}    IN    @{cpe_check_list}
+    \    Clear_Cpe_config    ${cpe}
+    \    Restart_cpe    ${cpe}
+    \    sleep    1
+    \    Restart_Thurster    ${cpe}
+
+Restart_CPE_List
+    [Arguments]    ${list_cpe}
+    : FOR    ${cpe}    IN    @{list_cpe}
+    \    Restart_Cpe    ${cpe}
+
+Get CPE Measure Results
+    [Arguments]    ${cpe_ip}    ${cpe_ssh_port}    ${user}    ${passwd}    ${task_ids}
+    ssh login    ${cpe_ip}    ${cpe_ssh_port}    ${user}    ${passwd}
+    write    netopeer2-cli
+    read until    >
+    write    connect --login netconfuser\r
+    read until    Password:
+    write    1234
+    read until Regexp    >
+    write    get --filter-xpath /aiwan-config:aiwan-switch/status/net-measure-task-result/last5min\r\n
+    ${res}=    read until regexp    \\n>
+    ${res}=    Evaluate    $res.replace('\\n','')
+    : FOR    ${id}    IN    @{task_ids}
+    \    ${data}=    Should Match Regexp    ${res}    ${id}.*?</result>
+    \    ${delay_data}=    Should Match Regexp    ${data}    <delay>.*</delay>    There should be the measure results on CPE.
+
+Check_Local_CPE_Intranet_FlowTable
+    [Arguments]    ${exec_time}    ${init_pkg}
+    ${r_p_net}    get from list    &{remote_pc}[intranet_range]    0
+    ${last_pkg}    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    &{remote_pc}[intranet_port]    ${suite_r_p_net}
+    ${increase}=    evaluate    ${last_pkg} - ${init_pkg}
+    Should Be True    ${increase} >= ${exec_time}
+
+Start_Check_Tcpdump_With_From_Fake_POP
+    [Arguments]    ${nic}    ${file}    ${ip}
+    [Timeout]    30 seconds
+    ssh login    &{remote_pop}[ctrl_ip]    &{remote_pop}[ssh_port]    &{remote_pop}[user]    &{remote_pop}[passwd]
+    Write Sudo Cmd    tcpdump -i ${nic} -n "src host ${ip}" \ -c 10 and udp \ and port 4789 > ${file} \ 2>&1    &{remote_pop}[passwd]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep VXLAN tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+
+Init_Iperfs_Server_In_PC_with_Port
+    [Arguments]    ${cpe}    ${s_port}
+    ${server_connection}=    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    nohup git/iperf/src/iperf3 -s -p ${s_port} --forceflush > /tmp/listen_${s_port}.txt 2>&1 &    return_stderr=True
+    should be empty    ${stderr}
+    [Return]    ${server_connection}
+
+Iperf3_loss_From_PC_With_Port
+    [Arguments]    ${remote_ip}    ${band}    ${pc}    ${port}    ${time}=5    ${reverse}=${False}
+    ...    ${p_size}=512
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    rm iperf.log -f    return_stderr=True
+    should be empty    ${stderr}
+    run keyword if    ${reverse}    Write    git/iperf/src/iperf3 -c ${remote_ip} -u -R -b ${band} -l ${p_size} -t ${time}s -p ${port} --forceflush --logfile iperf.log &
+    ...    ELSE    Write    git/iperf/src/iperf3 -c \ ${remote_ip} -u -b ${band} -l 512 -t ${time}s -p ${port} --forceflush --logfile iperf.log &
+    ${res}    Read Until Prompt
+
+Iperf3_band_From_PC_With_Port
+    [Arguments]    ${remote_ip}    ${pc}    ${port}    ${time}=5    ${reverse}=${False}    ${logfile}=iperf_band.log
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    rm ${logfile} -f    return_stderr=True
+    should be empty    ${stderr}
+    run keyword if    ${reverse}    Write    git/iperf/src/iperf3 -c ${remote_ip} -R -t ${time}s -p ${port} --connect-timeout 10000 --forceflush --logfile ${logfile} &
+    ...    ELSE    Write    git/iperf/src/iperf3 -c ${remote_ip} -t ${time}s -p ${port} --forceflush --connect-timeout 10000 --logfile ${logfile} &
+    ${res}    Read Until Prompt
+
+check_iperf_loss_result_in_pc
+    [Arguments]    ${loss}    ${pc}    ${log_file}=iperf.log
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    cat ${log_file}    return_stderr=True
+    ${cmd}    Set Variable    grep '%' ${log_file}|grep "sender" |awk -F '[(%]' '{print $2}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${loss}
+    ${cmd}    Set Variable    grep '%' ${log_file}|grep "receiver" |awk -F '[(%]' 'BEGIN{sum=0}{sum+=$2}END{print sum}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${loss}
+
+check_iperf_band_result_in_pc
+    [Arguments]    ${band}    ${pc}    ${u_band}=1000    ${check_sender}=${True}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    cat iperf_band.log    return_stderr=True
+    ${cmd}    Set Variable    grep "receiver" \ iperf_band.log | awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    ${ret}=    SSH_Write_Command_And_Check_Num    ${cmd}    >=${band}
+    ${cmd}    Set Variable    grep "sender" \ iperf_band.log | awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    run keyword if    ${check_sender}    SSH_Write_Command_And_Check_Num    ${cmd}    >=${band}
+    ${cmd}    Set Variable    grep "receiver" \ iperf_band.log | awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${u_band}
+    ${cmd}    Set Variable    grep "sender" \ iperf_band.log | awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    run keyword if    ${check_sender}    SSH_Write_Command_And_Check_Num    ${cmd}    <=${u_band}
+    [Return]    ${ret}
+
+Open_Cpe_Debug_Mode
+    [Arguments]    ${cpe}=local
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${cmd}=    set variable    aiwan-ctl --setLogLevel=dbg
+    Write CPE CMD    ${cpe}    ${cmd}    ${cmd}    ${pwd}
+    close connection
+
+Open_Cpe_Debug_Mode_With_NatOpen_Model
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${cmd}=    set variable    aiwan-ctl --setLogLevel=dbg --logModule=natopen
+    Write CPE CMD    ${cpe}    ${cmd}    ${cmd}    ${pwd}
+    ${cmd}=    set variable    aiwan-ctl --setLogLevel=dbg --logModule=spi
+    Write CPE CMD    ${cpe}    ${cmd}    ${cmd}    ${pwd}
+    close connection
+
+Close_Cpe_Debug_Mode
+    [Arguments]    ${cpe}=local
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${cmd}=    set variable    aiwan-ctl --setLogLevel=info
+    Write CPE CMD    ${cpe}    ${cmd}    ${cmd}    ${pwd}
+    close connection
+
+Ping_From_CPE_To_H2
+    [Arguments]    ${cpe}    ${remote_ip}    ${exec_time}    ${loss}
+    [Timeout]    30 seconds
+    Ssh_PC    ${cpe}
+    Write    ping -M do -s 1000 ${remote_ip} -c ${exec_time} -w 2 -i 0.2 > ping_p.log &
+    ${sleep_time}    evaluate    ${exec_time}*0.2*1.5
+    sleep    ${sleep_time}
+    ${stdout}    ${stderr}=    Execute Command    cat \ ping_p.log    return_stderr=True
+    Should Be Empty    ${stderr}
+    ${cmd}    Set Variable    grep 'loss' ping_p.log|awk -F '[ %]' '{print $6}'
+    ${res}    ${stderr}=    Execute Command    ${cmd}    return_stderr=True
+    Should Be True    ${res} <= ${loss}    The package should be less than ${loss}%
+    ssh connection close
+
+GET_CPE_INFO
+    [Arguments]    ${cpe}    ${cmd}
+    [Timeout]    30 seconds
+    Write    ${cmd}
+    ${res}=    read until prompt
+    ${stdout}    Get Line    ${res}    0
+    [Return]    ${stdout}
+
+Check_Controller_Log
+    ssh login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    SSH_Execute_Command_And_Verify_Output    grep 'Unhandled exception' /var/log/gaea/gaea.log | wc -l    0
+    run keyword and ignore error    SSH_Execute_Command_And_Verify_Output    grep 'it can not be committed to the running' /var/log/uranus/karaf/karaf.log | wc -l    0
+    close connection
+
+Block_Controller_Netconf
+    [Arguments]    ${ip}    ${block}
+    ssh login    &{uranus_host}[jump_ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    run keyword if    '${block}'=='block'    Write Sudo Cmd    iptables -I DOCKER-USER ! -i docker0 -o docker0 -p tcp --dport 4335 -s ${ip} -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    ...    ELSE    Write Sudo Cmd    iptables -D DOCKER-USER ! -i docker0 -o docker0 -p tcp --dport 4335 -s ${ip} -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    run keyword if    '${block}'=='block'    Write Sudo Cmd    iptables -I DOCKER-USER ! -i docker0 -o docker0 -p tcp --sport 830 -s ${ip} -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    ...    ELSE    Write Sudo Cmd    iptables -D DOCKER-USER ! -i docker0 -o docker0 -p tcp --sport 830 -s ${ip} -j DROP -m conntrack --ctstate RELATED,ESTABLISHED    &{uranus_host}[ssh_passwd]
+    close connection
+
+Block_Controller_openflow
+    [Arguments]    ${ip}    ${block}    ${port}
+    ssh login    &{uranus_host}[jump_ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    run keyword if    '${block}'=='block'    Write Sudo Cmd    iptables -I DOCKER-USER ! -i docker0 -o docker0 -p tcp --dport ${port} -s ${ip} -j DROP    &{uranus_host}[ssh_passwd]
+    ...    ELSE    Write Sudo Cmd    iptables -D DOCKER-USER ! -i docker0 -o docker0 -p tcp --dport ${port} -s ${ip} -j DROP    &{uranus_host}[ssh_passwd]
+    close connection
+
+Check_Local_CPE_Internet_FlowTable
+    [Arguments]    ${exec_time}    ${init_pkg}
+    ${last_pkg}    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    &{remote_pc}[internet_port]
+    ${increase}=    evaluate    ${last_pkg} - ${init_pkg}
+    Should Be True    ${increase} >= ${exec_time}
+
+Ssh_CPE
+    [Arguments]    ${cpe}=local    ${alias}=${None}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword if    ${openwrt}    ssh login    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ...    ~#    ${alias}
+    ...    ELSE    ssh login    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ...    ~$    ${alias}
+    ${pwd}=    setvariable    &{${cpe}_cpe}[passwd]
+    [Return]    ${pwd}
+
+Ssh_PC
+    [Arguments]    ${cpe}    ${alias}=${None}
+    [Timeout]    30 seconds
+    ${server}=    evaluate    'server' in '${cpe}'
+    run keyword if    ${server}    ssh login    &{${cpe}}[ip]    &{${cpe}}[ssh_port]    &{${cpe}}[user]    &{${cpe}}[passwd]
+    ...    ~$    ${alias}
+    ...    ELSE    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ...    ~$    ${alias}
+    ${pwd}=    set variable if    ${server}    &{${cpe}}[passwd]    &{${cpe}_pc}[passwd]
+    [Return]    ${pwd}
+
+Get_Site_Name
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${sitename}=    set variable    &{${cpe}_pc}[site_name]
+    [Return]    ${sitename}
+
+Get_CPE_Chassis_Id
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${ne_id}=    Set Variable    &{${cpe}_cpe}[chassis_id]
+    [Return]    ${ne_id}
+
+Check_CPE_Natmap
+    [Arguments]    ${cpe}    ${ip}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    Write Sudo Cmd    aiwan-ctl --natMap    ${pwd}
+    close connection
+    Should Contain    ${res}    ${ip}
+
+Init_Iperfs_Server_In_PC_with_Port_without_kill_server
+    [Arguments]    ${cpe}    ${s_port}
+    ${server_connection}=    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ${rc}    ${stderr}=    execute command    nohup git/iperf/src/iperf3 -s -p ${s_port} > /tmp/listen_${s_port}.txt 2>&1 &    return_stderr=True
+    should be empty    ${stderr}
+    [Return]    ${server_connection}
+
+Stop_Collector
+    [Arguments]    ${host}
+    run keyword if    '${host}' == 'controller'    ssh login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    ...    ELSE IF    '${host}' == 'manager'    ssh login    &{manager_server}[ip]    &{manager_server}[ctrl_port]    &{manager_server}[user]
+    ...    &{manager_server}[passwd]
+    ${pwd}=    set variable if    '${host}' == 'controller'    &{uranus_host}[ssh_passwd]    '${host}' == 'manager'    &{manager_server}[passwd]
+    Write Sudo Cmd    service aiwan-collector stop    ${pwd}
+    close connection
+
+Start_Collector
+    [Arguments]    ${host}
+    run keyword if    '${host}' == 'controller'    ssh login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    ...    ELSE IF    '${host}' == 'manager'    ssh login    &{manager_server}[ip]    &{manager_server}[ctrl_port]    &{manager_server}[user]
+    ...    &{manager_server}[passwd]
+    ${pwd}=    set variable if    '${host}' == 'controller'    &{uranus_host}[ssh_passwd]    '${host}' == 'manager'    &{manager_server}[passwd]
+    Write Sudo Cmd    service aiwan-collector start    ${pwd}
+    close connection
+
+Get_CPE_Wan_Num
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${ne_id}=    set variable    &{${cpe}_cpe}[wan_num]
+    [Return]    ${ne_id}
+
+Get_CPE_E2E_Tunnels_Num
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${peers}=    set variable    &{${cpe}_cpe}[office_peer]
+    ${local_wan_num}=    get_CPE_Wan_Num    ${cpe}
+    ${e2e_tunnels_num}=    set variable    ${0}
+    : FOR    ${peer}    IN    @{peers}
+    \    ${peer_wan_num}=    get_CPE_Wan_Num    ${peer}
+    \    ${e2e_tunnels_num}=    evaluate    ${peer_wan_num}*${local_wan_num}+${e2e_tunnels_num}
+    [Return]    ${e2e_tunnels_num}
+
+Get_CPE_Link_Packets_Bytes_Score
+    [Arguments]    ${cpe}    ${link_ids}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${score_list}=    create_list
+    ${packets_list}    create_list
+    ${bytes_list}    create_list
+    ${links_j}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    : FOR    ${link}    IN    @{link_ids}
+    \    ${r}=    evaluate    filter(lambda x:x['port']==${link},${links_j})[0]
+    \    append to list    ${bytes_list}    ${r['tx_bytes']}
+    \    append to list    ${packets_list}    ${r['tx_packets']}
+    \    append to list    ${score_list}    ${r['score']}
+    close connection
+    [Return]    ${score_list}    ${packets_list}    ${bytes_list}
+
+Get_CPE_DNS_ProxyStats_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${dns_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --dnsproxyStats
+    [Return]    ${dns_j}
+
+Get_CPE_Bond_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${bond_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --bondStats
+    [Return]    ${bond_j['ports']}
+
+Get_CPE_Link_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}    ${dstId}=${None}
+    ${link_j}=    run keyword if    ${dstId} == ${None}    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --linkStats
+    ...    ELSE    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --linkStats --dstId=${dstId}
+    [Return]    ${link_j['ports']}
+
+Get_CPE_nuwaStats_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${nuwa_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --nuwaStats
+    [Return]    ${nuwa_j}
+
+Get_CPE_nuwaStream_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}    ${cid}
+    ${stream_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --nuwaCnx=${cid}
+    [Return]    ${stream_j}
+
+Get_CPE_vport_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${vport_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --vportStats
+    [Return]    ${vport_j}
+
+Get_CPE_Interface_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${interface_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --interfaceStats
+    [Return]    ${interface_j}
+
+Get_CPE_Spi_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${spi_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --spiStats
+    [Return]    ${spi_j["spi_stats"]}
+
+Get_CPE_Cache_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}    ${ip}
+    ${spi_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --getCacheInfo --cacheIp=${ip}
+    [Return]    ${spi_j['cache']}
+
+Get_CPE_Qos_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${qos_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --qosTsStats
+    [Return]    ${qos_j['global_input_fail']}    ${qos_j['global_output_fail']}    ${qos_j['bond']}    ${qos_j['vport']}
+
+Get_CPE_Tunnels_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}
+    ${tunnel_j}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --tunnelStats
+    [Return]    ${tunnel_j['ports']}
+
+Get_CPE_Register_Info
+    [Arguments]    ${openwrt}    ${pwd}
+    ${regs}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --getRegisterNetworks
+    [Return]    ${regs}
+
+Get_CPE_Dynamic_Info
+    [Arguments]    ${openwrt}    ${pwd}
+    ${dyns}=    Get_CPE_Ctl_Json_Result    ${openwrt}    ${pwd}    --getDynamicNetworks
+    [Return]    ${dyns}
+
+Get_CPE_Ctl_Json_Result
+    [Arguments]    ${openwrt}    ${pwd}    ${cmd}
+    ${cmd_r}=    run keyword if    ${openwrt}    Write OpenWrt Cmd    aiwan-ctl ${cmd} --json    ${pwd}
+    ...    ELSE    Write Sudo Cmd    aiwan-ctl ${cmd} --json    ${pwd}
+    ${cmds}=    get line    ${cmd_r}    -2
+    ${cmd_j}=    evaluate    json.loads('${cmds}')    json
+    [Return]    ${cmd_j}
+
+Get CPE Location Statistics
+    [Arguments]    ${openwrt}    ${pwd}    ${param}=lastDay
+    ${cmd_r}=    run keyword if    ${openwrt}    Write OpenWrt Cmd    aiwan-ctl --location --${param} --json    ${pwd}
+    ...    ELSE    Write Sudo Cmd    sudo aiwan-ctl --location --${param} --json    ${pwd}
+    ${res}=    get line    ${cmd_r}    -2
+    ${stats_j}=    evaluate    json.loads('${res}')    json
+    [Return]    ${stats_j}
+
+Teardown_TC_config
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh add_500ms_delay_on_1002_1003.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+Clear TC Config
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+Add_Delay_Between_Sip_Dip_On_TC
+    [Arguments]    ${sip}    ${dip}    ${delay}
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh add_delay_on_sip_dip.sh ${sip} ${dip} ${delay}    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+Add_Loss_Between_Sip_Dip_On_TC
+    [Arguments]    ${sip}    ${dip}    ${loss}
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh add_loss_on_sip_dip.sh ${sip} ${dip} ${loss}    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+Add_Sdev_Between_Sip_Dip_On_TC
+    [Arguments]    ${sip}    ${dip}    ${sdev}
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh add_sdev_on_sip_dip.sh ${sip} ${dip} ${sdev}    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+PC_MSS_Check
+    [Arguments]    ${pc}    ${remote_ip}    ${mss}
+    ${pwd}=    ssh_pc    ${pc}
+    write sudo Cmd    sudo ps    ${pwd}
+    write    sudo nping --tcp -c 1 ${remote_ip} -p 22
+    ${res}=    read until prompt
+    should contain    ${res}    mss ${mss}
+    close connection
+
+Check_Ne_Measure_OAM_Header
+    [Arguments]    ${ne}    ${interface}    ${remote_ip}    ${mpls}    ${vxlan}
+    ${pwd}=    Ssh_Pop    ${ne}
+    ${res}=    Write Sudo Cmd    sudo tcpdump -i ${interface} -n -X -c 10 udp and host ${remote_ip} and portrange &{${ne}_pop}[tunnel_port] > tmp.log    ${pwd}
+    ${res_mpls}=    Write Sudo Cmd    cat tmp.log|grep '0x0010'|grep '${mpls}'|wc -l    ${pwd}
+    ${res_vxlan}=    Write Sudo Cmd    cat tmp.log|grep '0x0020'|grep '${vxlan}'|wc -l    ${pwd}
+    close connection
+    ${mpls_num}=    Get Line    ${res_mpls}    0
+    ${vxlan_num}=    Get Line    ${res_vxlan}    0
+    Should be true    ${mpls_num} >= 1
+    Should be true    ${vxlan_num} >= 1
+
+check_remote_iperf_server_receiver_band_result
+    [Arguments]    ${band_l}    ${band_h}
+    ${rc}    ${stderr}=    execute command    cat /tmp/listen.txt    return_stderr=True
+    ${cmd}    Set Variable    tail -n 10 /tmp/listen.txt | grep "receiver"|awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${band_h}
+    SSH_Write_Command_And_Check_Num    ${cmd}    >=${band_l}
+
+Set Pop Measure Delay
+    [Arguments]    ${pop}    ${task_id}
+    Ssh_Pop    ${pop}
+    ${cmd}    Set Variable    sed 's/<taskId>2</<taskId>${task_id}</g' ~/NoDelete/create_dbg_delay.xml > /opt/aiwan/sysrepo/examples/create.xml
+    write    ${cmd}
+    write    cd /opt/aiwan/sysrepo/examples/
+    write    netopeer2-cli
+    read until    >
+    write    connect --login netconfuser\r
+    read until    Password:
+    write    1234
+    read until Regexp    >
+    ${cmd}    Set Variable    edit-config --target running --config=create.xml\r
+    write    ${cmd}
+    read until Regexp    >
+    write    exit\r
+    read until regexp    $
+    close connection
+
+Delete Pop Measure Delay
+    [Arguments]    ${pop}    ${task_id}
+    Ssh_Pop    ${pop}
+    ${cmd}    Set Variable    cp ~/NoDelete/delete_dbg_delay.xml /opt/aiwan/sysrepo/examples/delete.xml
+    write    ${cmd}
+    write    cd /opt/aiwan/sysrepo/examples/
+    write    netopeer2-cli
+    read until    >
+    write    connect --login netconfuser\r
+    read until    Password:
+    write    1234
+    read until    >
+    ${cmd}    Set Variable    edit-config --target running --config=delete.xml\r
+    write    ${cmd}
+    read until    >
+    write    exit\r
+    read until    $
+    close connection
+
+Init OSSSimulator
+    SSH Login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    write    ps -ef | grep tclsh | grep -v grep | awk '{print $2}'
+    ${res}=    read until prompt
+    ${status}    ${pid}=    run keyword and ignore error    get line    ${res}    -2
+    run keyword if    '${status}'=='PASS'    write    kill -9 ${pid}
+    write    cd simulator/;./oss-simulator.tcl &
+    sleep    1
+    #close connection
+
+Get_CPE_Perfer_CAC_EAC
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${p_cac}    set variable    &{${cpe}_cpe}[prefer_cac]
+    ${p_eac}    set variable    &{${cpe}_cpe}[prefer_eac]
+    ${p_port}    set variable    &{${cpe}_cpe}[prefer_port]
+    [Return]    ${p_cac}    ${p_eac}    ${p_port}
+
+Get_CPE_If
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${internet_if}    set variable    &{${cpe}_cpe}[internet_if]
+    ${if}    run keyword if    '${cpe}' == 'nanjing' or '${cpe}' == 'wuhan'    create list    ${internet_if}    ${internet_if}
+    ...    ELSE IF    '${cpe}' == 'guangzhou' and &{guangzhou_cpe}[internet_wan_num] == 2    create list    ${internet_if}    &{guangzhou_cpe}[internet_if2]
+    ...    ELSE    create list    ${internet_if}
+    [Return]    ${if}
+
+Get_CPE_Nets
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${nets}=    set variable    &{${cpe}_cpe}[nets]
+    [Return]    ${nets}
+
+Check_CPE_Dns_Proxy_Stats
+    [Arguments]    ${cpe}    ${qname}    ${ip}    ${code}    ${cache}=${True}    ${num}=${1}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    Get_CPE_DNS_ProxyStats_Json_Result    ${openwrt}    ${pwd}
+    close connection
+    ${dns_proxy}=    evaluate    filter(lambda x:(x['qname'] == '${qname}'), ${res['qnames']})
+    ${ip_pop_num}=    evaluate    len(filter(lambda x: x['ip'] == '${ip}' and x['pop'] == ${code}, ${dns_proxy[0]['ip_pop']}))
+    should be equal    ${ip_pop_num}    ${num}
+    ${sec}=    evaluate    int(${dns_proxy[0]['reply'][0]['valid_seconds']}) > 0
+    should be equal    ${sec}    ${cache}
+
+Write OpenWrt Cmd
+    [Arguments]    ${cmd}    ${passwd}=rocks    ${delay_time}=1s
+    Write    ${cmd}
+    Set Default Configuration    prompt=#
+    ${res2}=    wait until keyword succeeds    ${delay_time}    1s    read until prompt
+    Return From Keyword    ${res2}
+
+Restart_Controller
+    ssh login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    Write Sudo Cmd    service aiwan-gaea restart    &{uranus_host}[ssh_passwd]
+    close connection
+
+Seriers_group_Nic_restart
+    SSH Login Local
+    Nic Restart    &{local_pc}[inner_nic] \    &{local_pc}[passwd]
+    Nic Restart    &{local_pc}[intranet_if]    &{local_pc}[passwd]    0
+    Close Connection
+
+Parallel_group_Nic_restart
+    SSH Login Wuhan
+    Nic Restart    &{wuhan_pc}[inner_nic]    &{wuhan_pc}[passwd]    0
+    Close Connection
+    SSH Login Guangzhou
+    Nic Restart    &{guangzhou_pc}[inner_nic]    &{guangzhou_pc}[passwd]    0
+    Close Connection
+
+Nic_Restart_Setup
+    run keyword if    ${suite_test_series_group}    Seriers_group_Nic_restart
+    run keyword if    ${suite_test_parallel_group}    Parallel_group_Nic_restart
+
+Change_CPE_config_tunnel_port
+    [Arguments]    ${port}
+    ssh_execute_command_and_verify_output    sed -i 's/"tunnel-local-port": [0-9]*/"tunnel-local-port": ${port}/g' /opt/aiwan/config/startup_cpe.json    ${EMPTY}
+
+Get_CPE_SSH_INFO
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${ssh_ip}=    set variable    &{${cpe}_cpe}[ip]
+    ${ssh_port}=    set variable    &{${cpe}_cpe}[ssh_port]
+    ${ssh_user}=    set variable    &{${cpe}_cpe}[user]
+    ${ssh_passwd}=    set variable    &{${cpe}_cpe}[passwd]
+    [Return]    ${ssh_ip}    ${ssh_port}    ${ssh_user}    ${ssh_passwd}
+
+Check_CPE_Dns_Proxy_Reply_Dns_Stats
+    [Arguments]    ${cpe}    ${domain}    ${dns}    ${cnt}    ${n}=${0}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    Get_CPE_DNS_ProxyStats_Json_Result    ${openwrt}    ${pwd}
+    close connection
+    ${dns_proxy}=    evaluate    filter(lambda x:(x['qname'] == '${domain}'), ${res['qnames']})
+    ${found_dns}=    evaluate    filter(lambda x: x['nameserver'] == '${dns}', ${dns_proxy[0]['reply']})
+    should be true    len(${found_dns}) >= ${1}
+    ${found_cnt}=    evaluate    int(${found_dns[0]['query_key_cnt']})
+    should be equal    '${found_cnt}'    '${cnt}'
+
+Iperf3_loss_From_PC_With_Port_with_multi_session
+    [Arguments]    ${remote_ip}    ${band}    ${pc}    ${port}    ${time}=5    ${reverse}=${False}
+    ...    ${para}=1
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    rm iperf.log -f    return_stderr=True
+    should be empty    ${stderr}
+    run keyword if    ${reverse}    Write    git/iperf/src/iperf3 -c \ ${remote_ip} -u -R -b ${band} -l 512 -t ${time}s -p ${port} -P ${para} --forceflush --logfile iperf.log &
+    ...    ELSE    Write    git/iperf/src/iperf3 -c \ ${remote_ip} -u -b ${band} -l 512 -t ${time}s -p ${port} -P ${para} --forceflush --logfile iperf.log &
+    ${res}    Read Until Prompt
+
+Iperf3_band_From_PC_With_Port_with_multi_session
+    [Arguments]    ${remote_ip}    ${pc}    ${port}    ${time}=5    ${reverse}=${False}    ${para}=1
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    rm iperf_band.log -f    return_stderr=True
+    should be empty    ${stderr}
+    run keyword if    ${reverse}    Write    git/iperf/src/iperf3 -c ${remote_ip} -R -t ${time}s -p ${port} -P ${para} --forceflush --logfile iperf_band.log \ &
+    ...    ELSE    Write    git/iperf/src/iperf3 -c ${remote_ip} -t ${time}s -p ${port} -P ${para} --forceflush --logfile iperf_band.log &
+    ${res}    Read Until Prompt
+
+check_iperf_band_re_trans_in_pc
+    [Arguments]    ${band}    ${pc}    ${u_band}=1000    ${check_sender}=${True}    ${retrans}=${0}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    cat iperf_band.log    return_stderr=True
+    ${cmd}    Set Variable    grep "receiver" \ iperf_band.log|grep "\\[SUM\\]"| awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    >=${band}
+    ${cmd}    Set Variable    grep "sender" \ iperf_band.log |grep "\\[SUM\\]"| awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    run keyword if    ${check_sender}    SSH_Write_Command_And_Check_Num    ${cmd}    >=${band}
+    ${cmd}    Set Variable    grep "receiver" \ iperf_band.log|grep "\\[SUM\\]"| awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${u_band}
+    ${cmd}    Set Variable    grep "sender" \ iperf_band.log | grep "\\[SUM\\]"|awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    run keyword if    ${check_sender}    SSH_Write_Command_And_Check_Num    ${cmd}    <=${u_band}
+    ${cmd}    Set Variable    grep "sender" iperf_band.log |grep "\[SUM\]"|awk -F ' ' '{print $(NF-1)}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${retrans}
+
+gw_cpe_ip_in_ipset
+    [Arguments]    ${ip}    ${ipset}=saas_vpn
+    Write    ipset test ${ipset} ${ip}
+    ${res}    read until prompt
+    should contain    ${res}    ${ip} is in set ${ipset}
+
+gw_cpe_ip_not_in_ipset
+    [Arguments]    ${ip}
+    Write    ipset test saas_vpn ${ip}
+    ${res}    read until prompt
+    should contain    ${res}    NOT
+
+Change_Cpe_Tunnel_Port
+    [Arguments]    ${cpe}    ${new_port}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword if    ${openwrt}    Write OpenWrt Cmd    sed -i 's/"tunnelPort":.*/"tunnelPort": ${new_port},/g' /opt/aiwan/config/startup_cpe.json    ${pwd}
+    ...    ELSE    Write Sudo Cmd    sed -i 's/"tunnelPort":.*/"tunnelPort": ${new_port},/g' /opt/aiwan/config/startup_cpe.json    ${pwd}
+    close connection
+
+Get_CPE_Link_mnt
+    [Arguments]    ${cpe}    ${link_ids}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${mnt_list}=    create_list
+    ${links_j}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    : FOR    ${link}    IN    @{link_ids}
+    \    ${r}=    evaluate    filter(lambda x:x['port']==${link},${links_j})[0]
+    \    append to list    ${mnt_list}    ${r['maintenance']}
+    close connection
+    [Return]    ${mnt_list}
+
+Print Iperf Server Log
+    [Arguments]    ${pc}    ${log_file}=/tmp/listen*.txt
+    ssh_pc    ${pc}
+    write    tail ${log_file} -n 15
+    read until prompt
+    close connection
+
+Print PC Large Log
+    [Arguments]    ${pc}    ${step}=10    ${log_file}=iperf.log
+    ssh_pc    ${pc}
+    write    sed -n '$=' test1.sh ${log_file}
+    ${res}=    read until prompt
+    ${lines}=    get line    ${res}    -2
+    ${log}=    set variable    ${None}
+    : FOR    ${line}    IN RANGE    ${step}    ${lines}    ${step}
+    \    write    head ${log_file} -n ${line} | tail -n ${step}
+    \    ${log_lines}=    read until prompt
+    \    ${log}=    catenate    ${log}    ${log_lines}
+    log    ${log}
+    close connection
+
+Print CPE Netconf Port
+    [Arguments]    ${cpe}    ${port}=${4335}
+    ssh_cpe    ${cpe}
+    write cpe cmd    ${cpe}    netstat -an | grep ${port}    netstat -an | grep ${port}
+    close connection
+
+Check CPE Openflow IP
+    [Arguments]    ${cpe}    ${ip}
+    ssh_cpe    ${cpe}
+    ${port}=    run keyword if    '${cpe}' == 'local' or '${cpe}' == 'remote' or '${cpe}' == 'chongqing' or '${cpe}' == 'zhenjiang'    set variable    6653
+    ...    ELSE    set variable    6633
+    ${res}=    write cpe cmd    ${cpe}    netstat -an | grep ${port} | grep ESTABLISHED    netstat -an | grep ${port} | grep ESTABLISHED
+    close connection
+    should contain    ${res}    ${ip}
+
+Check CPE NE Config
+    [Arguments]    ${cpe}    ${keyword}
+    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    grep '"domain": "${keyword}"' /etc/ne.json    grep '"domain": "${keyword}"' /etc/ne.json
+    close connection
+    should contain    ${res}    ${keyword}
+
+Check Current Callhome Uses 4G
+    [Arguments]    ${cpe}    ${port}=${4335}
+    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    netstat -an | grep ${port} | grep &{guangzhou_switch}[ip2]    netstat -an | grep ${port} | grep &{guangzhou_switch}[ip2]
+    ${status}    ${res}=    run keyword and ignore error    should contain    ${res}    ESTABLISHED
+    close connection
+    ${ret}=    set variable if    '${status}' == 'PASS'    ${True}    ${False}
+    [Return]    ${ret}
+
+Check_CPE_PACKET_Header_TTL
+    [Arguments]    ${ne}    ${interface}    ${remote_ip}    ${ttl}
+    ${pwd}=    ssh_cpe    ${ne}
+    ${end_port}=    evaluate    &{local_pop}[tunnel_port]+9
+    write    tcpdump -i ${interface} -n -X -c 3 udp and host ${remote_ip} and dst portrange &{local_pop}[tunnel_port]-${end_port} > tmp.log
+    ${res}    Read Until Prompt
+    write    cat tmp.log|grep '0x0010'|grep '${ttl} \ '|wc -l
+    ${res_ttl}    Read Until Prompt
+    close connection
+    ${ttl_num}=    Get Line    ${res_ttl}    0
+    Should be true    ${ttl_num} >=1
+
+Check_CPE_Receive_PACKET_Header_TTL
+    [Arguments]    ${ne}    ${interface}    ${ttl}    ${ttl2}
+    ${pwd}=    ssh_cpe    ${ne}
+    ${end_port}=    evaluate    &{local_pop}[tunnel_port]+9
+    write    tcpdump -i ${interface} -n -X -c 10 udp and src portrange &{local_pop}[tunnel_port]-${end_port} and greater 81 > tmp.log
+    ${res}    Read Until Prompt
+    write    cat tmp.log
+    ${res_ttl}    Read Until Prompt
+    write    cat tmp.log|grep '0x0010'|grep '[${ttl},${ttl2}] \ '|wc -l
+    ${res_ttl}    Read Until Prompt
+    close connection
+    ${ttl_num}=    Get Line    ${res_ttl}    0
+    Should be true    ${ttl_num} >=1
+
+Get Remote CPE IP from POP
+    [Arguments]    ${pop}
+    ${lines}=    get remote cpe tunnels from pop    ${pop}
+    @{lines}=    split to lines    ${lines}
+    ${ips}=    create_list
+    : FOR    ${line}    IN    @{lines}
+    \    ${match}    ${ne_port}=    should match regexp    ${line}    ne: ([0-9]:[0-9]{2,}:[0-9])
+    \    ${match}    ${ne_ip}    ${mid}    ${last}=    should match regexp    ${line}
+    \    ...    ->(([0-9]{1,3}\.){3}([0-9]{1,3})):
+    \    ${learnt_ip_info}=    create list    ${ne_port}    ${ne_ip}
+    \    append to list    ${ips}    ${learnt_ip_info}
+    [Return]    ${ips}
+
+check_iperf_last_band_result_in_server
+    [Arguments]    ${pc}    ${s}    ${port}    ${band_l}    ${band_h}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    cat /tmp/listen_${port}.txt    return_stderr=True
+    ${s_1}=    evaluate    ${s}-1
+    ${cmd}    Set Variable    grep "${s_1}.00-${s}.00" \ /tmp/listen_${port}.txt | awk -F 'Mbits' '{print $1}' | awk -F ' ' '{print $NF}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    >=${band_l}
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${band_h}
+
+Start Tcpdump_openwrt
+    [Arguments]    ${nic}    ${file}
+    # Before the tcpdump, need to enter the sudo passwd as it's the background process
+    write    rm -rf ${file}
+    write    tcpdump -n -i ${nic} -s 0 -w ${file} &
+    read until prompt
+    read
+
+Add_Nic_IP
+    [Arguments]    ${nic}    ${ip_list}
+    : FOR    ${ip}    IN    @{ip_list}
+    \    write    sudo ip addr add ${ip}/24 dev ${nic}
+    \    ${res}=    read until prompt
+    \    write    sudo ip addr show ${nic}
+    \    ${res}=    read until prompt
+    \    ${ipLine}=    get lines containing string    ${res}    ${ip}/24
+    \    should not be empty    ${ipLine}
+
+Del_Nic_IP
+    [Arguments]    ${nic}    ${ip_list}
+    : FOR    ${ip}    IN    @{ip_list}
+    \    write    sudo ip addr del ${ip}/24 dev ${nic}
+    \    ${res}=    read until prompt
+    \    write    sudo ip addr show ${nic}
+    \    ${res}=    read until prompt
+    \    should not contain    ${res}    ${ip}/24
+
+Set_CPE_Standby_Status
+    [Arguments]    ${cpe}    ${cmd}='touch'
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    ${cmd} /etc/aiwan/standby    ${cmd} /etc/aiwan/standby    ${pwd}
+    close connection
+
+Cmd_Cpe
+    [Arguments]    ${cpe}    ${cmd}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword if    ${openwrt}    Write OpenWrt Cmd    /etc/init.d/aiwan-cpe ${cmd}    ${pwd}
+    ...    ELSE    Write Sudo Cmd    service aiwan-cpe ${cmd}    ${pwd}
+    close connection
+
+Restart_All_Slave_CPE
+    : FOR    ${cpe}    IN    @{slave_cpe_list}
+    \    Restart_Cpe    ${cpe}
+
+Stop_All_Slave_CPE
+    : FOR    ${cpe}    IN    @{slave_cpe_list}
+    \    Cmd_Cpe    ${cpe}    stop
+
+reboot_Cpe
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword and ignore error    run keyword if    ${openwrt}    Write OpenWrt Cmd    reboot    ${pwd}
+    ...    ELSE    Write Sudo Cmd    reboot    ${pwd}
+    close connection
+
+Start_Tcpdump_With_From_Salt_Master_Internet_Host
+    [Arguments]    ${nic}    ${file}    ${protocol}    ${ip}
+    [Timeout]    30 seconds
+    ssh login    &{salt-master}[ctl_ip]    &{salt-master}[ssh_port]    &{salt-master}[user]    &{salt-master}[passwd]
+    Write Sudo Cmd    tcpdump -i ${nic} -n "src host ${ip}" \ -c 3 and ${protocol} > ${file} \ 2>&1    &{salt-master}[passwd]
+
+SSH Login With Key
+    [Arguments]    ${host}    ${port}    ${user}    ${key}    ${prompt}=~$
+    ${host_local}=    Open Connection    ${host}    port=${port}    prompt=${prompt}    timeout=15
+    Wait until keyword succeeds    2X    1    Login With Public Key    ${user}    ${key}
+    [Return]    ${host_local}
+
+Check Capture FileSize
+    [Arguments]    ${cpe}    ${captured_file}
+    ${tolerance}=    set variable if    '${cpe}' == 'guangzhou'    0.25    0.20
+    write    ls -ltr ${captured_file} | awk '{print $5}'
+    ${res}=    read until prompt
+    ${res}=    get line    ${res}    0
+    should be true    ${res} >= ${file_size}
+    should be true    ${res} <= ${file_size} + ${file_size} * ${tolerance}
+
+Check Capture Time
+    [Arguments]    ${cpe}    ${captured_file}    ${cap_time}    ${password}
+    ${res_dur}=    Run Keyword If    '${cpe}' == 'guangzhou'    write openwrt cmd    tcpdump -n -ttttt -r ${captured_file} | grep "^ [0-9]" | tail -1 | awk '{print $1}'    ${password}
+    ...    ELSE    write sudo cmd    tcpdump -n -ttttt -r ${captured_file} | grep "^ [0-9]" | tail -1 | awk '{print $1}'    ${password}
+    ${dur}=    get lines containing string    ${res_dur}    :
+    ${dur}=    get lines containing string    ${dur}    .
+    ${dur}    Convert Time    ${dur}    exclude_millis=yes
+    should be true    ${dur} <= ${cap_time}
+
+Check Capture Packets
+    [Arguments]    ${cpe}    ${captured_file}    ${packets_num}    ${password}
+    ${cmd}=    set variable    tcpdump -n -# -r ${captured_file} | grep "^[[:space:]][[:space:]][0-9]" | tail -1 | awk '{print $1}'
+    ${res}=    run keyword if    '${cpe}' == 'guangzhou'    write openwrt cmd    ${cmd}    ${password}
+    ...    ELSE    write sudo cmd    ${cmd}    ${password}
+    ${num}=    get lines matching regexp    ${res}    \\d+
+    should be true    ${num} >= ${packets_num}
+
+Check File Exists
+    [Arguments]    ${file_path}
+    write    ls ${file_path}
+    ${res}=    read until prompt
+    should not contain    ${res}    No such file or directory
+
+Get_CPE_Cache_Info
+    [Arguments]    ${cpe}    ${remote_ip}    ${pass}    ${saas}    ${proto}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${cache}=    Get_CPE_Cache_Json_Result    ${openwrt}    ${pwd}    ${remote_ip}
+    ${dst_res}=    evaluate    filter(lambda x:(x['dst_ip'] == '${remote_ip}' and x['pass'] == ${pass} and x['saas'] == ${saas} and x['proto'] == ${proto}),${cache})
+    ${src_res}=    evaluate    filter(lambda x:(x['src_ip'] == '${remote_ip}' and x['pass'] == ${pass} and x['saas'] == ${saas} and x['proto'] == ${proto}),${cache})
+    close connection
+    [Return]    ${dst_res}    ${src_res}
+
+Get_CPE_Nuwa_Connection_Number
+    [Arguments]    ${cpe}    ${remote}    ${remote_tye}=cpe
+    ${res}=    Get_CPE_Nuwa_Connection_Info    ${cpe}    ${remote}    ${remote_tye}
+    ${num}=    get length    ${res}
+    ${r_num}=    evaluate    len(filter(lambda x:x['reliable']==1,${res}))
+    [Return]    ${num}    ${r_num}
+
+Get_CPE_Nuwa_Connection_Info
+    [Arguments]    ${cpe}    ${remote}    ${remote_type}=cpe
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${r_ne_id}=    run keyword if    '${remote_type}'=='cpe'    get_cpe_chassis_id    ${remote}
+    ...    ELSE    get_saas_ne_id    ${remote}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${nuwa_connections}=    Get_CPE_nuwaStats_Json_Result    ${openwrt}    ${pwd}
+    ${res}=    evaluate    filter(lambda x:(x['state'] == 'handshake_finish' and 'dst: ${r_ne_id}' in x['desc']),${nuwa_connections["connections"]})
+    close connection
+    [Return]    ${res}
+
+Get_CPE_Nuwa_Path_Info
+    [Arguments]    ${cpe}    ${remote}    ${remote_type}    ${link_id}
+    ${c}=    Get_CPE_Nuwa_Connection_Info    ${cpe}    ${remote}    ${remote_type}
+    ${path_info}=    evaluate    filter(lambda x:x['port'] == ${link_id},${c[0]['send paths']})[0]
+    [Return]    ${path_info["current_bandwidth"]}    ${path_info["smoothed_rtt"]}
+
+Get_CPE_Nuwa_Stream_Info
+    [Arguments]    ${cpe}    ${remote}    ${reliable}    ${remote_tye}=cpe
+    ${res}=    Get_CPE_Nuwa_Connection_Info    ${cpe}    ${remote}    ${remote_tye}
+    ${r_res}=    evaluate    filter(lambda x:x['reliable']==${reliable} and x['stream_number']>0,${res})[0]
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${r_ne_id}=    run keyword if    '${remote_tye}'=='cpe'    get_cpe_chassis_id    ${remote}
+    ...    ELSE    get_saas_ne_id    ${remote}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${s_res}=    Get_CPE_nuwaStream_Json_Result    ${openwrt}    ${pwd}    ${r_res['id']}
+    [Return]    ${s_res['streams']}
+
+Get_CPE_Nuwa_Stream_Fec_Pkgs
+    [Arguments]    ${cpe}    ${remote}    ${reliable}    ${r_ip}    ${r_port}    ${remote_tye}=cpe
+    ${res}=    Get_CPE_Nuwa_Stream_Info    ${cpe}    ${remote}    ${reliable}    ${remote_tye}
+    ${r_res}=    evaluate    filter(lambda x:x['duplicate']==${true} and '-${r_ip}:${r_port}' in x['session'],${res})[0]
+    [Return]    ${r_res["counter_send_packets"]}    ${r_res["counter_send_bytes"]}    ${r_res["counter_recv_packets"]}    ${r_res["counter_recv_bytes"]}    ${r_res["counter_fec_packets"]}    ${r_res["counter_fec_bytes"]}
+
+Get_CPE_Nuwa_Connection_StreamNum_Pkgs
+    [Arguments]    ${cpe}    ${remote}    ${reliable}    ${remote_tye}=cpe
+    ${res}=    Get_CPE_Nuwa_Connection_Info    ${cpe}    ${remote}    ${remote_tye}
+    ${r_res}=    evaluate    filter(lambda x:x['reliable']==${reliable},${res})[0]
+    [Return]    ${r_res['stream_number']}    ${r_res["counter_send_packets"]}    ${r_res["counter_send_bytes"]}    ${r_res["counter_recv_packets"]}    ${r_res["counter_recv_bytes"]}    ${r_res["counter_resend_packets"]}
+    ...    ${r_res["counter_resend_bytes"]}
+
+Iperf3_loss_From_PC_With_Parallel Sessions
+    [Arguments]    ${remote_ip}    ${band}    ${pc}    ${port}    ${length}    ${P}
+    ...    ${time}=5    ${reverse}=${False}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    rm iperf.log -f    return_stderr=True
+    should be empty    ${stderr}
+    run keyword if    ${reverse}    Write    git/iperf/src/iperf3 -c \ ${remote_ip} -u -R -b ${band} -l ${length} -t ${time}s -p ${port} -P ${P} --forceflush --get-server-output --logfile iperf.log &
+    ...    ELSE    Write    git/iperf/src/iperf3 -c \ ${remote_ip} -u -b ${band} -l ${length} -t ${time}s -p ${port} -P ${P} --forceflush --get-server-output \ --logfile iperf.log &
+    ${res}    Read Until Prompt
+
+Iperf3_band_From_PC_With_Parallel Sessions
+    [Arguments]    ${remote_ip}    ${pc}    ${port}    ${P}    ${time}=5    ${reverse}=${False}
+    ...    ${logfile}=iperf_band.log
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    rm ${logfile} -f    return_stderr=True
+    should be empty    ${stderr}
+    run keyword if    ${reverse}    Write    git/iperf/src/iperf3 -c ${remote_ip} -R -t ${time}s -p ${port} -P ${P} --forceflush --logfile ${logfile} &
+    ...    ELSE    Write    git/iperf/src/iperf3 -c ${remote_ip} -t ${time}s -p ${port} -P ${P} --forceflush --logfile ${logfile} &
+    ${res}    Read Until Prompt
+
+Iperf3 From PC With Protocol
+    [Arguments]    ${remote_ip}    ${pc}    ${port}    ${udp}    ${band}    ${length}
+    ...    ${time}=5    ${logfile}=iperf_test.log
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    rm ${logfile} -f    return_stderr=True
+    should be empty    ${stderr}
+    Set Client Configuration    timeout=${30}
+    run keyword if    ${udp}    Write    git/iperf/src/iperf3 -c ${remote_ip} -u -b ${band} -l ${length} -t ${time}s -p ${port} --forceflush --logfile ${logfile}
+    ...    ELSE    Write    git/iperf/src/iperf3 -c ${remote_ip} -b ${band} -l ${length} -t ${time}s -p ${port} --forceflush --logfile ${logfile}
+    ${res}    Read Until Prompt
+    Set Client Configuration    timeout=${15}
+
+check_nping_loss_rtt_result_in_pc
+    [Arguments]    ${loss}    ${rtt}    ${pc}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    cat nping.log    return_stderr=True
+    ${cmd}    Set Variable    grep 'Max rtt' nping.log|awk -F '[:|]' '{print $2}'|awk -F 'ms' '{print $1}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${rtt}
+    ${cmd}    Set Variable    grep '%' nping.log|grep 'Lost:'|awk -F '[(%]' '{print $NR}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${loss}
+
+check_paralled_sessions_iperf_loss_result_in_pc
+    [Arguments]    ${loss}    ${pc}
+    ssh_pc    ${pc}
+    ${rc}    ${stderr}=    execute command    cat iperf.log    return_stderr=True
+    ${cmd}    Set Variable    grep '%' iperf.log|grep '^\\[SUM\\]'|grep "sender"|awk -F '[(%]' '{print $2}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${loss}
+    ${cmd}    Set Variable    grep '%' iperf.log|grep '^\\[SUM\\]'|grep "receiver" |awk -F '[(%]' 'BEGIN{sum=0}{sum+=$2}END{print sum}'
+    ${r_loss}=    evaluate    ${loss}*2
+    SSH_Write_Command_And_Check_Num    ${cmd}    <=${r_loss}
+    ${cmd}    Set Variable    tail -n 5 iperf.log |grep '^\\[SUM\\]'|grep "sender"|awk -F ' ms' '{print $(NF-1)}' | awk -F ' ' '{print $(NF)}'
+    write    ${cmd}
+    ${res}=    read until prompt
+    ${res}=    get line    ${res}    0
+    ${cmd}    Set Variable    grep '%' iperf.log|grep '^\\[SUM\\]'|grep "sender" |awk -F '[/(]' '{print $3}'
+    ${send_num}=    SSH_Write_Command_And_Check_Num    ${cmd}    >${0}
+    ${cmd}    Set Variable    grep '%' iperf.log|grep '^\\[SUM\\]'|grep "receiver" |awk -F '[/(]' 'BEGIN{sum=0}{sum+=$3}END{print sum}'
+    SSH_Write_Command_And_Check_Num    ${cmd}    >=${send_num}-200
+    [Return]    ${res}
+
+Add_Delay_Range_Between_Sip_Dip_On_TC
+    [Arguments]    ${sip}    ${dip}    ${delay}    ${range}    ${p}
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh add_delay_range_on_sip_dip.sh ${sip} ${dip} ${delay} ${range} ${p}    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+Check CPE Saas Bond And Links
+    [Arguments]    ${cpe}    ${saas}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${service_id}=    get_saas_ne_id    ${saas}
+    ${res}=    Get_CPE_Bond_Json_Result    ${openwrt}    ${pwd}
+    ${bonds}=    evaluate    filter(lambda x:(x['dst_id'] == ${service_id}), ${res})
+    ${len_bond}=    evaluate    len(${bonds})
+    should be equal    ${len_bond}    ${1}
+    ${res}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    ${links}=    evaluate    filter(lambda x:(x['dst_id'] == ${service_id}), ${res})
+    ${len_link}=    evaluate    len(${links})
+    ${expect_l}=    evaluate    &{${cpe}_cpe}[wan_num]*&{Saas_${saas}}[port_num]*2
+    should be equal    ${len_link}    ${expect_l}
+    close connection
+
+Get CPE Saas Bond Link Score and Packets
+    [Arguments]    ${cpe}    ${saas}    ${wan}=1    ${pkt_check}=${True}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${service_id}=    get_saas_ne_id    ${saas}
+    ${res}=    Get_CPE_Bond_Json_Result    ${openwrt}    ${pwd}
+    ${tx_pkts}=    evaluate    map(lambda y: y['tx_packets'], filter(lambda x:(x['dst_id'] == ${service_id}), ${res}))[0]
+    run keyword if    '${pkt_check}' == '${True}'    should not be equal    ${tx_pkts}    ${0}
+    ${res}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    ${score}=    evaluate    map(lambda y: y['score'], filter(lambda x:(x['dst_id'] == ${service_id} and x['src_wan_id'] == ${wan} and x['direct'] == ${True}), ${res}))[0]
+    ${packets}=    evaluate    map(lambda y: y['tx_packets'], filter(lambda x:(x['dst_id'] == ${service_id} and x['src_wan_id'] == ${wan} and x['direct'] == ${True}), ${res}))[0]
+    should be true    ${score} < ${9999}
+    run keyword if    '${pkt_check}' == '${True}'    should not be equal    ${packets}    ${0}
+    close connection
+    [Return]    ${score}    ${packets}
+
+Get CPE Saas Bond Link Score and Packets Non Direct
+    [Arguments]    ${cpe}    ${saas}    ${wan}=1    ${pkt_check}=${True}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${service_id}=    get_saas_ne_id    ${saas}
+    ${res}=    Get_CPE_Bond_Json_Result    ${openwrt}    ${pwd}
+    ${tx_pkts}=    evaluate    map(lambda y: y['tx_packets'], filter(lambda x:(x['dst_id'] == ${service_id}), ${res}))[0]
+    run keyword if    '${pkt_check}' == '${True}'    should not be equal    ${tx_pkts}    ${0}
+    ${res}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    ${score}=    evaluate    map(lambda y: y['score'], filter(lambda x:(x['dst_id'] == ${service_id} and x['src_wan_id'] == ${wan} and x['direct'] == ${False}), ${res}))[0]
+    ${packets}=    evaluate    map(lambda y: y['tx_packets'], filter(lambda x:(x['dst_id'] == ${service_id} and x['src_wan_id'] == ${wan} and x['direct'] == ${False}), ${res}))[0]
+    should be true    ${score} < ${9999}
+    run keyword if    '${pkt_check}' == '${True}'    should not be equal    ${packets}    ${0}
+    close connection
+    [Return]    ${score}    ${packets}
+
+Confirm Saas Choosing Better Link
+    [Arguments]    ${cpe}    ${service_id}    ${domain_name}
+    ${link_ids}    ${links}=    Check End2End Links    ${cpe}    ${service_id}    4
+    ${l_init_score}    ${l_init_pkt}    ${l_init_bytes}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    ssh_pc    ${cpe}
+    Write    rm -rf /tmp/saasPing.log
+    read until prompt
+    Write    ping ${domain_name} -c ${exec_time} -i 0.2 > /tmp/saasPing.log
+    read until prompt
+    Get Valid Ping Logs_loss_less_than    /tmp/saasPing.log    0
+    close connection
+    ${l_cur_score}    ${l_cur_pkt}    ${l_cur_bytes}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    # confirm the saas chooses the better link
+    ${b_pkg}    set variable    ${0}
+    ${pkg_wan}    set variable    ${0}
+    ${low_score}    set variable    ${10000}
+    ${score_wan}    set variable    ${0}
+    ${b_wan_link}    set variable    ${0}
+    ${b_s_link}    set variable    ${0}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}=    get index from list    ${links}    ${link}
+    \    ${pkg}=    evaluate    ${l_cur_pkt[${i}]}-${l_init_pkt[${i}]}
+    \    ${pkg_wan}    set variable if    ${pkg} > ${b_pkg}    ${link['local-wan-id']}    ${pkg_wan}
+    \    ${b_wan_link}    set variable if    ${pkg} > ${b_pkg}    ${link_ids[${i}]}    ${b_wan_link}
+    \    ${b_pkg}    set variable if    ${pkg} > ${b_pkg}    ${pkg}    ${b_pkg}
+    \    ${score_wan}    set variable if    ${l_cur_score[${i}]} < ${low_score}    ${link['local-wan-id']}    ${score_wan}
+    \    ${b_s_link}    set variable if    ${l_cur_score[${i}]} < ${low_score}    ${link_ids[${i}]}    ${b_s_link}
+    \    ${low_score}    set variable if    ${l_cur_score[${i}]} > ${low_score}    ${low_score}    ${l_cur_score[${i}]}
+    should be equal    ${pkg_wan}    ${score_wan}
+    should be equal    ${b_wan_link}    ${b_s_link}
+
+Check No Saas Bond Or Links
+    [Arguments]    ${cpe}    ${pop_neid}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${service_id}=    evaluate    str(${pop_neid} << 4 | 8)
+    ${res}=    Get_CPE_Bond_Json_Result    ${openwrt}    ${pwd}
+    ${bonds}=    evaluate    filter(lambda x:(x['dst_id'] == ${service_id}), ${res})
+    ${len_bonds}=    evaluate    len(${bonds})
+    should be equal    ${len_bonds}    ${0}
+    ${res}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    ${links}=    evaluate    filter(lambda x:(x['dst_id'] == ${service_id}), ${res})
+    ${len_links}=    evaluate    len(${links})
+    should be equal    ${len_links}    ${0}
+    close connection
+
+Update the Kernel Pop Tunnel Port
+    [Arguments]    ${pwd}    ${target_port}    ${groups}
+    # update moon config
+    write    grep tunnelPort /opt/aiwan/moon/config/config.json | awk '{print $NF}'
+    ${res}=    read until prompt
+    ${cur_port}=    get lines containing string    ${res}    ,
+    write sudo cmd    sed -i "s/${cur_port}/${target_port},/g" /opt/aiwan/moon/config/config.json    ${pwd}
+    # update saas config
+    write sudo cmd    sed -i "s/${cur_port}/${target_port},/g" /opt/aiwan/saas/config/config.json    ${pwd}
+    write sudo cmd    systemctl restart aiwan-world    ${pwd}
+    write sudo cmd    systemctl restart aiwan-moon    ${pwd}
+    write sudo cmd    systemctl restart aiwan-saas    ${pwd}
+
+Check Pop Tunnel Port
+    [Arguments]    ${pwd}    ${tunnel_port}    ${tunnel_ip}    ${cpe_ip}
+    ${file}=    set variable    ~/tmp.pcap
+    write sudo cmd    tcpdump -n -i any src port ${tunnel_port} and src host ${tunnel_ip} -c 5 -w ${file}    ${pwd}    60
+    write sudo cmd    tcpdump -n -i any src ${cpe_ip} and dst port ${tunnel_port} and dst host ${tunnel_ip} -c 5 -w ${file}    ${pwd}    60
+
+Confirm No Data in Sysrepo Startup
+    [Arguments]    ${cpe}    ${item_list}
+    ssh_cpe    ${cpe}
+    ${res}=    Write CPE CMD    ${cpe}    sysrepocfg -f json -d running -X -x /aiwan-config:aiwan-switch/resource//*    sysrepocfg -f json -d running -X -x /aiwan-config:aiwan-switch/resource//*
+    : FOR    ${item}    IN    @{item_list}
+    \    should not contain    ${res}    ${item}
+    ${res}=    Write CPE CMD    ${cpe}    sysrepocfg -f json -d startup -X -x /aiwan-config:aiwan-switch/resource//*    sysrepocfg -f json -d startup -X -x /aiwan-config:aiwan-switch/resource//*
+    : FOR    ${item}    IN    @{item_list}
+    \    should not contain    ${res}    ${item}
+    close connection
+
+Check Data in Sysrepo Running
+    [Arguments]    ${cpe}    ${item_list}    ${should_contain}=${True}
+    ${res}=    Write CPE CMD    ${cpe}    sysrepocfg -f json -d running -X -x /aiwan-config:aiwan-switch/resource//*    sysrepocfg -f json -d startup -X -x /aiwan-config:aiwan-switch/resource//*
+    : FOR    ${item}    IN    @{item_list}
+    \    run keyword if    ${should_contain}    should contain    ${res}    ${item}
+    \    ...    ELSE    should not contain    ${res}    ${item}
+
+Controller Unregister CPE Done
+    [Arguments]    ${ne_list}
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    run keyword if    &{${cpe}_cpe}[chassis_id] in @{ne_list}    Check CPE Netconf Config on Controller    &{${cpe}_cpe}[chassis_id]
+
+Check CPE Netconf Config on Controller
+    [Arguments]    ${ne_id}
+    ${code}    ${body}=    get_ne_netconf_config    ${ne_id}
+    should be equal    ${code}    ${404}
+
+Start_Tcpdump_With_From_Dns_Server
+    [Arguments]    ${nic}    ${file}    ${protocol}    ${ip}
+    [Timeout]    30 seconds
+    ssh login    &{dns_server}[ip]    &{dns_server}[ssh_port]    &{dns_server}[user]    &{dns_server}[passwd]
+    Write Sudo Cmd    tcpdump -i ${nic} -n "src host ${ip}" \ -c 3 and ${protocol} > ${file} \ 2>&1    &{dns_server}[passwd]
+
+Dig_And_Check_CPE_Dns_Proxy_Stats
+    [Arguments]    ${cpe}    ${ip}    ${code}    ${cache}=${True}
+    ssh_pc    local
+    ${qname}=    set variable    samba.systemtest.com
+    Write    dig samba.systemtest.com
+    close connection
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    Get_CPE_DNS_ProxyStats_Json_Result    ${openwrt}    ${pwd}
+    close connection
+    ${dns_proxy}=    evaluate    filter(lambda x:(x['qname'] == '${qname}'), ${res['qnames']})
+    ${ip_pop_num}=    evaluate    len(filter(lambda x: x['ip'] == '${ip}' and x['pop'] == ${code}, ${dns_proxy[0]['ip_pop']}))
+    should be equal    ${ip_pop_num}    ${1}
+    ${sec}=    evaluate    int(${dns_proxy[0]['reply'][0]['valid_seconds']}) > 0
+    should be equal    ${sec}    ${cache}
+
+Get_CPE_Numa_Stream_Number
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${nuwa_state}=    Get_CPE_nuwaStats_Json_Result    ${openwrt}    ${pwd}
+    close connection
+    [Return]    ${nuwa_state["stream_num"]}    ${nuwa_state["current_stream_id"]}    ${nuwa_state["lwip_stream_num"]}    ${nuwa_state["current_lwip_stream_id"]}
+
+get_saas_ne_id
+    [Arguments]    ${saas}
+    [Timeout]
+    ${ne_id}=    Set Variable    &{Saas_${saas}}[ne_id]
+    [Return]    ${ne_id}
+
+Check_Spi_Info_From_Cpe
+    [Arguments]    ${cpe}    ${spi}    ${num}=1
+    ${ret}=    get_spi_nat_patterns_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ${find}=    run keyword if    ${ret}    evaluate    filter(lambda x:x['domain'] == '${spi}',filter(lambda x:'domain' in x.keys(),${ret}))
+    ...    ELSE    create list
+    length should be    ${find}    ${num}
+
+Check CPE Anyc Bond And Links
+    [Arguments]    ${cpe}    ${anyc}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${service_id}=    get_anyc_ne_id    ${anyc}
+    ${res}=    Write OpenWrt Cmd    aiwan-ctl --bondStats | grep "\\-${service_id},"    ${pwd}
+    ${bonds}=    get lines containing string    ${res}    ,
+    should contain    ${bonds}    dst_id: ${service_id}
+    @{l_bonds}    split string    ${bonds}    \n
+    ${len_bond}=    evaluate    len(${l_bonds})
+    should be equal    ${len_bond}    ${1}
+    ${res}=    Write OpenWrt Cmd    aiwan-ctl --linkStats | grep "\\-${service_id}"    ${pwd}
+    ${links}=    get lines containing string    ${res}    ,
+    @{l_links}    split string    ${links}    \n
+    : FOR    ${l}    IN    @{l_links}
+    \    ${s}=    evaluate    re.search(r' score: (\\S+),','${l}').group(1)    modules=re,sys
+    \    should be true    ${s} < 9999
+    ${len_link}=    evaluate    len(${l_links})
+    ${expect_l}=    evaluate    &{${cpe}_cpe}[wan_num]*2
+    should be equal    ${len_link}    ${expect_l}
+    close connection
+
+get_anyc_ne_id
+    [Arguments]    ${anyc}
+    [Timeout]
+    ${ne_id}=    Set Variable    &{anycast_${anyc}}[ne_id]
+    [Return]    ${ne_id}
+
+Check_POP_world_No_CoreDump
+    [Arguments]    ${pop}
+    ${pwd}=    ssh_POP    ${pop}
+    ${res}=    Write Sudo Cmd    ls /opt/aiwan/world/cores/* -ltr    ${pwd}
+    close connection
+    Should Not Contain    ${res}    core.
+
+Ssh_Services
+    [Arguments]    ${services}    ${alias}=${None}
+    [Timeout]    30 seconds
+    ssh login    &{${services}}[ctrl_ip]    &{${services}}[ssh_port]    &{${services}}[user]    &{${services}}[passwd]    ~$    ${alias}
+    [Return]    &{${services}}[passwd]
+
+Check_Services_No_CoreDump
+    [Arguments]    ${services}
+    ${pwd}=    ssh_services    ${services}
+    ${is_saas}=    evaluate    'Saas' in '${services}'
+    ${res}=    run keyword if    ${is_saas}    Write Sudo Cmd    ls /opt/aiwan/saas/cores/* -ltr    ${pwd}
+    ...    ELSE    Write Sudo Cmd    ls /opt/aiwan/anyc/cores/* -ltr    ${pwd}
+    close connection
+    Should Not Contain    ${res}    core.
+
+Check GW Saas Config
+    [Arguments]    ${pattern}    ${should_contain}=${True}    ${no_pattern}=${None}    ${file}=/etc/dnsmasq.d/saas.conf
+    ${cmd}=    run keyword if    '${no_pattern}' == '${None}'    set variable    grep ${pattern} ${file}
+    ...    ELSE    set variable    grep ${pattern} ${file} | grep -v ${no_pattern}
+    ${res}=    write openwrt cmd    ${cmd}
+    run keyword if    '${should_contain}' == '${True}'    should contain    ${res}    ${pattern}
+    ...    ELSE    should not contain    ${res}    ${pattern}
+
+Check GW Ipset List
+    [Arguments]    ${keywords}    ${should_contain}=${True}    ${name}=dst_ip_set
+    ${res}=    write openwrt cmd    ipset list ${name}
+    run keyword if    '${should_contain}' == '${True}'    should contain    ${res}    ${keywords}
+    ...    ELSE    should not contain    ${res}    ${keywords}
+
+Start_Tcpdump_dns_With_From_Dns_Server
+    [Arguments]    ${nic}    ${file}    ${ip}    ${a}
+    [Timeout]    30 seconds
+    ssh login    &{dns_server}[ip]    &{dns_server}[ssh_port]    &{dns_server}[user]    &{dns_server}[passwd]    ~$    ${a}
+    Write Sudo Cmd    rm ${file} -rf    &{dns_server}[passwd]
+    Write Sudo Cmd    pkill -9 tcpdump    &{dns_server}[passwd]
+    Write Sudo Cmd    tcpdump -i ${nic} -n -c2 host ${ip} and udp and port 53 -w ${file} &    &{dns_server}[passwd]
+
+Check_Domain_Info_With_Agent_From_Cpe
+    [Arguments]    ${cpe}    ${domain}    ${num}=1    ${agent}=${EMPTY}
+    ${ret}=    get_domain_nat_patterns_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ${find}=    run keyword if    ${ret}    evaluate    filter(lambda x:(x['pattern'] == '${domain}')and(x['dnsServer']=='${agent}'),${ret})
+    ...    ELSE    create list
+    length should be    ${find}    ${num}
+
+Check Callhome Netconf and OF
+    [Arguments]    ${cpe}    ${status}=master
+    # check from cpe
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    run keyword if    ${openwrt}    Write OpenWrt Cmd    netstat -an | grep 4335    ${pwd}
+    ...    ELSE    Write Sudo Cmd    netstat -an | grep 4335    ${pwd}
+    run keyword if    '${status}' == 'master'    should contain    ${res}    ESTABLISHED
+    ...    ELSE    should not contain    ${res}    ESTABLISHED
+    ${res}=    run keyword if    ${openwrt}    Write OpenWrt Cmd    netstat -an | grep -E "6633|6653"    ${pwd}
+    ...    ELSE    Write Sudo Cmd    netstat -an | grep -E "6633|6653"    ${pwd}
+    run keyword if    '${status}' == 'master'    should contain    ${res}    ESTABLISHED
+    ...    ELSE    should not contain    ${res}    ESTABLISHED
+    close connection
+    # check from controller for master
+    ${netconf}=    check_device_status    &{${cpe}_cpe}[chassis_id]    NETCONF
+    ${of}=    check_device_status    &{${cpe}_cpe}[chassis_id]    OF_13
+    run keyword if    '${status}' == 'master'    should be true    ${netconf} and ${of}
+
+Init_Iperfs_Server_In_PC_Bind_Address
+    [Arguments]    ${pc}    ${ip}    ${port}=5201
+    ${server_connection}=    ssh login    &{${pc}}[ip]    &{${pc}}[ssh_port]    &{${pc}}[user]    &{${pc}}[passwd]
+    ${rc}    ${stderr}=    execute command    pkill -9 iperf3    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    nohup git/iperf/src/iperf3 -s -p ${port} -B ${ip} --forceflush> /tmp/listen.txt 2>&1 &    return_stderr=True
+    should be empty    ${stderr}
+    [Return]    ${server_connection}
+
+Block_Saas_Cpe_Direct_link
+    [Arguments]    ${saas}    ${ip}    ${block}
+    ${pass}=    ssh services    ${saas}
+    run keyword if    '${block}'=='block'    Write Sudo Cmd    iptables -I INPUT -p udp --dport &{${saas}}[tunnel_port] -s ${ip} -j DROP    &{uranus_host}[ssh_passwd]
+    ...    ELSE    Write Sudo Cmd    iptables -D INPUT -p udp --dport &{${saas}}[tunnel_port] \ -s ${ip} -j DROP    ${pass}
+    close connection
+
+Write CPE CMD
+    [Arguments]    ${cpe}    ${cmd_u}    ${cmd_gw}    ${passwd}=rocks    ${delay_time}=1s
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    run keyword if    ${openwrt}    Write OpenWrt Cmd    ${cmd_gw}    &{${cpe}_cpe}[passwd]    ${delay_time}
+    ...    ELSE    Write Sudo Cmd    ${cmd_u}    &{${cpe}_cpe}[passwd]    ${delay_time}
+    [Return]    ${res}
+
+Ensure_Saas_OK
+    [Arguments]    ${pc}    ${ip}=&{internet_host}[saas_dns]    ${num}=20
+    ssh_pc    ${pc}
+    ${res}=    Write Sudo Cmd    nping --tcp-connect -c ${num} --delay 30ms ${ip} -p 9999    &{local_pc}[passwd]
+    should contain    ${res}    Failed: 0
+    close connection
+
+Add_Delay_on_Gateway_Interface
+    [Arguments]    ${cpe}    ${if_list}    ${delay_list}
+    ssh cpe    ${cpe}
+    : FOR    ${if}    IN    @{if_list}
+    \    ${i}=    get index from list    ${if_list}    ${if}
+    \    write    tc qdisc del dev ${if} root netem
+    \    ${res}=    read until prompt
+    \    write    tc qdisc add dev ${if} root netem delay ${delay_list[${i}]}ms
+    \    ${res}=    read until prompt
+    \    write    tc qdisc show dev ${if}
+    \    ${res}=    read until prompt
+    close connection
+
+clear_Delay_on_Gateway_Interface
+    [Arguments]    ${cpe}    ${if_list}
+    ssh cpe    ${cpe}
+    : FOR    ${if}    IN    @{if_list}
+    \    write    tc qdisc del dev ${if} root netem
+    \    ${res}=    read until prompt
+    \    write    tc qdisc show dev ${if}
+    \    ${res}=    read until prompt
+    \    should not contain    ${res}    netem
+    close connection
+
+Check CPE Cache Info
+    [Arguments]    ${cpe}    ${remote_ip}    ${pass}    ${saas}    ${proto}    ${expect_len_dst}
+    ...    ${expect_len_src}    ${expect_bond}    ${check_qos}=${True}
+    ${dst_cache}    ${src_cache}    Get_CPE_Cache_Info    ${cpe}    ${remote_ip}    ${pass}    ${saas}
+    ...    ${proto}
+    ${len_des}=    get length    ${dst_cache}
+    ${len_src}=    get length    ${src_cache}
+    should be true    ${len_des}>=${expect_len_dst}    should be true
+    should be true    ${len_src}>=${expect_len_src}    should be true
+    run keyword if    ${expect_len_dst} > 0 and ${check_qos}    should be true    "${dst_cache[0]['qos.exist']}"=="True"
+    run keyword if    ${expect_len_src} > 0 and ${check_qos}    should be true    "${src_cache[0]['qos.exist']}"=="False"
+    run keyword if    ${expect_len_dst} > 0    should be true    "${dst_cache[0]['out_port']}"=="${expect_bond}"
+    run keyword if    ${expect_len_src} > 0    should be true    "${src_cache[0]['in_port']}"=="${expect_bond}"
+
+Get_CPE_Minion_Id
+    [Arguments]    ${cpe}
+    [Timeout]
+    ${ne_id}=    Set Variable    &{${cpe}_cpe}[minion_id]
+    [Return]    ${ne_id}
+
+Block CPE Wan IP From Salt Master
+    [Arguments]    ${cpe}
+    ${wan_ip}=    run keyword if    '${cpe}' in @{nat_cpe_list}    wait until keyword succeeds    30s    1s    Get Current Wan IP on Salt Master
+    ...    ${cpe}
+    ...    ELSE    Get Nic IP    &{${cpe}_cpe}[internet_if]
+    ${cmd}=    set variable    iptables -I INPUT -s ${wan_ip} -j DROP
+    write sudo cmd    ${cmd}    &{salt-master}[passwd]
+    [Return]    ${wan_ip}
+
+Get Current Wan IP on Salt Master
+    [Arguments]    ${cpe}    ${salt_port}=${4505}
+    ${f_ip1}=    Check IP On Salt Master    &{${cpe}_switch}[ip]    ${salt_port}
+    ${f_ip2}=    Check IP On Salt Master    &{${cpe}_switch}[ip2]    ${salt_port}
+    should be true    ${f_ip1} ^ ${f_ip2}
+    ${ip}=    set variable if    ${f_ip1}    &{${cpe}_switch}[ip]    &{${cpe}_switch}[ip2]
+    [Return]    ${ip}
+
+Check IP On Salt Master
+    [Arguments]    ${ip}    ${port}
+    ${res}=    write sudo cmd    netstat -an | grep ${port} | grep ${ip}:    &{salt-master}[passwd]
+    ${status}    run keyword and return status    should contain    ${res}    ESTABLISHED
+    ${match}    ${send_q}    run keyword if    ${status}    should match regexp    ${res}    tcp\[ ]+0[ ]+(\\d+).*
+    ${status}    set variable if    '${send_q}' == '${0}'    ${status}    ${False}
+    [Return]    ${status}
+
+Get Current Dev From Table200
+    ${res}=    write openwrt cmd    ip route list table 200| awk '{print $NF}'
+    ${dev}=    Get Line    ${res}    0
+    [Return]    ${dev}
+
+Update Dnsmasq for Salt Domain Name
+    [Arguments]    ${dev}
+    write openwrt cmd    echo 'ipset=/salt-cpe.netgrounder.com/mwan_set' > /etc/dnsmasq.d/mwan.conf
+    write openwrt cmd    echo 'server=/salt-cpe.netgrounder.com/10.184.20.105@${dev}' >> /etc/dnsmasq.d/mwan.conf
+    write openwrt cmd    /etc/init.d/dnsmasq restart
+    write openwrt cmd    /etc/init.d/salt-minion restart
+
+Unblock CPE Wan IP From Salt Master
+    [Arguments]    ${ip}
+    ${cmd}=    set variable    iptables -D INPUT -s ${ip} -j DROP
+    write sudo cmd    ${cmd}    &{salt-master}[passwd]
+
+Get_CPE_tunnelStats
+    [Arguments]    ${cpe}    ${ne}    ${wan}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}    evaluate    '${cpe}' in ${opwrt_list}
+    ${tunnels}=    Get_CPE_Tunnels_Json_Result    ${openwrt}    ${pwd}
+    ${tunnel_states}=    evaluate    filter(lambda x:x['dst_id']==int(${ne}) and x['vport_wan_id']==int(${wan}), ${tunnels})
+    close connection
+    [Return]    ${tunnel_states}
+
+Get Remote CPE Tunnels from POP
+    [Arguments]    ${pop}
+    Ssh_Pop    ${pop}
+    write    telnet 0 8085
+    read until    moon>
+    write    show nat
+    ${res}=    read until    moon>
+    close connection
+    ${lines}=    get lines containing string    ${res}    number:
+    [Return]    ${lines}
+
+Get Remote CPE Tunnels Packets from POP
+    [Arguments]    ${pop}    ${tunnel_id}
+    Ssh_Pop    ${pop}
+    write    telnet 0 8086
+    read until    pipeline>
+    write    show tunnel
+    ${res}=    read until    pipeline>
+    close connection
+    ${tunnels}=    evaluate    """${res}""".split('tunnel ')
+    ${tunnel_info}=    evaluate    filter(lambda x:x.startswith('${tunnel_id}\\n'),${tunnels})[0]
+    ${tunnel_tx_p}=    evaluate    re.search(r'tx_pkts (.+?) tx_bytes ([0-9]+)', """${tunnel_info}""").group(1)    re
+    ${tunnel_tx_b}=    evaluate    re.search(r'tx_pkts (.+?) tx_bytes ([0-9]+)', """${tunnel_info}""").group(2)    re
+    [Return]    ${tunnel_tx_p}    ${tunnel_tx_b}
+
+Get_Saas_Nuwa_from_CLI
+    [Arguments]    ${saas}    ${cpe}
+    ssh services    ${saas}
+    write    telnet 0 8087
+    read until    saas>
+    write    show cpe ${cpe}
+    ${res}=    read until    saas>
+    close connection
+    ${res_list}=    evaluate    """${res}""".split("NUWA state handshake_finish")
+    ${r_res}=    evaluate    filter(lambda x: 'reliable' in x,${res_list})
+    ${ur_res}=    evaluate    filter(lambda x: 'reliable' not in x,${res_list})
+    ${r_c_s_p}    ${r_c_s_b}    ${r_c_r_p}    ${r_c_r_b}    ${r_c_rs_p}    ${r_c_rs_b}    ${r_c_stream_c}=
+    ...    Get_Nuwa_Pkgs_from_Saas_CLI    ${r_res}
+    ${c_s_p}    ${c_s_b}    ${c_r_p}    ${c_r_b}    ${c_rs_p}    ${c_rs_b}    ${c_stream_c}=
+    ...    Get_Nuwa_Pkgs_from_Saas_CLI    ${ur_res}
+    ${r_c_info}=    create list    ${r_c_s_p}    ${r_c_s_b}    ${r_c_r_p}    ${r_c_r_b}    ${r_c_rs_p}
+    ...    ${r_c_rs_b}    ${r_c_stream_c}
+    ${c_info}=    create list    ${c_s_p}    ${c_s_b}    ${c_r_p}    ${c_r_b}    ${c_rs_p}
+    ...    ${c_rs_b}    ${c_stream_c}
+    [Return]    ${r_c_info}    ${c_info}
+
+Get_Saas_Nuwa_stream_from_CLI
+    [Arguments]    ${saas}    ${cpe}    ${reliable}    ${d_ip}    ${d_port}
+    ssh services    ${saas}
+    write    telnet 0 8087
+    read until    saas>
+    write    show cpe ${cpe}
+    ${res}=    read until    saas>
+    close connection
+    ${res_list}=    evaluate    """${res}""".split("NUWA state handshake_finish")
+    ${s_s_p}    ${s_s_b}    ${s_r_p}    ${s_r_b}    ${s_fec_p}    ${s_fec_b}    ${s_resend_f}=
+    ...    run keyword if ${reliable}    Get_Nuwa_Stream_Pkgs_from_Saas_CLI    ${res_list[-2]}    ${d_ip}    ${d_port}
+    ...    ELSE    Get_Nuwa_Stream_Pkgs_from_Saas_CLI    ${res_list[-1]}    ${d_ip}    ${d_port}
+    ${stream_info}=    create list    ${s_s_p}    ${s_s_b}    ${s_r_p}    ${s_r_b}    ${s_fec_p}
+    ...    ${s_fec_b}    ${s_resend_f}
+    [Return]    ${stream_info}
+
+Get_Nuwa_Pkgs_from_Saas_CLI
+    [Arguments]    ${res}
+    ${r_c_s_p}=    evaluate    re.search(r'send packets (.+?) bytes ([0-9]+)', """${res}""").group(1)    re
+    ${r_c_s_b}=    evaluate    re.search(r'send packets (.+?) bytes ([0-9]+)', """${res}""").group(2)    re
+    ${r_c_r_p}=    evaluate    re.search(r'recv packets (.+?) bytes ([0-9]+)', """${res}""").group(1)    re
+    ${r_c_r_b}=    evaluate    re.search(r'recv packets (.+?) bytes ([0-9]+)', """${res}""").group(2)    re
+    ${r_c_rs_p}=    evaluate    re.search(r'resend packets (.+?) bytes ([0-9]+)', """${res}""").group(1)    re
+    ${r_c_rs_b}=    evaluate    re.search(r'resend packets (.+?) bytes ([0-9]+)', """${res}""").group(2)    re
+    ${r_c_stream_c}=    evaluate    re.search(r'stream-counter (.+?) max-resend-times ([0-9]+)', """${res}""").group(1)    re
+    [Return]    ${r_c_s_p}    ${r_c_s_b}    ${r_c_r_p}    ${r_c_r_b}    ${r_c_rs_p}    ${r_c_rs_b}
+    ...    ${r_c_stream_c}
+
+Get_Nuwa_Stream_Pkgs_from_Saas_CLI
+    [Arguments]    ${res}    ${d_ip}    ${d_port}
+    ${stream_list}=    evaluate    """${res}""".split(' duplicate ')
+    ${stream}=    evaluate    filter(lambda x: 'to ${d_ip}:${d_port}' in x,${stream_list})[0]
+    ${r_s_s_p}=    evaluate    re.search(r'send (.+?) packets ([0-9]+) bytes', """${stream}""").group(1)    re
+    ${r_s_s_b}=    evaluate    re.search(r'send (.+?) packets ([0-9]+) bytes', """${stream}""").group(2)    re
+    ${r_s_r_p}=    evaluate    re.search(r'recv (.+?) packets ([0-9]+) bytes', """${res}""").group(1)    re
+    ${r_s_r_b}=    evaluate    re.search(r'recv (.+?) packets ([0-9]+) bytes', """${res}""").group(2)    re
+    ${r_s_fec_p}=    evaluate    re.search(r'fec (.+?) packets ([0-9]+) bytes', """${res}""").group(1)    re
+    ${r_s_fec_b}=    evaluate    re.search(r'fec (.+?) packets ([0-9]+) bytes', """${res}""").group(2)    re
+    ${r_s_resend_frame}=    evaluate    re.search(r'resend (.+?) frames ([0-9]+) bytes', """${res}""").group(1)    re
+    [Return]    ${r_s_s_p}    ${r_s_s_b}    ${r_s_r_p}    ${r_s_r_b}    ${r_s_fec_p}    ${r_s_fec_b}
+    ...    ${r_s_resend_frame}
+
+Get_Anycast_IO_Packet_from_CLI
+    ssh Login    &{anycast_service}[ctrl_ip]    &{anycast_service}[ssh_port]    &{anycast_service}[user]    &{anycast_service}[passwd]
+    write    telnet 0 8086
+    read until    osal>
+    write    show vport
+    ${vport_res}=    read until    osal>
+    write    show tunnel
+    ${tunnel_res}=    read until    osal>
+    write    show link
+    ${link_res}=    read until    osal>
+    write    show bond
+    ${bond_res}=    read until    osal>
+    close connection
+    ${vport_tx_p}    ${vport_tx_b}=    Get_Tx_From_Anycast_Cli    ${vport_res}
+    ${tunnel_tx_p}    ${tunnel_tx_b}=    Get_Tx_From_Anycast_Cli    ${tunnel_res}
+    ${link_tx_p}    ${link_tx_b}=    Get_Tx_From_Anycast_Cli    ${link_res}
+    ${bond_tx_p}    ${bond_tx_b}=    Get_Tx_From_Anycast_Cli    ${bond_res}
+    [Return]    ${vport_tx_p}    ${vport_tx_b}    ${tunnel_tx_p}    ${tunnel_tx_b}    ${link_tx_p}    ${link_tx_b}
+    ...    ${bond_tx_p}    ${bond_tx_b}
+
+Get_Tx_From_Anycast_Cli
+    [Arguments]    ${res}
+    ${txtemp}=    get lines containing string    ${res}    tx
+    ${tx_p_t}=    set variable    ${0}
+    ${tx_b_t}=    set variable    ${0}
+    ${tx}=    split to lines    ${txtemp}
+    : FOR    ${l}    IN    @{tx}
+    \    ${tx_p}=    evaluate    re.search(r'tx (.+?) pkts (.+?) bytes', '${l}').group(1)    re
+    \    ${tx_p_t}=    evaluate    ${tx_p_t}+int(${tx_p})
+    \    ${tx_b}=    evaluate    re.search(r'tx (.+?) pkts (.+?) bytes', '${l}').group(2)    re
+    \    ${tx_b_t}=    evaluate    ${tx_b_t}+int(${tx_b})
+    [Return]    ${tx_p_t}    ${tx_b_t}
+
+Block_CPE_POP_Port
+    [Arguments]    ${cpe_ip}    ${dport}    ${r_cpe_ip}
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh add_loss_on_pop_port.sh ${cpe_ip} ${dport} ${r_cpe_ip}    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+Get_CPE_Flow_Info_From_POP
+    [Arguments]    ${pop}    ${cpe_neid}    ${wan}
+    ${route_id}=    get_routeid_from_gneid    ${cpe_neid}    ${wan}
+    ${port_num}=    evaluate    len(&{${pop}_pop}[logic_ports])*3
+    ${cmd}=    evaluate    'pipeline PIPELINE0 table ${port_num} rule read stats match vxmp priority 1800 &{${pop}_pop}[cac] 0xff &{${pop}_pop}[eac] \ 0xff ${route_id} 0xffffffff 0 0x0'
+    Ssh_Pop    ${pop}
+    write    telnet 0 8086
+    read until    pipeline>
+    write    ${cmd}
+    ${res}=    read until    pipeline>
+    close connection
+    ${result}    get lines containing String    ${res}    Packets
+    should not be empty    ${result}
+    ${r}=    split string    ${result}    ;
+    ${results}=    split string    ${r[0]}    :
+    [Return]    ${results[1]}
+
+Get_CPE_CodeMap
+    [Arguments]    ${code}    ${cpe}
+    ssh cpe    ${cpe}
+    ${code_maps}    write cpe cmd    ${cpe}    aiwan-ctl --codeMap    aiwan-ctl --codeMap    ${${cpe}_cpe}[passwd]
+    ${code_map}    get lines containing string    ${code_maps}    ${code}
+    should not be empty    ${code_map}
+    [Return]    ${code_map}
+
+Delete_CPE_CodeMap
+    [Arguments]    ${cpe}
+    write cpe cmd    ${cpe}    aiwan-ctl --codeMapDel    aiwan-ctl --codeMapDel    ${${cpe}_cpe}[passwd]
+
+add delay on pop
+    [Arguments]    ${pop}    ${ip}
+    Ssh_Pop    ${pop}
+    run keyword if    '${ip}'=='&{${pop}_pop}[ip]'    write sudo cmd    tc qdisc add dev enp1s0f0 root netem delay 300ms    &{${pop}_pop}[passwd]
+    ...    ELSE    write sudo cmd    tc qdisc add dev enp1s0f1 root netem delay 300ms    &{${pop}_pop}[passwd]
+    close connection
+
+del delay on pop
+    [Arguments]    ${pop}    ${ip}
+    Ssh_Pop    ${pop}
+    run keyword if    '${ip}'=='&{${pop}_pop}[ip]'    write sudo cmd    tc qdisc del dev enp1s0f0 root netem delay 120ms    &{${pop}_pop}[passwd]
+    ...    ELSE    write sudo cmd    tc qdisc del dev enp1s0f1 root netem delay 120ms    &{${pop}_pop}[passwd]
+    close connection
+
+get_link_qos_num
+    [Arguments]    ${cpe}    ${link_ids}    ${qos}=${10000}
+    ${b_score_list}    ${b_p_list}    ${b_b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    ${num}=    evaluate    len(filter(lambda x:x>=${qos}, ${b_score_list}))
+    [Return]    ${num}
+
+shutdown_changsha_wan1_port
+    ssh cpe    changsha
+    Write OpenWrt Cmd    ifconfig wan down
+    wait until keyword succeeds    21s    1s    gateway_cpe_wan_link_bad    changsha    4    1
+
+unshutdown_changsha_wan1_port
+    [Arguments]    ${bad_link_n}=2
+    ssh cpe    changsha
+    Write OpenWrt Cmd    ifconfig wan up;ifup wan
+    wait until keyword succeeds    32s    1s    gateway_cpe_wan_link_bad    changsha    ${bad_link_n}    1
+
+Refresh Default SAAS SPI Dispatch
+    [Arguments]    ${cpe}
+    ${agent_codes}=    run keyword if    '&{dns_server}[ip]' != '&{default_dns}[ip]'    create list    &{default_dns}[ip]    &{dns_server}[ip]    ${CM_local_code}
+    ...    &{default_dns}[ip]    &{default_dns}[ip]
+    ...    ELSE    create list    &{default_dns}[ip]    &{dns_server}[ip]    ${CM_local_code}    &{default_dns}[ip]
+    ...    &{default_dns}[ip]    ${CM_local_code}
+    ${indexes}=    run keyword if    '&{dns_server}[ip]' != '&{default_dns}[ip]'    create list    0    1    2
+    ...    3    4
+    ...    ELSE    create list    0    1    2    3
+    ...    4    5
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_tag_id}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    ${cpe}    samba.systemtest.com    @{agent_codes}[1]
+    ...    @{indexes}[1]    ${suite_saas_tag_id}    ${0}
+    Apply Default Saas SPI To CPEs    ${cpe}    ${suite_saas_tag_id}
+
+Search Analyze Log
+    [Arguments]    ${cpe}    ${stats_j}    ${tag_id}    ${start_time}    ${dst_ip}    ${protocol}
+    ...    ${payload_size_max}    ${payload_size_min}    ${duration}    ${dst_port}    ${private}=${False}    ${f_https}=${False}
+    should be equal    ${stats_j['spi_tag']}    ${tag_id}
+    should be equal    '${stats_j['session']['protocol']}'    '${protocol}'
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword if    ${openwrt} and '${dst_port}' != '53'    should be equal    ${stats_j['session']['source_ip']}    &{${cpe}_pc}[inner_ip]
+    ...    ELSE IF    ${openwrt} and '${dst_port}' == '53'    should be true    '${stats_j['session']['source_ip']}' in &{${cpe}_cpe}[wan_ips]
+    ...    ELSE IF    ${private} == ${True}    should be equal    ${stats_j['session']['source_ip']}    &{${cpe}_pc}[intranet_ip]
+    ...    ELSE    should be equal    ${stats_j['session']['source_ip']}    &{${cpe}_switch}[ip]
+    should be equal    ${stats_j['session']['destination_ip']}    ${dst_ip}
+    run keyword if    ${dst_port} != ${None}    should be equal    ${stats_j['session']['destination_port']}    ${dst_port}
+    should be equal    '${stats_j['ne_id']}'    '&{${cpe}_cpe}[chassis_id]'
+    ${t_stamp_long}=    set variable    ${stats_j['start_epoch']}
+    ${time_gap}=    evaluate    abs(${start_time}-${t_stamp_long}/1000000)
+    should be true    ${time_gap} <= 40
+    run keyword if    ${duration} != ${0}    Check Duration Gap    ${duration}    ${stats_j['duration_seconds']}    ${f_https}
+    should be true    ${stats_j['L3']['tx_packets_min_size']} >= ${payload_size_min}
+    should be true    ${stats_j['L3']['tx_packets_max_size']}<= ${payload_size_max}
+
+Check Duration Gap
+    [Arguments]    ${exp_dur}    ${actual_dur}    ${f_https}
+    ${duration_gap}=    evaluate    abs(${exp_dur}-${actual_dur})
+    run keyword if    ${f_https}    should be true    ${duration_gap} < ${exp_dur} * 0.5 or ${duration_gap} <= 5
+    ...    ELSE    should be true    ${duration_gap} < ${exp_dur} * 0.1 or ${duration_gap} <= 0.1
+
+Check Analyze Log L3
+    [Arguments]    ${cpe}    ${tag_id}    ${start_time}    ${dst_ip}    ${protocol}    ${pkts}
+    ...    ${payload_size_max}    ${payload_size_min}    ${duration}    ${dst_port}=${None}    ${private}=${False}    ${filter}=${None}
+    ...    ${f_https}=${False}    ${tmp_log}=${analyze_tmp_log}
+    ${num}=    set variable if    '${protocol}' == '6'    3    1
+    ssh_cpe    ${cpe}
+    run keyword if    '${filter}' == '${None}'    write    grep "ne_id" ${tmp_log} | grep '"protocol":${protocol},' | tail -n ${num}
+    ...    ELSE    write    grep "ne_id" ${tmp_log} | grep '"protocol":${protocol},' | grep ${filter} | tail -n ${num}
+    ${res}=    read until prompt
+    ${stats_lines}=    get lines containing string    ${res}    ne_id
+    ${line_list}=    split string    ${stats_lines}    \n
+    : FOR    ${line}    IN    @{line_list}
+    \    ${stats_j}=    evaluate    json.loads('${line}')    json
+    \    ${status}=    run keyword and return status    Search Analyze Log    ${cpe}    ${stats_j}    ${tag_id}
+    \    ...    ${start_time}    ${dst_ip}    ${protocol}    ${payload_size_max}    ${payload_size_min}
+    \    ...    ${duration}    ${dst_port}    ${private}    ${f_https}
+    \    exit for loop if    ${status} == ${True}
+    should be true    ${status}    ${True}
+    run keyword if    ${pkts} != ${None}    should be equal    '${stats_j['L3']['tx_packets_total']}'    '${pkts}'
+    should be true    ${stats_j['L3']['tx_packets_min_size']} * ${stats_j['L3']['tx_packets_total']} <= ${stats_j['L3']['tx_bytes_total']}
+    should be true    ${stats_j['L3']['tx_packets_max_size']} * ${stats_j['L3']['tx_packets_total']} >= ${stats_j['L3']['tx_bytes_total']}
+    run keyword if    ${stats_j['L3']['tx_packets_total']} != ${0} and ${stats_j['L3']['tx_packets_total']} != ${1}    should be true    ${stats_j['L3']['tx_packets_min_size']} <= ${stats_j['L3']['tx_packets_average_size']}
+    run keyword if    ${stats_j['L3']['tx_packets_total']} != ${0} and ${stats_j['L3']['tx_packets_total']} != ${1}    should be true    ${stats_j['L3']['tx_packets_max_size']}>= ${stats_j['L3']['tx_packets_average_size']}
+    should be true    ${stats_j['L3']['tx_packets_min_size']} >= ${payload_size_min}
+    should be true    ${stats_j['L3']['tx_packets_max_size']}<= ${payload_size_max}
+    should be true    ${stats_j['L3']['tx_min_interval']} <= ${stats_j['L3']['tx_average_interval']}
+    should be true    ${stats_j['L3']['tx_max_interval']}>= ${stats_j['L3']['tx_average_interval']}
+    should be true    ${stats_j['L3']['rx_packets_min_size']} * ${stats_j['L3']['rx_packets_total']} <= ${stats_j['L3']['rx_bytes_total']}
+    should be true    ${stats_j['L3']['rx_packets_max_size']} * ${stats_j['L3']['rx_packets_total']} >= ${stats_j['L3']['rx_bytes_total']}
+    run keyword if    ${stats_j['L3']['rx_packets_total']} != ${0} and ${stats_j['L3']['rx_packets_total']} != ${1}    should be true    ${stats_j['L3']['rx_packets_min_size']} <= ${stats_j['L3']['rx_packets_average_size']}
+    run keyword if    ${stats_j['L3']['rx_packets_total']} != ${0} and ${stats_j['L3']['rx_packets_total']} != ${1}    should be true    ${stats_j['L3']['rx_packets_max_size']}>= ${stats_j['L3']['rx_packets_average_size']}
+    run keyword if    ${stats_j['L3']['rx_packets_total']} != ${0} and ${stats_j['L3']['rx_packets_total']} != ${1}    should be true    ${stats_j['L3']['rx_min_interval']} <= ${stats_j['L3']['rx_average_interval']}
+    run keyword if    ${stats_j['L3']['rx_packets_total']} != ${0} and ${stats_j['L3']['rx_packets_total']} != ${1}    should be true    ${stats_j['L3']['rx_max_interval']}>= ${stats_j['L3']['rx_average_interval']}
+    [Return]    ${stats_j}
+
+Check Analyze Log L4
+    [Arguments]    ${stats_j}    ${f_handshake}    ${syn_ack_MSS}    ${closed_by}    ${tx_loss}    ${rx_loss}
+    run keyword if    ${f_handshake} == ${False}    should be equal    ${stats_j['L4_tcp']['server_delay']}    ${-1}
+    ...    ELSE    should not be equal    ${stats_j['L4_tcp']['server_delay']}    ${0}
+    run keyword if    ${stats_j['L3']['rx_packets_total']} != ${0}    should be equal    '${stats_j['L4_tcp']['syn_ack_MSS']}'    '${syn_ack_MSS}'
+    run keyword if    '${closed_by}' == 'TIMEOUT'    should be equal    '${stats_j['L4_tcp']['closed_by']}'    '${closed_by}'
+    ...    ELSE    should be true    '${stats_j['L4_tcp']['closed_by']}' == 'RST' or '${stats_j['L4_tcp']['closed_by']}' == 'FIN'
+    should be true    ${stats_j['L4_tcp']['tx_min_ack_delay']} <= ${stats_j['L4_tcp']['tx_max_ack_delay']}
+    should be true    ${stats_j['L4_tcp']['rx_min_ack_delay']} <= ${stats_j['L4_tcp']['rx_max_ack_delay']}
+    run keyword if    ${tx_loss} != ${0}    should be equal    '${stats_j['L4_tcp']['tx_loss_number']}'    '${tx_loss}'
+    run keyword if    ${rx_loss} != ${0}    should be equal    '${stats_j['L4_tcp']['rx_loss_number']}'    '${rx_loss}'
+
+Check Analyze Log Http Msg
+    [Arguments]    ${msg}    ${start_epoch}    ${duration}    ${method}    ${code}    ${rsp_ver}
+    ...    ${uri}    ${host}    ${is_chunked}    ${content_length}    ${content_type}=${None}
+    # no check for "refer"
+    should be true    ${msg['ts']} > ${start_epoch} and ${msg['ts']} < ${start_epoch} + ${duration} * 1000000
+    should be true    '${msg['method']}' == '${method}'
+    should be true    '${msg['code']}' == '${code}'
+    should be true    '${msg['rsp_version']}' == '${rsp_ver}'
+    should be true    '${msg['uri']}' == '${uri}'
+    should be true    '${msg['host']}' == '${host}'
+    should be true    '${msg['is_chunked']}' == '${is_chunked}'
+    should be true    '${msg['content_length']}' == '${content_length}'
+    run keyword if    '${content_type}' != '${None}'    should be true    '${msg['content_type']}' == '${content_type}'
+    ...    ELSE    should not be true    'content_type' in ${msg}.keys()
+    should be true    'transfer_delay' in ${msg}.keys()
+
+Check Analyze Log Https
+    [Arguments]    ${stats_j}    ${server_name}
+    should be equal    ${stats_j['L7_https']['SNI']}    ${server_name}
+    should be true    ${stats_j['L7_https']['tls_handshake_delay']} > ${0}
+    should be true    ${stats_j['L7_https']['tls_handshake_delay']} < ${1000}
+
+Check Analyze Log Http Long
+    [Arguments]    ${stats_j}    ${http_num}    ${del_num}    ${host}
+    should be true    len(${stats_j['L7_http']}) == ${http_num}
+    ${del_msg}=    evaluate    filter(lambda x:x['method']=='DELETE',${stats_j['L7_http']})
+    should be true    len(${del_msg}) == ${del_num}
+    ${put_msg}=    evaluate    filter(lambda x:x['method']=='PUT',${stats_j['L7_http']})
+    should be true    len(${put_msg}) == ${20}
+    ${post_msg}=    evaluate    filter(lambda x:x['method']=='POST',${stats_j['L7_http']})
+    should be true    len(${post_msg}) == ${20}
+    ${patch_msg}=    evaluate    filter(lambda x:x['method']=='PATCH',${stats_j['L7_http']})
+    should be true    len(${patch_msg}) == ${20}
+    ${get_msg}=    evaluate    filter(lambda x:x['method']=='GET',${stats_j['L7_http']})
+    ${exp_get}=    evaluate    ${40} - ${del_num}
+    should be true    len(${get_msg}) == ${exp_get}
+    run keyword if    ${exp_get} != ${0}    Check Analyze Log Http Msg    ${get_msg[0]}    ${stats_j['start_epoch']}    ${stats_j['duration_seconds']}    GET
+    ...    200    1.1    /    ${host}    ${False}    ${0}
+    Check Analyze Log Http Msg    ${del_msg[3]}    ${stats_j['start_epoch']}    ${stats_j['duration_seconds']}    DELETE    200    1.1
+    ...    /    ${host}    ${False}    ${4}    application/x-www-form-urlencoded
+    Check Analyze Log Http Msg    ${put_msg[10]}    ${stats_j['start_epoch']}    ${stats_j['duration_seconds']}    PUT    200    1.1
+    ...    /    ${host}    ${False}    ${3}    application/x-www-form-urlencoded
+    Check Analyze Log Http Msg    ${post_msg[9]}    ${stats_j['start_epoch']}    ${stats_j['duration_seconds']}    POST    200    1.1
+    ...    /    ${host}    ${False}    ${6}    application/x-www-form-urlencoded
+    Check Analyze Log Http Msg    ${patch_msg[15]}    ${stats_j['start_epoch']}    ${stats_j['duration_seconds']}    PATCH    200    1.1
+    ...    /    ${host}    ${False}    ${3}    application/x-www-form-urlencoded
+
+Check Analyze Log DNS
+    [Arguments]    ${stats_j}    ${dns_server}    ${domain_name}    ${ip}    ${redirct_server}=${None}
+    should be equal    ${stats_j['L7_dns']['dns_server']}    ${dns_server}
+    should be true    '${domain_name}' in ${stats_j['L7_dns']['domain_name']}
+    should be true    '${ip}' in ${stats_j['L7_dns']['A']}
+    run keyword if    '${redirct_server}' != '${None}'    should be equal    ${stats_j['L7_dns']['dns_server']}    ${dns_server}
+
+Get Anacli Report
+    [Arguments]    ${cpe}
+    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    aiwan-ctl --getAnaReport| awk '{print $NF}'    aiwan-ctl --getAnaReport| awk '{print $NF}'
+    close connection
+    ${r_num}=    Get Line    ${res}    -3
+    [Return]    ${r_num}
+
+Check Analyze Log IPSEC
+    [Arguments]    ${stats_j}
+    should be equal    ${stats_j['L7_ipsec']['ike_version']}    ${1}
+    should be true    ${stats_j['L7_ipsec']['exchange_mode']} == ${2} or ${stats_j['L7_ipsec']['exchange_mode']} == ${5}
+    should be true    ${stats_j['L7_ipsec']['life_duration']} >= 0
+    should be true    ${stats_j['L7_ipsec']['hash_algorithm']} == ${1} or ${stats_j['L7_ipsec']['hash_algorithm']} == ${0}
+    should be true    ${stats_j['L7_ipsec']['authentication_method']} == ${1} or ${stats_j['L7_ipsec']['authentication_method']} == ${0}
+    should be true    ${stats_j['L7_ipsec']['DPD']} == ${True} or ${stats_j['L7_ipsec']['DPD']} == ${False}
+    should be true    ${stats_j['L7_ipsec']['Diffie-Hellman_group_description']} != ''
+    should be true    ${stats_j['L7_ipsec']['encryption_algorithm']} != ''
+    should be true    ${stats_j['L7_ipsec']['NAT-D']} == ${True} or ${stats_j['L7_ipsec']['NAT-D']} == ${False}
+    should be true    ${stats_j['L7_ipsec']['NAT-T']} == ${True} or ${stats_j['L7_ipsec']['NAT-T']} == ${False}
+
+Redirect Analyze Log
+    [Arguments]    ${cpe}    ${tmp_file}
+    ssh_cpe    ${cpe}
+    write    killall tail
+    read until prompt
+    write    tail -F ${ana_log} -n 0 > ${tmp_file}
+
+Set Analyze Time
+    [Arguments]    ${cpe}    ${int}
+    ssh_cpe    ${cpe}
+    write cpe cmd    ${cpe}    aiwan-ctl --setAna --anaTimeout=${int}    aiwan-ctl --setAna --anaTimeout=${int}
+    close connection
+
+Try Http Client Test
+    [Arguments]    ${cpe}    ${peer_ip}    ${del_num}=40    ${port}=9700
+    ssh_pc    ${cpe}    tcl_http_client
+    write    ./httpClient.tcl ${peer_ip} ${del_num} ${port}
+    read until prompt
+
+Get CPE Vports Packets
+    [Arguments]    ${cpe}    ${if}    ${index}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    Get_CPE_vport_Json_Result    ${openwrt}    ${pwd}
+    ${vport}=    evaluate    filter(lambda x:(x['if_name'] == '${if}') and (x['index'] == ${index}), ${res['ports']})[0]
+    [Return]    ${vport['tx_packets']}    ${vport['tx_bytes']}    ${vport['rx_packets']}    ${vport['rx_bytes']}
+
+Get CPE interface Packets
+    [Arguments]    ${cpe}    ${if}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    Get_CPE_Interface_Json_Result    ${openwrt}    ${pwd}
+    ${vport}=    evaluate    filter(lambda x:(x['if_name'] == '${if}') and (x['index'] == ${index}), ${res})[0]
+    [Return]    ${res[${if}]['tx_pkts']}    ${res[${if}]['tx_bytes']}    ${res[${if}]['rx_pkts']}    ${res[${if}]['rx_bytes']}
+
+add_loss_on_cpe_wan
+    [Arguments]    ${cpe}    ${index}=1    ${type}=loss    ${num}=10%
+    ${wan_name}=    set variable if    '${index}'=='1'    internet_if    internet_if${index}
+    ssh cpe    ${cpe}
+    write openwrt cmd    tc qdisc add dev &{${cpe}_cpe}[${wan_name}] root netem ${type} ${num}
+    close connection
+
+del_loss_on_cpe_wan
+    [Arguments]    ${cpe}    ${index}=1    ${type}=loss    ${num}=10%
+    ${wan_name}=    set variable if    '${index}'=='1'    internet_if    internet_if${index}
+    ssh cpe    ${cpe}
+    write openwrt cmd    tc qdisc del dev &{${cpe}_cpe}[${wan_name}] root netem ${type} ${num}
+    close connection
+
+Salt Available Check
+    [Arguments]    ${minion_id}
+    SSH Login Salt Master
+    Salt Connection Test    ${minion_id}
+    close connection
+
+Check_CPE_Acl_Enable
+    [Arguments]    ${cpe}    ${priority}    ${action}    ${d_ip}=all    ${protocal}=${None}
+    run keyword if    '${protocal}' != '${None}'    check_acl_protocal_enable    ${cpe}    ${priority}    ${action}    ${protocal}    ${d_ip}
+    ...    ELSE    check_acl_noProtocal_enable    ${cpe}    ${priority}    ${action}    ${d_ip}
+
+check_acl_protocal_enable
+    [Arguments]    ${cpe}    ${priority}    ${action}    ${protocal}    ${d_ip}=all
+    ssh cpe    ${cpe}
+    : FOR    ${p}    IN    @{protocal}
+    \    check_acl_match_num    ${priority}    ${action}    ${d_ip}    ${p}
+    close connection
+
+check_acl_noProtocal_enable
+    [Arguments]    ${cpe}    ${priority}    ${action}    ${d_ip}=all
+    ssh cpe    ${cpe}
+    check_acl_match_num    ${priority}    ${action}    ${d_ip}
+    close connection
+
+check_acl_match_num
+    [Arguments]    ${priority}    ${action}    ${d_ip}=all    ${protocal}=${None}
+    ${res}=    write openwrt cmd    cat /tmp/aiwan_ipt_acl
+    ${acl}=    run keyword if    '${d_ip}' == 'all'    write openwrt cmd    grep -v ' -d \ ' /tmp/aiwan_ipt_acl
+    ...    ELSE    write openwrt cmd    grep \ ' -d ${d_ip}' /tmp/aiwan_ipt_acl
+    ${match_acl}=    run keyword if    '${protocal}' != 'None'   get lines matching pattern    ${acl}    *-p ${protocal} *-j ${action}*
+    ...    ELSE    get lines matching pattern    ${acl}    *-j ${action}*
+    ${match_acl2}=    get lines matching pattern    ${match_acl}    *priority: ${priority}*
+    ${num}=    get line count    ${match_acl2}
+    should be equal as integers    ${num}    ${1}
+
+Change_cpe_4G_usage
+    [Arguments]    ${cpe}    ${status}    ${ifname}=eth1
+    ${cpe_startup_path}=    set variable    /opt/aiwan/config/startup_cpe.json
+    ${sed_cmd}=    set variable if    ${status}    sed -i "/${ifname}/{n;n;n;n;s/normal/backup/}" ${cpe_startup_path}    sed -i "/${ifname}/{n;n;n;n;s/backup/normal/}" ${cpe_startup_path}
+    ${cmd}=    set variable    ${sed_cmd};/etc/init.d/aiwan-cpe restart
+    ${pwd}=    ssh_cpe    ${cpe}
+    Write OpenWrt Cmd    ${cmd}
+    close connection
+
+Change_cpe_collectd_log_level
+    [Arguments]    ${cpe}    ${loglevel}
+    ${collectd_config_path}=    set variable    /etc/config/collectd
+    ${sed_cmd}=    set variable if    ${loglevel}    sed -i 's/notice/info/g' ${collectd_config_path}    sed -i 's/info/notice/g' ${collectd_config_path}
+    ${cmd}=    set variable    ${sed_cmd};/etc/init.d/collectd restart
+    ${pwd}=    ssh_cpe    ${cpe}
+    Write OpenWrt Cmd    ${cmd}
+    close connection
+
+Add_or_update_Aiwan_env_key_value
+    [Arguments]    ${cpe}    ${key}    ${value}
+    ${env_script_path}=    set variable    /opt/aiwan/pkg/add_or_update_aiwan_env.sh
+    ${pwd}=    ssh_cpe    ${cpe}
+    Write OpenWrt Cmd    bash ${env_script_path} ${key} ${value}
+    close connection
+
+check_if_measure_fill
+    [Arguments]    ${cpe}    ${fill}
+    ${pwd}=    ssh_cpe    ${cpe}
+    write    tail -n 10 /opt/aiwan/logs/collectd.log |grep 'localWanId":2'|awk -F[ '{print $3}' |awk -F] '{print $1}' > /tmp/result.log ; a=`cat /tmp/result.log |awk -F, 'END {if ($1==$2 && $1==$10 && length($1)!=0) print 1; else print 0}'`
+    read until prompt
+    write    echo $a
+    ${res}=    read until prompt
+    ${res}=    get line    ${res}    0
+    close connection
+    should be true    ${res} == ${fill}
+
+Add 5-Tuple SPI
+    [Arguments]    ${cpe}    ${src_ip}    ${src_port}    ${dst_domain_ip}    ${dst_port}    ${protocol}
+    ...    ${dns}=192.168.0.1
+    ${tag_name}=    set variable    saas_5_tuple
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    Set global Variable    ${suite_saas_5_tuple_tag_id}    ${tag_id}
+    : FOR    ${index}    ${field}    ${value}    IN ENUMERATE    srcCIDR    ${src_ip}
+    ...    srcPort    ${src_port}    dstDomain    ${dst_domain_ip}    dstPort    ${dst_port}
+    ...    l4proto    ${protocol}
+    \    update company spi tag rule    ${suite_company_id}    ${tag_id}    0    ${field}    ${value}
+    ${agent_codes}=    create list    ${dns}
+    ${indexes}=    create list    0
+    ${ttls}=    create list    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    900    ${agent_codes}    ${indexes}
+    ...    ${ttls}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    ${cpe}    ${dst_domain_ip}    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}
+
+Stop Mwan Service
+    : FOR    ${cpe}    IN    @{stop_mwan_cpe_list}
+    \    ssh_cpe    ${cpe}
+    \    write cpe cmd    ${cpe}    systemctl stop aiwan-mwan    /etc/init.d/aiwan-mwan stop
+    \    close connection
+
+Start Mwan Service
+    : FOR    ${cpe}    IN    @{stop_mwan_cpe_list}
+    \    ssh_cpe    ${cpe}
+    \    write cpe cmd    ${cpe}    systemctl start aiwan-mwan    /etc/init.d/aiwan-mwan start
+    \    close connection
+
+gateway_cpe_wan_link_bad
+    [Arguments]    ${cpe}    ${exp_num}    ${port}=1
+    ${link_ids}    ${links}=    Check End2End Links    ${cpe}    &{nanjing_cpe}[chassis_id]    8
+    ${b_score_list}    ${b_p_list}    ${b_b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    ${wan1_links}    evaluate    filter(lambda x:x['local-wan-id']==${port},${links})
+    ${wan1_links_ids}    EVALUATE    map(lambda x: x['number'],${wan1_links})
+    ${num}=    get_link_qos_num    ${cpe}    ${wan1_links_ids}
+    should be true    ${num}==${exp_num}
+
+Confirm Link Score
+    [Arguments]    ${cpe}    ${dstId}    ${difference}=${200}    ${f_compare}=greater
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${links}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}    ${dstId}
+    ${scores}=    evaluate    map(lambda y: y['score'], ${links})
+    ${diff}=    evaluate    abs(@{scores}[0] - @{scores}[1])
+    run keyword if    '${f_compare}' == 'greater'    should be true    ${diff} > ${difference}
+    ...    ELSE    should be true    ${diff} < ${difference}
+
+block_pop_tunnel
+    [Arguments]    ${pop}    ${sip}    ${dip}    ${block}
+    ${pass}=    ssh pop    ${pop}
+    run keyword if    '${block}'=='block'    Write Sudo Cmd    iptables -I INPUT -p udp -d ${dip} -s ${sip} -j DROP    ${pass}
+    ...    ELSE    Write Sudo Cmd    iptables -D INPUT -p udp -d ${dip} -s ${sip} -j DROP    ${pass}
+    close connection
+
+Update Guangzhou IP
+    ssh_cpe    guangzhou
+    ${ip1}=    Get Nic IP    &{guangzhou_cpe}[internet_if]
+    ${ip2}=    Get Nic IP    &{guangzhou_cpe}[internet_if2]
+    @{list}=    create list    ${ip1}    ${ip2}
+    set to dictionary    ${guangzhou_cpe}    wan_ips    ${list}
+    close connection
+
+check_openwrt_cpe_dhcp
+    [Arguments]    ${cpe}    ${ignore}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    uci show dhcp.lan.ignore    uci show dhcp.lan.ignore    ${pwd}
+    should contain    ${res}    ='${ignore}'
+    close connection

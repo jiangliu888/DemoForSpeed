@@ -1,0 +1,1686 @@
+#!groovy
+
+pipeline {
+    agent { label 'master' }
+    environment {
+        GITREPO = '192.168.0.100:8011'
+        USER = "dev"
+        CREDENTIALSID = "aac47fba-17c9-4426-9f2d-868eaebdc92c"
+        VER = '20.06.0-RC1'
+    }
+    stages {
+        stage ('Build') {
+            parallel {
+        stage('build triton') {
+           agent { label 'dpdk' }
+                steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/triton/*
+                        '''
+                        dir('src/triton') {
+                            git(url: "ssh://${USER}@${GITREPO}/triton", branch: 'master')
+                        }
+                sh '''#!/bin/bash -l
+                    verdate=`date +%Y.%m.%d`
+                    verpath="aiwan-triton_${VER}-${verdate}"
+                    sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-triton_*
+                    sudo rm -rf ${WORKSPACE}/src/triton/build/*
+                    sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                    set -ex
+                    echo "Start to build package"
+                    ret=`sudo docker ps -a | grep triton_deb | wc -l`
+                    if [ $ret -eq 1 ];then
+                        sudo docker rm -vf triton_deb
+                    fi
+                    sudo docker run  -itd --name triton_deb -v $WORKSPACE/src/triton:/root/triton triton_ci
+                    sudo docker exec -w /root/triton -i triton_deb  ./build.sh ${VER}-${verdate}
+                    sudo mv ${WORKSPACE}/src/triton/build/aiwan-triton*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                    sudo docker rm -vf triton_deb
+                    for name in aiwan-triton
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo touch RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                    echo "Finished to build package"
+                '''
+                archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-triton*/*.deb*, src/pkg/aiwan-triton*/RELEASENOTES', fingerprint: true
+            }
+        }
+                stage('build maat') {
+                    agent { label 'master' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        '''
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch: 'master')
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        verpath="aiwan-config_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-config_*
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe-ipk_*
+                        sudo rm -rf ${WORKSPACE}/src/maat/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        docker rm $(docker ps -a -q -f status=exited)
+                        docker run -e CONFIG_VERSION=${VER}-${verdate} -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.0 /home/build/src/maat/ci/build.sh
+                        sudo mv ${WORKSPACE}/src/maat/build/aiwan-config*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-config
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo touch RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-config*/*.deb*, src/pkg/aiwan-config*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+                stage('build planet') {
+                    agent { label 'master' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/planet/*
+                        '''
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch: 'master')
+                        }
+                        dir('src/planet') {
+                            git(url: "ssh://${USER}@${GITREPO}/planet", branch: 'master')
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        verpath3="aiwan-moon_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-moon_*
+                        sudo rm -rf ${WORKSPACE}/src/maat/build/*
+                        sudo rm -rf ${WORKSPACE}/src/planet/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath3}
+                        docker rm $(docker ps -a -q -f status=exited)
+                        docker run -e CONFIG_VERSION=${VER}-${verdate} -e MOON_VERSION=${VER}-${verdate} -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.0 /home/build/src/planet/ci/build.sh
+                        sudo mv ${WORKSPACE}/src/planet/build/aiwan-moon*.deb ${WORKSPACE}/src/pkg/${verpath3}/
+                        for name in aiwan-moon
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo touch RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-moon*/*.deb*,src/pkg/aiwan-moon*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+                stage('build world') {
+                    agent { label 'master' }
+                    steps {
+                    sh '''
+                        sudo rm -rf ${WORKSPACE}/src/world/*
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/nuwa/*
+                        '''
+                        dir('src/world') {
+                            git(url: "ssh://${USER}@${GITREPO}/world", branch: 'master')
+                        }
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch: 'master')
+                        }
+                        dir('src/nuwa') {
+                            git(url: "ssh://${USER}@${GITREPO}/nuwa", branch: 'master')
+                        }
+
+                        sh '''#!/bin/bash
+                           cd ${WORKSPACE}/src/maat
+                           sudo rm -rf build
+                           docker run -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.0 /home/build/src/maat/ci/buildlib.sh
+
+                           cd ${WORKSPACE}/src/nuwa
+                           cp ../world/utils/lwip/lwipopts.h ./lwip/lwip/lwipopts.h
+                           mkdir target
+                           cd target
+                           cmake ..
+                           make
+                           cd ../lwip
+                           make
+                           verdate=`date +%Y.%m.%d`
+                           verpath="aiwan-world_${VER}-${verdate}"
+                           verpath2="aiwan-saas_${VER}-${verdate}"
+                           sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-world_*
+                           sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-saas_*
+                           sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                           sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath2}
+                           cd ${WORKSPACE}/src/world
+                           rm -rf build
+                           mkdir build
+                           cd build
+                           cmake .. -DRELEASE=1 -DCONFIG_VERSION=${VER}-${verdate}
+                           export CONFIG_VERSION=${VER}-${verdate}
+                           make
+                           make deb_package
+                           sudo mv ${WORKSPACE}/src/world/build/aiwan-world*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                           sudo mv ${WORKSPACE}/src/world/build/aiwan-saas*.deb ${WORKSPACE}/src/pkg/${verpath2}/
+                           for name in aiwan-world aiwan-saas
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               sudo touch RELEASENOTES
+                               n=`ls ${name}*.deb`
+                               sudo md5sum ${n} > ${n}.md5
+                            done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-world*/*.deb*,src/pkg/aiwan-world*/RELEASENOTES,src/pkg/aiwan-saas*/*.deb*,src/pkg/aiwan-saas*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+        stage('Build anycast') {
+            agent { label 'master' }
+            steps {
+                     sh '''
+                        sudo rm -rf ${WORKSPACE}/src/world/*
+                        sudo rm -rf ${WORKSPACE}/src/anycast/*
+                        sudo rm -rf ${WORKSPACE}/src/nuwa/*
+                        '''
+                        dir('src/world') {
+                            git(url: "ssh://${USER}@${GITREPO}/world", branch: 'master')
+                        }
+                        dir('src/anycast') {
+                            git(url: "ssh://${USER}@${GITREPO}/anycast", branch: 'master')
+                        }
+                        dir('src/nuwa') {
+                            git(url: "ssh://${USER}@${GITREPO}/nuwa", branch: 'master')
+                        }
+
+                     sh '''
+                     cd ${WORKSPACE}/src/nuwa
+                     rm -rf target
+                     mkdir target
+                      make -f nuwa.mak release
+
+                     cd ${WORKSPACE}/src/world
+                     rm -rf build && mkdir build && cd build
+                     cmake .. -DRELEASE=1
+                     make
+                     verdate=`date +%Y.%m.%d`
+                     verpath="aiwan-anyc_${VER}-${verdate}"
+                     sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-anyc*
+                     sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                     cd ${WORKSPACE}/src/anycast
+                     rm -rf build && mkdir build && cd build
+                     cmake .. -DRELEASE=1 -DCONFIG_VERSION=${VER}-${verdate}
+                     export CONFIG_VERSION=${VER}-${verdate}
+                     make
+                     make deb_package
+                     sudo mv ${WORKSPACE}/src/anycast/build/aiwan-anyc*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                     for name in aiwan-anyc
+                     do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               sudo touch RELEASENOTES
+                               n=`ls ${name}*.deb`
+                               sudo md5sum ${n} > ${n}.md5
+                      done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-anyc*/*.deb*,src/pkg/aiwan-anyc*/RELEASENOTES', fingerprint: true
+                }
+           }
+                stage('build dpdk') {
+                    agent { label 'POP202' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/dpdk
+                        '''
+                        dir('src/dpdk') {
+                            git(url: "ssh://${USER}@${GITREPO}/dpdk", branch: 'planet-v18.11', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''
+                        verdate=`date +%Y.%m.%d`
+                        verpath="aiwan-planet_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-planet_*
+                        sudo rm -rf ${WORKSPACE}/src/dpdk/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        cd ${WORKSPACE}/src/dpdk
+                        git clean -fd
+                        make defconfig
+                        sed -i s/CONFIG_RTE_TABLE_STATS_COLLECT=n/CONFIG_RTE_TABLE_STATS_COLLECT=y/ ./build/.config
+                        make -j12
+                        export RTE_TARGET=build
+                        export RTE_SDK=`pwd`
+                        cd examples/ip_pipeline
+                        make -j12
+                        cd ${WORKSPACE}/src/dpdk
+                        VERSION=${VER}-${verdate} make planet
+                        sudo mv ${WORKSPACE}/src/dpdk/build/aiwan-planet*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-planet
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo touch RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-planet*/*.deb*,src/pkg/aiwan-planet*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+                stage('build satellite') {
+                    agent { label 'cpe-7050' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/satellite
+                        sudo rm -rf ${WORKSPACE}/src/nuwa
+                        sudo rm -rf ${WORKSPACE}/src/l8w8jwt
+                        '''
+
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/satellite') {
+                            git(url: "ssh://${USER}@${GITREPO}/satellite", branch: 'devel-20.06', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/nuwa') {
+                            git(url: "ssh://${USER}@${GITREPO}/nuwa", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/l8w8jwt') {
+                            git(url: "ssh://${USER}@${GITREPO}/l8w8jwt", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        verpath="aiwan-cpe_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe_*
+                        sudo rm -rf ${WORKSPACE}/src/satellite/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        cd ${WORKSPACE}/src/satellite
+                        if ! lsmod | grep -Fwq "netmap"; then
+                            sudo insmod ./deb/netmap.ko
+                        fi
+                        export SATELLITE_VERSION=${VER}-${verdate}
+                        ./docker.sh ${SATELLITE_VERSION}
+                        sudo /opt/configure-network.sh
+                        sudo mv ${WORKSPACE}/src/satellite/build/aiwan-cpe*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-cpe
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo cp  ${WORKSPACE}/src/satellite/changelog RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-cpe*/*.deb*,src/pkg/aiwan-cpe*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+             stage('build satellite openwrt') {
+                    agent { label 'server64' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/satellite
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe*.ipk
+                        sudo rm -rf ${WORKSPACE}/src/nuwa
+                        sudo rm -rf ${WORKSPACE}/src/l8w8jwt
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.132 " rm -rf /home/jenkins/ipk/aiwan-cpe_*.ipk"
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.73 " rm -rf /home/jenkins/ipk/aiwan-cpe_*.ipk"
+                        '''
+
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/satellite') {
+                            git(url: "ssh://${USER}@${GITREPO}/satellite", branch: 'devel-20.06', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/nuwa') {
+                            git(url: "ssh://${USER}@${GITREPO}/nuwa", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/l8w8jwt') {
+                            git(url: "ssh://${USER}@${GITREPO}/l8w8jwt", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        verpath="aiwan-cpe-ipk_${VER}-${verdate}"
+                        verpath_m="aiwan-cpe-mips-ipk_${VER}-${verdate}"
+                        verpath_a="aiwan-cpe-arm-ipk_${VER}-${verdate}"
+                        sudo rm -rf /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-cpe*.ipk
+                        sudo rm -rf /home/sdn/openwrt/mips/512M/callhome/openwrt/bin/packages/mipsel_24kc/aiwan/aiwan-cpe*.ipk
+                        sudo rm -rf /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-cpe*.ipk
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath_m}
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath_a}
+                        cp ${WORKSPACE}/src/satellite/ipk/Makefile /home/sdn/openwrt/aiwan_feed/aiwan-cpe/Makefile
+                        cd  /home/sdn/openwrt/vcpe/callhome/openwrt
+                        export SOURCE_DIR=${WORKSPACE}/src/satellite
+                        export SOURCE_MAAT_DIR=${WORKSPACE}/src/maat
+                        export SATELLITE_VERSION=${VER}-${verdate}
+                        export SOURCE_NUWA_DIR=${WORKSPACE}/src/nuwa
+                        export SOURCE_JWT_DIR=${WORKSPACE}/src/l8w8jwt
+                        make package/aiwan-cpe/{clean,compile} V=sc -j1
+                        make package/index
+                        sudo cp /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-cpe_${SATELLITE_VERSION}_x86_64.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        if [ $? -ne 0 ];then
+                            echo "Copy the ipk failed."
+                            exit 1
+                        fi
+
+                        cd  /home/sdn/openwrt/mips/512M/callhome/openwrt
+                        make package/aiwan-cpe/{clean,compile} V=sc -j1
+                        make package/index
+                        sudo cp /home/sdn/openwrt/mips/512M/callhome/openwrt/bin/packages/mipsel_24kc/aiwan/aiwan-cpe_${SATELLITE_VERSION}_mipsel_24kc.ipk ${WORKSPACE}/src/pkg/${verpath_m}/
+                        if [ $? -ne 0 ];then
+                            echo "Copy the mips ipk failed."
+                            exit 1
+                        fi
+
+                        cd /home/sdn/openwrt/arm/callhome/openwrt
+                        make package/aiwan-cpe/{clean,compile} V=sc -j1
+                        make package/index
+                        sudo cp /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-cpe_${SATELLITE_VERSION}_arm_cortex-a7_neon-vfpv4.ipk ${WORKSPACE}/src/pkg/${verpath_a}/
+                        if [ $? -ne 0 ];then
+                            echo "Copy the arms ipk failed."
+                            exit 1
+                        fi
+
+                        for name in aiwan-cpe-arm-ipk aiwan-cpe-mips-ipk aiwan-cpe-ipk
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo cp  ${WORKSPACE}/src/satellite/changelog RELEASENOTES
+                           if [ "${name}" == "aiwan-cpe-arm-ipk" ]; then
+                               sshpass -p rocks scp -o StrictHostKeyChecking=no *.ipk root@10.192.9.73:/home/jenkins/ipk/
+                           fi
+                           if [ "${name}" == "aiwan-cpe-ipk" ]; then
+                               sshpass -p rocks scp -o StrictHostKeyChecking=no *.ipk root@10.192.9.132:/home/jenkins/ipk/
+                           fi
+                           n=`ls *.ipk`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-cpe-ipk*/*.ipk*,src/pkg/aiwan-cpe-ipk*/RELEASENOTES,src/pkg/aiwan-cpe-mips-ipk*/aiwan-cpe_*_mipsel_24kc.ipk*, src/pkg/aiwan-cpe-mips-ipk*/RELEASENOTES, src/pkg/aiwan-cpe-arm-ipk*/aiwan-cpe_*_arm_cortex-a7_neon-vfpv4.ipk*, src/pkg/aiwan-cpe-arm-ipk*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+                stage('build prism') {
+                    agent { label 'master' }
+
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/prism/*
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.132 " rm -rf /home/jenkins/ipk/*.plg;rm -rf /home/jenkins/ipk/*.json"
+                        '''
+                        dir('src/prism') {
+                            git(url: "ssh://${USER}@${GITREPO}/prism", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        for name in aiwan-manager aiwan-agent-pop aiwan-collector aiwan-agent-cpe-plg aiwan-exporter aiwan-agent-cpe
+                        do
+                           verpath="${name}_${VER}-${verdate}"
+                           sudo rm -rf ${WORKSPACE}/src/pkg/${name}_*
+                           sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        done
+
+                        sudo rm -rf ${WORKSPACE}/src/prism/ci/deb/*.deb
+                        sudo rm -rf ${WORKSPACE}/src/prism/ci/deb/*.ipk
+                        sudo rm -rf ${WORKSPACE}/src/prism/agent/build/*plg
+                        docker rm $(docker ps -a -q -f status=exited)
+                        docker run -e AgentVersionEx=${VER}-${verdate} -e ManagerVersionEx=${VER}-${verdate} -e CollectorVersionEx=${VER}-${verdate} -v ${WORKSPACE}/src/prism:/home/build/src/prism go/build:1.5.0 /home/build/src/prism/ci/build.sh
+                        for name in aiwan-manager aiwan-agent-pop aiwan-collector aiwan-exporter aiwan-agent-cpe
+                        do
+                           verpath="${name}_${VER}-${verdate}"
+                           sudo mv ${WORKSPACE}/src/prism/ci/deb/${name}*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                           if [ "${name}" == "aiwan-agent-cpe" ]; then
+                               sudo mv ${WORKSPACE}/src/prism/ci/deb/${name}*.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                           fi
+                        done
+                        sudo mv ${WORKSPACE}/src/prism/agent/build/*plg ${WORKSPACE}/src/pkg/aiwan-agent-cpe-plg_${VER}-${verdate}/
+                        sudo mv ${WORKSPACE}/src/prism/agent/build/*.json ${WORKSPACE}/src/pkg/aiwan-agent-cpe-plg_${VER}-${verdate}/
+                        sudo cp ${WORKSPACE}/src/prism/agent/deb/changelog ${WORKSPACE}/src/pkg/aiwan-agent-pop/RELEASENOTES
+                        sudo cp ${WORKSPACE}/src/prism/collect/deb/changelog ${WORKSPACE}/src/pkg/aiwan-collector/RELEASENOTES
+                        sudo cp ${WORKSPACE}/src/prism/manager/deb/changelog ${WORKSPACE}/src/pkg/aiwan-manager/RELEASENOTES
+                        for name in aiwan-manager aiwan-agent-pop aiwan-collector aiwan-exporter aiwan-agent-cpe
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                           if [ "${name}" == "aiwan-agent-cpe" ]; then
+                               n=`ls ${name}*.ipk`
+                               sudo md5sum ${n} > ${n}.md5
+                           fi
+                           sudo touch RELEASENOTES
+                        done
+                        for name in aiwan-agent-cpe-plg
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sshpass -p rocks scp -o StrictHostKeyChecking=no *.plg root@10.192.9.132:/home/jenkins/ipk/plg/
+                           sshpass -p rocks scp -o StrictHostKeyChecking=no *.json root@10.192.9.132:/home/jenkins/ipk/
+                           sudo touch RELEASENOTES
+                           plg_n=`ls *plg`
+                           for plg in ${plg_n}
+                           do
+                               sudo md5sum ${plg} > ${plg}.md5
+                           done
+                           json_n=`ls *.json`
+                           for json in ${json_n}
+                           do
+                               sudo md5sum ${json} > ${json}.md5
+                           done
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-exporter*/*.deb*,src/pkg/aiwan-collector*/*.deb*,src/pkg/aiwan-agent-pop*/*.deb*,src/pkg/aiwan-manager*/*.deb*,src/pkg/aiwan-agent-cpe*/*plg*,src/pkg/aiwan-agent-cpe*/*.json*,src/pkg/aiwan-agent-cpe*/*.deb*,src/pkg/aiwan-agent-cpe*/*.ipk*,src/pkg/aiwan-exporter*/RELEASENOTES,src/pkg/aiwan-collector*/RELEASENOTES,src/pkg/aiwan-agent-pop*/RELEASENOTES,src/pkg/aiwan-manager*/RELEASENOTES,src/pkg/aiwan-agent-cpe*/RELEASENOTES,src/pkg/aiwan-agent-cpe*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+            stage('Build log-agent ipk') {
+                   agent { label 'master' }
+                   steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/poseidon
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-log-agent_*
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.132 " rm -rf /home/jenkins/ipk/aiwan-log-agent_*.ipk"
+                        '''
+                        dir('src/poseidon') {
+                            git(url: "ssh://${USER}@${GITREPO}/poseidon", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                       sh '''#!/bin/bash
+                           verdate=`date +%Y.%m.%d`
+                           verpath="aiwan-log-agent_${VER}-${verdate}"
+                           sudo rm -rf /space/ow/openwrt/bin/packages/x86_64/aiwan/aiwan-log-agent_*_x86_64.ipk
+                           sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                           mkdir -p /space/ow/aiwan/cpe/poseidon
+                           cp ${WORKSPACE}/src/poseidon/ipk/Makefile /space/ow/aiwan/cpe/poseidon
+                           cd /space/ow/openwrt
+                           export SOURCE_DIR=${WORKSPACE}/src/poseidon
+                           export POSEIDON_VERSION=${VER}-${verdate}
+                           make package/poseidon/compile V=sc -j1
+                           if [ "$?" -ne 0 ];then
+                               error 'Build aiwan log-agent failure!'
+                           fi
+                               echo "Finished to build aiwan log-agent package"
+                           sudo mv /space/ow/openwrt/bin/packages/x86_64/aiwan/aiwan-log-agent_*_x86_64.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                           for name in aiwan-log-agent
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               sshpass -p rocks scp -o StrictHostKeyChecking=no *.ipk root@10.192.9.132:/home/jenkins/ipk/
+                               touch   RELEASENOTES
+                               n=`ls ${name}*.ipk`
+                               sudo md5sum ${n} > ${n}.md5
+                           done
+                       '''
+                       archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-log-agent*/*.ipk*,src/pkg/aiwan-log-agent*/RELEASENOTES', fingerprint: true
+                   }
+               }
+                stage('Build log-agent deb') {
+                    agent { label 'cpe-7050' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/poseidon
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-log-agent_*
+                        '''
+
+                        dir('src/poseidon') {
+                            git(url: "ssh://${USER}@${GITREPO}/poseidon", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        verpath="aiwan-log-agent_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/poseidon/ci/deb/*.deb
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        sudo docker run -itd --name poseidon poseidon:latest
+                        cd ${WORKSPACE}/src
+                        sudo docker cp poseidon poseidon:/root
+                        sudo docker exec -w /root/poseidon -i poseidon ./build.sh ${VER}-${verdate}
+                        sudo docker cp poseidon:/root/poseidon/ci ${WORKSPACE}/src/poseidon/
+                        sudo mv ${WORKSPACE}/src/poseidon/ci/deb/aiwan-log-agent_*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-log-agent
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           touch   RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        sudo docker rm poseidon -f
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-log-agent*/*.deb*,src/pkg/aiwan-log-agent*/RELEASENOTES', fingerprint: true
+                    }
+                }
+               stage('Build gaea') {
+                   agent { label 'gaea' }
+
+                   steps {
+                        dir('src/gaea') {
+                            git(url: "ssh://${USER}@${GITREPO}/gaea", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash -l
+                           set -ex
+                           verdate=`date +%Y.%m.%d`
+                           verpath="aiwan-gaea_${VER}-${verdate}"
+                           sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-gaea_*
+                           sudo rm -rf ${WORKSPACE}/src/gaea/ci/*.deb
+                           sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                           echo "Start to build gaea package"
+                           cd $WORKSPACE/src/gaea
+                           sudo ./build.sh ${VER}-${verdate}
+                           sudo chown -R airwalk:airwalk ${WORKSPACE}/src/gaea
+                           if [ "$?" -ne 0 ];then
+                               error 'Build aiwan gaea failure!'
+                           fi
+                               echo "Finished to build package"
+                           sudo mv ${WORKSPACE}/src/gaea/ci/aiwan-gaea*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                           for name in aiwan-gaea
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               sudo touch ${WORKSPACE}/src/gaea/ci/upgrade/notes
+                               sudo cp ${WORKSPACE}/src/gaea/ci/upgrade/notes   RELEASENOTES
+                               n=`ls ${name}*.deb`
+                               sudo md5sum ${n} > ${n}.md5
+                           done
+                            '''
+                           archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-gaea*/*.deb*,src/pkg/aiwan-gaea*/RELEASENOTES', fingerprint: true
+                    }
+                }
+                
+                stage('build metis') {
+                    agent { label 'Controller15.2' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/metis
+                        '''
+                        dir('src/metis') {
+                            git(url: "ssh://${USER}@${GITREPO}/metis", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''
+                        verdate=`date +%Y.%m.%d`
+                        verpath="metis_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis-*
+                        sudo rm -rf ${WORKSPACE}/src/metis/metis-*.tar.gz
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis_*/metis-*.tar.gz
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis_*/metis-*.tar.gz.md5
+                        sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        echo "Start to build metis"
+                        sudo chown -R jenkins:jenkins ${WORKSPACE}/src
+                        cd ${WORKSPACE}/src/metis
+                        sudo rm -rf web/node_modules/.cache
+                        sed -i 's/runTests$/#runTests/g' build.sh
+                        bash build.sh ${VER}-${verdate}
+                        if [ $? -ne 0 ];then
+                            echo "build metis failed"
+                            exit 1
+                        fi
+                        sudo mv ${WORKSPACE}/src/metis/metis-*.tar.gz ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in metis
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               touch   RELEASENOTES
+                               n=`ls ${name}*.gz`
+                               sudo md5sum ${n} > ${n}.md5
+                           done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/metis*/*.gz*', fingerprint: true
+                    }
+                }
+
+                stage('build uranus') {
+                    agent { label 'uranus' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/uranus
+                        '''
+                        dir('src/mnemosyne'){
+                            git(url: "ssh://${USER}@${GITREPO}/mnemosyne", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/uranus') {
+                            git(url: "ssh://${USER}@${GITREPO}/uranus", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash -l
+                        verdate=`date +%Y.%m.%d`
+                        verpath="aiwan-uranus_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-uranus_*
+                        sudo rm -rf ${WORKSPACE}/src/uranus/ci/*.deb
+                        sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        sudo cp ${WORKSPACE}/mnemosyne/libs/openflowj-3.2.1.onos.jar /home/jenkins/repo/.m2/repository/org/onosproject/openflowj/3.2.1.onos/
+                        echo "Start build aiwan uranus"
+                        cd $WORKSPACE/src/uranus
+                        chmod a+x ./build
+                        ./build ${VER}-${verdate}
+                        if [ "$?" -ne 0 ];then
+                            error 'Build aiwan uranus failure!'
+                        fi
+                        sudo mv ${WORKSPACE}/src/uranus/ci/aiwan-uranus*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-uranus
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo touch RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-uranus*/*.deb*,src/pkg/aiwan-uranus*/RELEASENOTES', fingerprint: true
+                    }
+                }
+            }
+        }
+
+        stage ('Deploy Uranus and gaea') {
+            parallel {
+                stage ('deploy auth server') {
+                    agent { label 'CONTROLLER114' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-triton*.deb
+                        '''
+                        sh '''#!/bin/bash -l
+                            set -ex
+                            echo "remove auth server"
+                            sudo dpkg -P aiwan-triton
+                            echo "Start to deploy mariadb"
+                            ret=`sudo docker ps -a | grep mariadb | wc -l`
+                            if [ $ret -eq 1 ];then
+                                sudo docker rm -f mariadb
+                            fi
+                            sudo docker run -p 3306:3306 --name mariadb -e MYSQL_ROOT_PASSWORD=root -d mariadb
+                            echo "Finished to deploy mariadb"
+                        '''
+                        copyArtifacts filter: '**/aiwan-triton*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        ver_u=`ls aiwan-triton*`
+                        sudo dpkg -i $ver_u
+                        sudo  sed -i "s/localhost/10.194.20.2/g" /opt/aiwan/triton/config/config.json
+                        sudo systemctl daemon-reload
+                        sudo service aiwan-triton start
+                        sleep 30s
+                        bash /home/sdn/reg_auth.sh
+                        '''
+                    }
+                }
+               stage ('deploy web server metis') {
+                    agent { label 'CONTROLLER114' }
+
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/gz/*.gz
+                        sudo rm -rf /opt/aiwan/metis/*.gz
+                        '''
+
+                        copyArtifacts filter: '**/*.gz', target: 'gz', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/gz
+                        cp *.gz /opt/aiwan/metis/
+                        cd /opt/aiwan/metis/server
+                        echo "Call npm run stop"
+                        sudo npm run stop
+                        if [ $? -ne 0 ];then
+                            echo "stop metis failed"
+                            exit 1
+                        fi
+                        sudo consul kv delete -http-addr=127.0.0.1:8500 -token="c428683c-b77b-d051-9388-5d0bd018adcd" -recurse configs/v1/companies
+                        mongo insight --eval "db.dropDatabase()"
+                        echo "Done the npm stop. Now extract the gz."
+                        cd ..
+                        pwd
+                        tar zxf *.gz
+                        if [ $? -ne 0 ];then
+                            echo "extract metis failed"
+                            exit 1
+                        fi
+                        cd server
+                        sed -i "s/10.184.20.2:6126/10.194.20.2:6126/g" config/config.prod.js
+                        sed -i "s/10.184.20.105:8080/10.194.20.105:8080/g" config/config.prod.js
+                        sed -i "s/10.192.20.15:8500/127.0.0.1:8500/g" config/config.default.js
+                        sed -i 's/\\/v1\\/cpes/\\/v1\\/asset\\/cpes/g' config/config.default.js
+                        sed -i 's/cb44168b-baf7-8f64-a1bb-e0723d7e8943/c428683c-b77b-d051-9388-5d0bd018adcd/g' config/config.default.js
+                        echo "Now start the npm."
+                        sudo npm run start
+                        if [ $? -ne 0 ];then
+                            echo "start metis failed"
+                            exit 1
+                        fi
+                        '''
+                        echo "Done the npm run start."
+                    }
+                }
+                
+                stage ('deploy uranus') {
+                    agent { label 'CONTROLLER114' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-uranus*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-gaea*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-uranus*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: '**/aiwan-gaea*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -P aiwan-gaea
+                        sudo dpkg -P aiwan-uranus
+                        mongo gaea --eval "db.dropDatabase()"
+                        ver_u=`ls aiwan-coeus*`
+                        sudo dpkg -i $ver_u
+                        ver_u=`ls aiwan-uranus*`
+                        sudo dpkg -i $ver_u
+                        ver=`ls aiwan-gaea*`
+                        sudo dpkg -i $ver
+                        sudo sed -i 's/poll-interval = 300000/poll-interval = 30000/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/poll-delay = 120000/poll-delay = 12000/g'  /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/area-selector-delay = 120000/area-selector-delay = 70000/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/area-select-interval = 300/area-select-interval = 10/g'  /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/link-select-interval = 30/link-select-interval = 10/g'  /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/link-select-duration = 3000/link-select-duration = 60/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i '/consul /{n;s/10.192.20.15/10.194.20.2/}' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/fb99bce7-b7bc-c23f-350e-6b9272cf112c/c428683c-b77b-d051-9388-5d0bd018adcd/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i '/influx-db /{n;s/"127.0.0.1"/"10.194.20.105"/}' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/sync-switch = false/sync-switch = true/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/ne-sync-all-interval = 600000/ne-sync-all-interval = 60000/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/reboot-sync-delay = 120000/reboot-sync-delay = 30000/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/connect-timeout-ms = 6000/connect-timeout-ms = 4000/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/manager-ports-default = \\[8970, 8972, 80, 443\\]/manager-ports-default = \\[8970, 8972, 9999\\]/g' /opt/aiwan/gaea/config/application.conf
+                        sudo sed -i 's/manager-ports-aux = \\[8974, 8976, 81, 444\\]/manager-ports-aux = \\[8974, 8976, 9998\\]/g' /opt/aiwan/gaea/config/application.conf
+                        sudo systemctl daemon-reload
+                        sudo cp /opt/aiwan/ca/controller/controller_keystore.jks /opt/aiwan/uranus/config/certs/keystore.jks
+                        sudo cp /opt/aiwan/ca/controller/controller_truststore.jks /opt/aiwan/uranus/config/certs/truststore.jks
+                        sudo service aiwan-uranus start
+                        sudo service aiwan-gaea start
+                        sudo ntpdate 192.168.0.8
+                        sleep 120s
+                        curl -u onos:rocks -H "content-type:application/json" -XPOST http://127.0.0.1:8181/onos/v1/configuration/org.onosproject.openflow.controller.impl.OpenFlowControllerImpl -d @/var/CA/controller/openflow.json
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage ('Deploy') {
+            parallel {
+            stage ('config web') {
+                  agent { label 'CONTROLLER114' }
+                  steps {
+                   sh '''
+                   sudo rm -rf ${WORKSPACE}/src/RoaringDog
+                   '''
+                   dir('src/RoaringDog') {
+                       git(url: "ssh://${USER}@${GITREPO}/RoaringDog", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                   }
+                   sh '''#!/bin/bash
+                   cd  ${WORKSPACE}/src/RoaringDog
+                   sudo docker rm e2etest
+                   sudo docker run -i -v $PWD:/e2e -w /e2e  --name e2etest cypress/forci:v5  sh -c "ln -s /usr/local/lib/node_modules /e2e; cypress run --spec "cypress/integration/st_setup/*test.js"; junit-merge -d cypress/results -o cypress/results/result.xml;xunit-viewer -r cypress/results/result.xml -o cypress/results/result.html;rm -rf /e2e/node_modules"
+                   result=`grep 'type="CypressError' cypress/results/result.xml |wc -l`
+                   if [ $result -ne 0 ]; then
+                       echo "failure: $result"
+                       exit 1
+                   fi
+                   '''
+                    }
+               }
+                stage ('deploy manager') {
+                    agent { label 'MANAGER105' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/*.deb
+                        rm -rf ${WORKSPACE}/deb/*plg
+                        sudo cp /opt/aiwan/manager/config/config.json ${WORKSPACE}/config.json.bak
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-manager*.deb, **/aiwan-config*.deb, **/aiwan-collector*.deb, **/aiwan-cpe*.deb, **/*plg', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo cp aiwan-cpe*.deb /var/sftp/images/
+                        sudo cp aiwan-config*.deb /var/sftp/images/
+                        sudo cp *plg /var/sftp/images/
+                        #sudo dpkg -P aiwan-manager
+                        #if [ $? -ne 0 ];then
+                        #    echo "rm manager failed."
+                        #    exit 1
+                        #fi
+                        #sleep 1
+                        sudo dpkg -i aiwan-manager*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install manager failed."
+                            exit 1
+                        fi
+                        sleep 1
+                        sudo cp ${WORKSPACE}/config.json.bak /opt/aiwan/manager/config/config.json
+                        sudo systemctl restart aiwan-manager
+                        if [ $? -ne 0 ];then
+                            echo "restart manager failed."
+                            exit 1
+                        fi
+                        #sudo dpkg -P aiwan-collector
+                        #if [ $? -ne 0 ];then
+                        #    echo "rm collector failed."
+                        #    exit 1
+                        #fi
+                        #sleep 1
+                        sudo dpkg -i aiwan-collector*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install collector failed."
+                            exit 1
+                        fi
+                        '''
+
+                    }
+                }
+
+                stage ('deploy oss-simulator') {
+                    agent { label 'CONTROLLER114' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-*.deb*
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json*
+                        rm -rf ${WORKSPACE}/deb/*.ipk*
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-config*.deb*, **/aiwan-cpe*.deb*, **/aiwan-cpe*.ipk*, **/aiwan-agent*.deb*, **/aiwan-exporter*.deb*, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        echo "Check the copied artifacts."
+                        ls -l
+                        sudo cp aiwan-cpe*.deb* /home/sdn/simulator/store/test/deb/
+                        sudo cp aiwan-config*.deb* /home/sdn/simulator/store/test/deb/
+                        sudo cp aiwan-cpe*.ipk* /home/sdn/simulator/store/test/deb/
+                        sudo cp *plg* /home/sdn/simulator/store/test/plugin/
+                        sudo cp *.json* /home/sdn/simulator/store/test/plugin/
+                        sudo sed -i 's/"tcp@127.0.0.1:8972"/"tcp@10.194.20.105:8972"/g' /home/sdn/simulator/store/test/plugin/ping.json
+                        sudo sed -i 's/"tcp@127.0.0.1:8970"/"tcp@10.194.20.105:8970","tcp@10.194.20.2:8970"/g' /home/sdn/simulator/store/test/plugin/result.json
+                        sudo sed -i 's/60/10/g' /home/sdn/simulator/store/test/plugin/status.json
+                        sudo sed -i 's/120/20/g' /home/sdn/simulator/store/test/plugin/status.json
+                        cd /home/sdn/simulator/store/test/plugin/
+                        json_n=`ls *.json`
+                        for json in ${json_n}
+                        do
+                            sudo md5sum ${json} > ${json}.md5
+                        done
+                        '''
+                    }
+                }
+
+                stage ('deploy collector') {
+                    agent { label 'CONTROLLER114'}
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-collector*.deb
+                        sudo cp /opt/aiwan/collector/config/config.json ${WORKSPACE}/config.json.bak
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-collector*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -P aiwan-collector
+                        if [ $? -ne 0 ];then
+                            echo "rm collector failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-collector*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install collector failed."
+                            exit 1
+                        fi
+                        sudo cp ${WORKSPACE}/config.json.bak /opt/aiwan/collector/config/config.json
+                        sudo systemctl restart aiwan-collector
+                        if [ $? -ne 0 ];then
+                            echo "restart collector failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                stage ('deploy anycast') {
+                    agent { label 'anycast' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-anyc*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-anyc*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo systemctl stop aiwan-anyc
+
+                        sudo dpkg -r aiwan-anyc
+                        if [ $? -ne 0 ];then
+                            echo "rm anyc failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-anyc*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install anyc failed."
+                            exit 1
+                        fi
+
+                        sudo systemctl start aiwan-anyc.service
+                        '''
+                    }
+                }
+                stage ('deploy pop(dpdk)') {
+                    agent { label 'POP202' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-planet*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-planet*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo systemctl stop aiwan-planet
+
+                        sudo dpkg -r aiwan-planet
+                        if [ $? -ne 0 ];then
+                            echo "rm planet failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-planet*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install planet failed."
+                            exit 1
+                        fi
+
+                        sudo sed -i 's/"101"/"default"/g' /opt/aiwan/planet/install/planet.json
+                        sudo sed -i 's/"102"/"china telecom"/g' /opt/aiwan/planet/install/planet.json
+                        sudo sed -i 's/"103"/"china mobile"/g' /opt/aiwan/planet/install/planet.json
+                        sudo sed -i 's/4789/4790/g' /opt/aiwan/planet/install/render.py
+                        sudo systemctl start aiwan-planet.service
+                        sleep 30s
+                        sudo systemctl restart aiwan-moon.service
+                        sudo systemctl restart aiwan-agent.service
+                        '''
+                    }
+                }
+
+                stage ('deploy pop(world)') {
+                    agent { label 'POP241' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-world*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-saas*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-world*.deb,**/aiwan-saas*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo systemctl stop aiwan-world
+                        sudo systemctl stop aiwan-saas
+
+                        sudo dpkg -r aiwan-world
+                        if [ $? -ne 0 ];then
+                            echo "rm planet failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -r aiwan-saas
+                        if [ $? -ne 0 ];then
+                            echo "rm saas failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-world*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install planet failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-saas*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install saas failed."
+                            exit 1
+                        fi
+                        
+                        cd /opt/aiwan/world/config
+                        sudo ./config.py -m 101,102 -i enp1s0f0,enp1s0f1
+                        sudo systemctl start aiwan-world.service
+                        sudo systemctl start aiwan-saas
+                        sudo systemctl restart aiwan-moon.service
+                        sudo systemctl restart aiwan-agent.service
+                        '''
+                    }
+                }
+                
+                stage ('deploy saas2') {
+                    agent { label 'Saas-Service2' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-saas*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-saas*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo systemctl stop aiwan-saas
+
+                        sudo dpkg -r aiwan-saas
+                        if [ $? -ne 0 ];then
+                            echo "rm saas failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-saas*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install saas failed."
+                            exit 1
+                        fi
+                        
+                        sudo systemctl start aiwan-saas
+                        '''
+                    }
+                }
+
+                stage ('deploy pop(moon)') {
+                    agent { label 'POP202' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-moon*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-agent-pop*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-moon*.deb, **/aiwan-agent-pop*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo dpkg -r aiwan-moon
+                        if [ $? -ne 0 ];then
+                            echo "rm moon failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -P aiwan-agent-pop
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-agent-pop failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-agent-pop*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-agent-pop failed."
+                            exit 1
+                        fi
+                        sudo sed -i 's/114.114.114.114,8.8.8.8/10.194.20.1,10.196.20.1/g' /opt/aiwan/agent/config/planet.json
+                        sudo sed -i 's/:60/:10/g' /opt/aiwan/agent/config/planet.json
+                        sudo sed -i 's/"tcp@127.0.0.1:8972"/"tcp@10.194.20.105:8972"/g' /opt/aiwan/agent/config/ping.json
+                        sudo sed -i 's/"tcp@127.0.0.1:8970"/"tcp@10.194.20.105:8970"/g' /opt/aiwan/agent/config/result.json
+                        sudo service aiwan-agent restart
+
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-moon*.deb
+                        sudo systemctl start netopeer2-server.service
+                        sudo systemctl start aiwan-moon.service
+                        '''
+                    }
+                }
+
+                stage ('deploy pop(moon1)') {
+                    agent { label 'POP241' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-moon*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-agent-pop*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-moon*.deb, **/aiwan-agent-pop*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo dpkg -r aiwan-moon
+                        if [ $? -ne 0 ];then
+                            echo "rm moon failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -P aiwan-agent-pop
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-agent-pop failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-agent-pop*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-agent-pop failed."
+                            exit 1
+                        fi
+                        sudo sed -i 's/114.114.114.114,8.8.8.8/10.194.20.1,10.196.20.1/g' /opt/aiwan/agent/config/planet.json
+                        sudo sed -i 's/:60/:10/g' /opt/aiwan/agent/config/planet.json
+                        sudo sed -i 's/"tcp@127.0.0.1:8972"/"tcp@10.194.20.105:8972"/g' /opt/aiwan/agent/config/ping.json
+                        sudo sed -i 's/"tcp@127.0.0.1:8970"/"tcp@10.194.20.105:8970"/g' /opt/aiwan/agent/config/result.json
+                        sudo service aiwan-agent restart
+
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-moon*.deb
+                        sudo systemctl start netopeer2-server.service
+                        sudo systemctl start aiwan-moon.service
+                        '''
+                    }
+                }
+            }
+        }
+        stage ('Deploy CPE') {
+            parallel {
+                stage ('deploy cpe-sh') {
+                    agent {label 'CPE-SH' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        sudo rm -rf /opt/aiwan/agent/plugins/*plg*
+                        sudo cp ${WORKSPACE}/deb/*plg* /opt/aiwan/agent/plugins/
+                        sudo cp ${WORKSPACE}/deb/plugin.json /opt/aiwan/agent/config/
+                        sudo systemctl restart aiwan-agent.service
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-exporter
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-cpe*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-exporter*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-exporter failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy cpe-bj') {
+                    agent { label 'CPE-BJ' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        sudo rm -rf /opt/aiwan/agent/plugins/*plg*
+                        sudo cp ${WORKSPACE}/deb/*plg* /opt/aiwan/agent/plugins/
+                        sudo cp ${WORKSPACE}/deb/plugin.json /opt/aiwan/agent/config/
+                        sudo systemctl restart aiwan-agent.service
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-exporter
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-cpe*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-exporter*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-exporter failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy cpe-nj') {
+                    agent { label 'CPE-NJ' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        sudo rm -rf /opt/aiwan/agent/plugins/*plg*
+                        sudo cp ${WORKSPACE}/deb/*plg* /opt/aiwan/agent/plugins/
+                        sudo cp ${WORKSPACE}/deb/plugin.json /opt/aiwan/agent/config/
+                        sudo systemctl restart aiwan-agent.service
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-exporter
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-cpe*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-exporter*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-exporter failed."
+                            exit 1
+                        fi
+                        #cd /opt/aiwan/ha/
+                        #sudo ./config.py  --wan enp1s0f0 --wan_ip 172.20.14.32 --wan_peer_ip 172.20.14.22 --wan_vip 172.20.14.25,172.20.14.26 --lan  enp1s0f1 --lan_ip 172.21.14.32 --lan_peer_ip 172.21.14.22 --lan_vip 172.21.14.25 --role master
+                        #sudo cp  aiwan_*.sh /etc/aiwan/ -rf
+                        #sudo cp keepalived.conf /etc/keepalived/
+                        #sudo service aiwan-ha restart
+                        '''
+                    }
+                }
+                stage ('deploy cpe-nj-slave') {
+                    agent { label 'CPE-NJ-SLAVE' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        sudo rm -rf /opt/aiwan/agent/plugins/*plg*
+                        sudo cp ${WORKSPACE}/deb/*plg* /opt/aiwan/agent/plugins/
+                        sudo cp ${WORKSPACE}/deb/plugin.json /opt/aiwan/agent/config/
+                        sudo systemctl restart aiwan-agent.service
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-exporter
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-cpe*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-exporter*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo service aiwan-agent stop
+                        #cd /opt/aiwan/ha/
+                        #sudo ./config.py  --wan enp1s0f0 --wan_ip 172.20.14.22 --wan_peer_ip 172.20.14.32 --wan_vip 172.20.14.25,172.20.14.26 --lan  enp1s0f1 --lan_ip 172.21.14.22 --lan_peer_ip 172.21.14.32 --lan_vip 172.21.14.25 --role slaver
+                        #sudo cp  aiwan_*.sh /etc/aiwan/ -rf
+                        #sudo cp keepalived.conf /etc/keepalived/
+                        #sudo service aiwan-ha restart
+                        '''
+                    }
+                }
+                stage ('deploy cpe-wh-master') {
+                    agent { label 'CPE-WH-M' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-log-agent*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json
+                       '''
+                        copyArtifacts filter: '**/aiwan-log-agent*.deb, **/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        sudo rm -rf /opt/aiwan/agent/plugins/*plg*
+                        sudo cp ${WORKSPACE}/deb/*plg* /opt/aiwan/agent/plugins/
+                        files=`ls /opt/aiwan/agent/plugins/`
+                        sudo cp ${WORKSPACE}/deb/plugin.json /opt/aiwan/agent/config/
+                        sudo systemctl restart aiwan-agent.service
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-exporter
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-log-agent
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-log-agent failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-cpe*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-exporter*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-log-agent_*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-log-agent failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy cpe-openwrt') {
+                    agent {  label 'master' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/erlang
+                        '''
+                        dir('src/erlang') {
+                            git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master')
+                        }
+                        sh '''#!/bin/bash
+                        sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/src/erlang/tests/ci/install_gw_*.sh root@10.192.9.132:/home/jenkins/ipk/
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.132 "cd /home/jenkins/ipk/; sh install_gw_agent.sh; sh install_gw_cpe.sh; sh install_gw_log_agent.sh"
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe aiwan-log-agent in remote cpe failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy cpe-cq') {
+                    agent { label 'CPE-CQ' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-log-agent*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json
+                        '''
+                        copyArtifacts filter: '**/aiwan-log-agent*.deb, **/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        sudo rm -rf /opt/aiwan/agent/plugins/*plg*
+                        sudo cp ${WORKSPACE}/deb/*plg* /opt/aiwan/agent/plugins/
+                        sudo cp ${WORKSPACE}/deb/plugin.json /opt/aiwan/agent/config/
+                        sudo systemctl restart aiwan-agent.service
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-exporter
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-log-agent
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-log-agent failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-cpe*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-exporter*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-log-agent_*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-log-agent failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                stage ('deploy cpe-arm') {
+                    agent {  label 'master' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/erlang
+                        sudo rm -rf ${WORKSPACE}/deb/*arms*
+                        '''
+                        dir('src/erlang') {
+                            git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        copyArtifacts filter: '**/*arm*', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        echo "copy the install script to cpe"
+                        sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/src/erlang/tests/ci/install_gw_cpe.sh root@10.192.9.73:/home/jenkins/ipk/
+                        echo "call the install sh script"
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.73 "cd /home/jenkins/ipk/; sh install_gw_cpe.sh"
+                        '''
+                    }
+                }
+                stage ('deploy cpe-nj-saas') {
+                    agent { label 'CPE-NJ-SAAS' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        rm -rf ${WORKSPACE}/deb/*plg*
+                        rm -rf ${WORKSPACE}/deb/*.json
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl, **/*plg*, **/*.json', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        sudo rm -rf /opt/aiwan/agent/plugins/*plg*
+                        sudo cp ${WORKSPACE}/deb/*plg* /opt/aiwan/agent/plugins/
+                        sudo cp ${WORKSPACE}/deb/plugin.json /opt/aiwan/agent/config/
+                        sudo systemctl restart aiwan-agent.service
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-exporter
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-exporter failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-cpe*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-exporter*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-exporter failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+            }
+        }
+        stage ('test') {
+            agent { label 'master' }
+            steps {
+                sh '''
+                sudo rm -rf ${WORKSPACE}/src/erlang
+                sudo rm -rf ${WORKSPACE}/output
+                '''
+                dir('src/erlang') {
+                    git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master')
+                }
+                sh '''#!/bin/bash
+                set +e
+                export PYTHONPATH=${WORKSPACE}/src/erlang
+                cd ${WORKSPACE}/src/erlang
+                pabot --pabotlib --command pybot -L trace --variablefile erlang/config/testbed.yaml --end-command --processes 3 --outputdir ${WORKSPACE}/pabotLog erlang/parallel_test
+                set -e
+                pybot -L trace --exclude debugORonlyCI --outputdir ${WORKSPACE}/output  --variablefile erlang/config/testbed.yaml erlang/testcase
+                
+                '''
+            }
+        }
+
+    }
+
+    post {
+        always {
+            node ('master') {
+                archiveArtifacts 'output/*'
+                archiveArtifacts 'pabotLog/*'
+            }
+        }
+    }
+}

@@ -1,0 +1,36 @@
+[
+    {
+        "name":"SAAS_8584-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {   "name":"SAAS_8600-4-11",         
+        "port_num":2,         
+        "use_group":false     
+    },
+    {
+        "name":"CR_8550-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {
+        "name":"CR_8566-6-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {
+        "name":"CR_8534-5-1",
+        "port_num":2,
+        "use_group":false
+    },
+    { 
+        "name":"CPE_17026-5-11",
+        "port_num":2,
+        "use_group":false
+    },
+    {
+        "name":"CPE_17043-5-12",
+        "port_num":3,
+        "use_group":false
+    }
+]

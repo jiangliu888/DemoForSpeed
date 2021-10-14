@@ -1,0 +1,12 @@
+*** Settings ***
+Suite Setup       Run Setup Only Once   Suite_SetUp
+Suite Teardown    Run Teardown Only Once    Suit_TearDown
+Resource          ../testcase/resource/UranusKeyword.txt
+Resource          ../testcase/resource/SshKeyword.txt
+Library           pabot.PabotLib
+
+*** Variables ***
+${flow_ttl}       600
+${local_code_g}    134479872
+${domain_wait}    5s
+${CM_code}        11

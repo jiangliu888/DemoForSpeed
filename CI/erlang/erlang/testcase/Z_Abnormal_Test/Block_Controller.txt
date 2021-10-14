@@ -1,0 +1,82 @@
+*** Settings ***
+Suite Setup       Down_Controller_Setup
+Suite Teardown    Up_Controller
+Test Teardown
+Test Timeout      10 minutes
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/uranus/GaeaKeyword.py
+Library           ../../libs/relay/RelayControlCli.py
+Resource          ../resource/SwitchKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${ping_num}       60
+${exec_time}      100
+${check_num}      5
+${office_tcpdump_file}    pop_change_office_no_c.pcap
+${pop_change_ping_log}    Pop_change_512_ping_no_c.log
+${handover_series_log}    handover_series_log
+
+*** Test Cases ***
+Block_Controller_Change_pop_Tunnels
+    [Tags]    SDWANDEV-453
+    block_pop_tunnel    remote    ${remote_pop_running_t["dstIp"]}    ${remote_pop_running_t["srcIp"]}    block
+    ssh_pc    remote
+    Write    rm -rf ${handover_series_log}
+    ${res}=    read until prompt
+    Write    ping -M do -s 512 &{local_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${handover_series_log} 2>&1 &
+    ${res}=    read until prompt
+    run keyword and continue on Failure    Get Valid Ping Logs_loss_less_than    ${handover_series_log}    0
+    close connection
+    ${new_r_t}=    get_running_tunnels_from_pop    remote    1699
+    should not be true    ${new_r_t} == ${remote_pop_running_t['tunnelId']}
+    [Teardown]    block_pop_tunnel    remote    ${remote_pop_running_t["dstIp"]}    ${remote_pop_running_t["srcIp"]}    unblock
+
+Block_Controller_Restart_CPE
+    [Tags]    SDWANDEV-152    SDWANDEV-340    SDWANDEV-285    SDWANDEV-341    SDWANDEV-4310
+    [Setup]
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    Restart_All_CPE
+    sleep    2s
+    Open_Cpe_Debug_Mode
+    wait until keyword succeeds    5x    20ms    Ensure_CPE_Flow_Work    remote    office
+    [Teardown]    Close_Cpe_Debug_Mode
+
+Block_Controller_Restart_Pop
+    [Tags]    SDWANDEV-286    SDWANDEV-285    abnormal
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    Restart_Pop
+    sleep    35s
+    wait until keyword succeeds    5x    1s    Ensure_CPE_Flow_Work    remote    office
+    [Teardown]
+
+*** Keywords ***
+Down_Controller_Setup
+    wait until keyword succeeds    10x    1s    Ensure_CPE_Flow_Work    remote    office
+    get_remote_running_tunnels
+    Block_Controller_Ports
+
+Up_Controller
+    UnBlock_Controller_Ports
+    wait until keyword succeeds    6x    20ms    get_company_sites_with_id    ${suite_company_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    Nping_From_PC    local
+    Nping_From_PC    remote
+    Nping_From_PC    chongqing
+    wait until keyword succeeds    60    2s    All_Of_Devices_Avaiable
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+
+get_remote_running_tunnels
+    ${tunnels}=    get_pop_to_pop_running_tunnels    &{remote_pop}[ne_id]    &{local_pop}[ne_id]
+    ${ts}=    get_ne_tunnels_from_controller_with_dst_ne_id    &{remote_pop}[ne_id]    &{local_pop}[ne_id]
+    ${t}=    evaluate    filter(lambda x:x['tunnelId']==int(${tunnels[0]["tunnelId"]}),${ts})[0]
+    set suite variable    ${remote_pop_running_t}    ${t}
+
+get_running_tunnels_from_pop
+    [Arguments]    ${pop}    ${pri}=1700
+    ssh_pop    ${pop}
+    ${res}=    write sudo cmd    sudo /opt/aiwan/world/bin/ctl.py show rule|grep ${pri}|awk -F "id |stats" '{ print $2 }'
+    ${t_id}=    get line    ${res}    0
+    close connection
+    [Return]    ${t_id}

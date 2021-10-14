@@ -1,0 +1,298 @@
+#!groovy
+
+pipeline {
+    agent {
+        label 'master'
+    }
+    environment {
+        GITREPO = '192.168.0.100:8011'
+        USER = "dev"
+        CREDENTIALSID = "aac47fba-17c9-4426-9f2d-868eaebdc92c"
+        VER = '21.08-RC1'
+    }
+    stages {
+        stage ('Build') {
+            parallel {
+            // first stage build metis
+                stage('build metis') {
+                //   when {
+                //       environment name: 'GERRIT_PROJECT', value: 'metis'
+                //   }
+                    agent {label 'web_ci1'}
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/metis
+                        '''
+                        dir('src/metis') {
+                            git(url: "ssh://${USER}@${GITREPO}/metis", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''
+                        sudo chown -R jenkins:jenkins ${WORKSPACE}/src
+                        cd ${WORKSPACE}/src/metis
+                        sed -i 's/runTests$/#runTests/g' build.sh
+                        bash build.sh $VER
+                        if [ $? -ne 0 ];then
+                            echo "build metis failed"
+                            exit 1
+                        fi
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/metis/metis*.tar.gz', fingerprint: true
+                    }
+                }
+                stage('build thruster') {
+                    agent { label 'master' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/thruster
+                        '''
+                        dir('src/thruster') {
+                            git(url: "ssh://${USER}@${GITREPO}/thruster", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/orion'){
+                            git(url: "ssh://${USER}@${GITREPO}/orion", branch:  'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                        verdate=`date +%Y.%m.%d`
+                        verpath="aiwan-thruster_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-thruster_*
+                        sudo rm -rf ${WORKSPACE}/src/thruster/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        docker rm $(docker ps -a -q -f status=exited)
+                        docker run -e THRUSTER_VERSION=${VER}-${verdate} -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.3 /home/build/src/thruster/ci/build.sh
+                        sudo mv ${WORKSPACE}/src/thruster/ci/deb/aiwan-thruster*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-thruster
+                        do
+                            d="${name}_${VER}-${verdate}"
+                            sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                            cd ${WORKSPACE}/src/pkg/${d}
+                            sudo touch RELEASENOTES
+                            n=`ls ${name}*.deb`
+                            sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/*thruster*/build/create_config,src/pkg/aiwan-thruster_*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+            }
+        }
+
+        stage('deploy metis server'){
+            parallel {
+                stage('deploy web1'){
+                    agent {label 'web_ci1'}
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/gz/*.gz
+                        '''
+                        copyArtifacts filter: '**/*.gz, **/create_config', target: 'gz', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/gz
+                        sudo cp create_config /tmp/
+                        sudo chmod +x /tmp/create_config
+                        sudo rm -f /opt/aiwan/metis/*.gz
+                        sudo cp *.gz /opt/aiwan/metis/
+                        echo "Done the source loading."
+                        cd /opt/aiwan/metis/server
+                        echo "Call npm run stop"
+                        sudo npm run stop
+                        if [ $? -ne 0 ];then
+                            echo "stop metis failed"
+                            exit 1
+                        fi
+                        echo "Done the npm stop. Now extract the gz."
+                        cd ..
+                        pwd
+                        sudo tar zxf *.gz
+                        if [ $? -ne 0 ];then
+                            echo "extract metis failed"
+                            exit 1
+                        fi
+                        cd server
+                        curl --header "X-Consul-Token: 3849ff79-5a3b-a8e9-e9f3-1f0c4882fda5" -X DELETE "http://10.192.19.18:8500/v1/kv/configs/v1/?recurse"
+                        mongo insight --eval "db.dropDatabase()"
+                        sed -i "s#http://[^:]*:8500#http://10.192.19.18:8500#g" config/config.default.js
+                        sed -i "/8500/{n;s#token: '[^']*#token: '3849ff79-5a3b-a8e9-e9f3-1f0c4882fda5#;}" config/config.default.js
+                        sed -i "s#https://tuhao.netgrounder.com#http://10.194.20.105:8000#g" config/config.default.js
+                        sed -i "s/1827564c0e7694dacd01472b2211a653cd236b1f/a4e8759692327b386a32ff2506a4dc717210c043/g" config/config.default.js
+                        sed -i "s/10.184.20.2:6126/127.0.0.1:6126/g"  config/config.prod.js
+                        sed -i "s#http://[^:]*:8000#http://127.0.0.1:8000#g" config/config.prod.js
+                        sed -i 's/metis --sticky/metis --sticky --workers=1/g' package.json
+                        echo "Now start the npm."
+                        sudo npm run start
+                        if [ $? -ne 0 ];then
+                            echo "start metis failed"
+                            exit 1
+                        fi
+                        '''
+                        echo "Done the npm run start."
+                    }
+                }
+                stage('deploy web2'){
+                    agent {label 'web_ci2'}
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/gz/*.gz
+                        '''
+                        copyArtifacts filter: '**/*.gz, **/create_config', target: 'gz', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/gz
+                        sudo cp create_config /tmp/
+                        sudo chmod +x /tmp/create_config
+                        sudo rm -f /opt/aiwan/metis/*.gz
+                        sudo cp *.gz /opt/aiwan/metis/
+                        echo "Done the source loading."
+                        cd /opt/aiwan/metis/server
+                        echo "Call npm run stop"
+                        sudo npm run stop
+                        if [ $? -ne 0 ];then
+                            echo "stop metis failed"
+                            exit 1
+                        fi
+                        echo "Done the npm stop. Now extract the gz."
+                        cd ..
+                        pwd
+                        sudo tar zxf *.gz
+                        if [ $? -ne 0 ];then
+                            echo "extract metis failed"
+                            exit 1
+                        fi
+                        cd server
+                        curl --header "X-Consul-Token: 0760bc6b-c6a7-4a07-e21c-c7ec260ed6bc" -X DELETE "http://10.192.19.55:8500/v1/kv/configs/v1/?recurse"
+                        mongo insight --eval "db.dropDatabase()"
+                        sed -i "s#http://[^:]*:8500#http://10.192.19.55:8500#g" config/config.default.js
+                        sed -i "/8500/{n;s#token: '[^']*#token: '0760bc6b-c6a7-4a07-e21c-c7ec260ed6bc#;}" config/config.default.js
+                        sed -i "s#https://tuhao.netgrounder.com#http://10.194.20.105:8000#g" config/config.default.js
+                        sed -i "s/1827564c0e7694dacd01472b2211a653cd236b1f/a4e8759692327b386a32ff2506a4dc717210c043/g" config/config.default.js
+                        sed -i "s/10.184.20.2:6126/127.0.0.1:6126/g"  config/config.prod.js
+                        sed -i "s#http://[^:]*:8000#http://127.0.0.1:8000#g" config/config.prod.js
+                        sed -i 's/metis --sticky/metis --sticky --workers=1/g' package.json
+                        echo "Now start the npm."
+                        sudo npm run start
+                        if [ $? -ne 0 ];then
+                            echo "start metis failed"
+                            exit 1
+                        fi
+                        '''
+                        echo "Done the npm run start."
+                    }
+                }
+            }
+        }
+
+        // this stage runs end-to-end tests, and each agent uses the workspace
+        // from the previous stage
+        stage('cypress parallel tests') {
+            parallel {
+                stage('web_ci1') {
+                    agent {
+                        label 'web_ci1'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/RoaringDog
+                        sudo rm -rf ${WORKSPACE}/src/erlang
+                        '''
+                        dir('src/RoaringDog') {
+                            git(url: "ssh://${USER}@${GITREPO}/RoaringDog", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/erlang') {
+                            git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        echo "start local server,prepare env"
+                        sh '''#!/bin/bash
+                            set -x
+                            cd  ${WORKSPACE}/src/RoaringDog/test/fakeController
+                            sudo pkill -f FakeControl
+                            python FakeController.py > /dev/null 2>&1 &
+                            sudo pkill -f fakeTick
+                            python fakeTicket.py > /dev/null 2>&1 &
+                            cd  ${WORKSPACE}/src
+                            sed -i 's#CONSUL_HOST = \"http://[^:]*:#CONSUL_HOST = \"http://10.192.19.18:#g' erlang/erlang/libs/variables/InterfacePathVariables.py
+                            sed -i 's#X-Consul-Token\": "[^\"]*#X-Consul-Token\": \"3849ff79-5a3b-a8e9-e9f3-1f0c4882fda5#g' erlang/erlang/libs/variables/InterfacePathVariables.py
+                            sed -i 's#consulToken\": "[^\"]*#consulToken\": \"3849ff79-5a3b-a8e9-e9f3-1f0c4882fda5#g' RoaringDog/cypress.json
+                            sudo docker rm -f e2etest >/dev/null 2>&1 || echo "no container"
+                            sudo docker run -i --shm-size=1g --link mongo -v $PWD:/e2e -v /tmp/create_config:/tmp/create_config -w /e2e  --name e2etest harbor.netgrounder.com:800/cypress/forci:latest  sh -c "ln -s /usr/local/lib/node_modules /e2e/RoaringDog; cd RoaringDog;\
+                            cypress run --spec '**/sdwan-site-test.js,**/sdwan-union-test.js,**/sdwan-c*.js,**/sdwan-firewall-test.js,**/sdwan-d*-test.js'" > RoaringDog/cypress/running.log 2>&1 || echo ""
+                        '''
+                        sh '''
+                        grep -R 'failure message' src/RoaringDog/cypress/results/
+                        if [ $? -ne 1 ];then
+                             echo "some case failed"
+                             exit 1
+                         fi
+                        '''
+                    }
+                }
+		
+		        stage('web_ci2') {
+                    agent {
+                        label 'web_ci2'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/RoaringDog
+                        sudo rm -rf ${WORKSPACE}/src/erlang
+                        '''
+                        dir('src/RoaringDog') {
+                            git(url: "ssh://${USER}@${GITREPO}/RoaringDog", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/erlang') {
+                            git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        echo "start local server,prepare env"
+                        sh '''#!/bin/bash
+                            set -x
+                            cd  ${WORKSPACE}/src/RoaringDog/test/fakeController
+                            sudo pkill -f FakeControl
+                            python FakeController.py > /dev/null 2>&1 &
+                            sudo pkill -f fakeTick
+                            python fakeTicket.py > /dev/null 2>&1 &
+                            cd  ${WORKSPACE}/src
+                            sed -i 's#CONSUL_HOST = \"http://[^:]*:#CONSUL_HOST = \"http://10.192.19.55:#g' erlang/erlang/libs/variables/InterfacePathVariables.py
+                            sed -i 's#X-Consul-Token\": \"[^\"]*#X-Consul-Token\": \"0760bc6b-c6a7-4a07-e21c-c7ec260ed6bc#g' erlang/erlang/libs/variables/InterfacePathVariables.py
+                            sed -i 's#consulToken\": "[^\"]*#consulToken\": \"0760bc6b-c6a7-4a07-e21c-c7ec260ed6bc#g' RoaringDog/cypress.json
+                            sudo docker rm -f e2etest >/dev/null 2>&1 || echo "no container"
+                            sudo docker run -i --shm-size=1g --link mongo -v $PWD:/e2e -v /tmp/create_config:/tmp/create_config -w /e2e --env TZ="Asia/Shanghai"  --name e2etest harbor.netgrounder.com:800/cypress/forci:latest  sh -c "ln -s /usr/local/lib/node_modules /e2e/RoaringDog; cd RoaringDog;\
+                            cypress run --spec '**/sdwan-pop-test.js,**/sdwan-r*.js,**/sdwan-a*-test.js'" > RoaringDog/cypress/running1.log 2>&1 || echo ""
+                        '''
+                        archiveArtifacts 'src/RoaringDog/cypress/results/*, src/RoaringDog/cypress/results/**/*, src/RoaringDog/cypress/videos/**/*, src/RoaringDog/cypress/*.log'
+                        sh '''
+                        sudo sed -i '/127.0.0.1 api.jiandaoyun.com/d' /etc/hosts
+                        grep -R 'failure message' src/RoaringDog/cypress/results/
+                        if [ $? -ne 1 ];then
+                             echo "some case failed"
+                             exit 1
+                         fi
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            node ('web_ci1') {
+                sh '''
+                sudo rm -f results/*
+                sudo rm -f videos/*
+                '''
+                copyArtifacts filter: '**/results-*.xml, **/*.log', target: 'results', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                copyArtifacts filter: '**/*.mp4', target: 'videos', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                sh '''
+                set -x
+                sudo docker rm -f process_result >/dev/null 2>&1 || echo "no container"
+                sudo cp results/results-*.xml src/RoaringDog/cypress/results/
+                sudo cp results/pythoncmd.log src/RoaringDog/cypress/results/pythoncmd1.log
+                sudo cp results/running1.log src/RoaringDog/cypress/results
+                sudo cp src/RoaringDog/cypress/running.log src/RoaringDog/cypress/results
+                sudo cp videos/* src/RoaringDog/cypress/videos/testcase/
+                sudo docker run -i -v /home/jenkins/workspace/web_ci_p:/e2e -w /e2e  --name process_result harbor.netgrounder.com:800/cypress/forci:latest  sh -c "cd /e2e/src/RoaringDog/cypress/;junit-merge -d results -o results/result.xml;xunit-viewer -r results/result.xml -o results/result.html;rm -rf /e2e/src/RoaringDog/node_modules"
+                sudo rm -rf cypress
+                sudo cp -r src/RoaringDog/cypress/ ./
+                '''
+                archiveArtifacts 'cypress/results/result.xml, cypress/results/result.html, cypress/results/python*.log, cypress/results/running*.log, cypress/videos/**/*'
+            }
+        }
+    }
+}

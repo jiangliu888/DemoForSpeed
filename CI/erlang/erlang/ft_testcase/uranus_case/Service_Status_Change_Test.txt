@@ -1,0 +1,140 @@
+*** Settings ***
+Suite Setup       FT_Suit_startup
+Suite Teardown
+Test Setup        TestSetup
+Resource          ../../testcase/resource/UranusKeyword.txt
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/uranus/GaeaKeyword.py
+Resource          ../resource/FtNeKeyword.txt
+Library           ../../libs/fake_ne/interface/FakeNeKeyword.py
+Library           ../../libs/fake_ne/topo/loadTopo.py
+Resource          ../resource/topoKeyword.txt
+Library           ../../libs/manager/ManagerKeyword.py
+Library           ../../libs/prism/PrismKeyword.py
+Variables         ../../config/ft_topo_check/measure_tasks_check.py
+Variables         ../../config/ft_topo_check/flows_check.py
+Library           ../../libs/uranus/interface/EsInterface.py
+
+*** Variables ***
+${service_status_check_time}    60s
+${select_area_wait_timer}    60s
+
+*** Test Cases ***
+Check_Global_Config_From_Consul
+    [Tags]    SDWANDEV-2070
+    Exec_Cmd_on_Controller    docker stop ourea_instance gaea_instance
+    Set_Global_Consul_Config    0
+    Exec_Cmd_on_Controller    docker start ourea_instance gaea_instance
+    wait until keyword succeeds    120    2s    Check_Global_Consul_Config_In_Controller    0
+    delete_gaea_config
+    Set_Global_Consul_Config    1
+    wait until keyword succeeds    10    2s    Check_Global_Consul_Config_In_Controller    1
+    [Teardown]    run keywords    delete_gaea_config
+    ...    AND    Exec_Cmd_on_Controller    docker start ourea_instance gaea_instance
+
+CPE_gw_reselect_Aera_after_gaea_restart
+    [Tags]    SDWANDEV-2295
+    ${switchs}=    create list    8550    8566    8022    8038    16192
+    ...    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2er_2cpe_topo_gw_withMode.json    ${switchs}    ${cpes}
+    register_cpe_config_to_change_ip    16208    enp0s3    9
+    Exec_Cmd_on_Controller    sudo docker restart ourea_instance
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    11
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s4    0
+    ...    4    11
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    12
+    Tunnel_check    ${CR8550_ER8022_CPE16192_2wan_CR8566_ER8038_CPE16208_2wan_with4G_ALL_tunnels}
+    [Teardown]    Case_tear_down
+
+CPE_multiWan_4Gdown_check_tunnel_after_gaea_restart
+    [Tags]    SDWANDEV-2828
+    ${switchs}=    create list    8550    8566    16192    16208
+    ${cpes}=    create list    16192    16208
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_gw_with2Mode.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s3    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16192    enp0s4    0
+    ...    4    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s3    0
+    ...    5    1
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    Ensure_CPE_Wan_Select_Right_EAC    16208    enp0s4    0
+    ...    5    1
+    wait until keyword succeeds    3x    2s    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_2WanPort_gw_ALL_tunnels}
+    register_cpe_config_to_change_4G_status    16192    ${False}
+    wait until keyword succeeds    3x    2s    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_2WanPort_gw_ALL_tunnels}
+    Exec_Cmd_on_Controller    sudo docker restart gaea_instance pontus_instance ourea_instance
+    wait until keyword succeeds    20s    2s    Tunnel_check    ${CR8550_CR8566_CPE16192_CPE16208_2WanPort_gw_ALL_tunnels}
+    [Teardown]    run keywords    Case_tear_down    delete_company1_relation
+
+MongoStoped_start_gaea_check_sevices
+    [Tags]    SDWANDEV-3000    remove
+    Exec_Cmd_on_Controller    sudo docker stop mongo;docker restart ourea_instance
+    wait until keyword succeeds    ${service_status_check_time}    1s    Check_gaea_services_status    0
+    [Teardown]    run keywords    Exec_Cmd_on_Controller    docker start mongo
+    ...    AND    wait until keyword succeeds    ${service_status_check_time}    2s    Check_gaea_services_status    1
+
+ConsulStoped_start_gaea_check_sevices
+    [Tags]    SDWANDEV-3001
+    Exec_Cmd_on_Controller    sudo docker stop node1
+    wait until keyword succeeds    ${service_status_check_time}    1s    Check_gaea_services_status    0
+    [Teardown]    run keywords    Exec_Cmd_on_Controller    sudo docker start node1
+    ...    AND    wait until keyword succeeds    ${service_status_check_time}    2s    Check_gaea_services_status    1
+
+Gaea_running_stop_mongo_check_sevices
+    [Tags]    SDWANDEV-3002
+    Exec_Cmd_on_Controller    sudo docker stop mongo
+    wait until keyword succeeds    ${service_status_check_time}    1s    Check_gaea_services_status    0
+    [Teardown]    run keywords    Exec_Cmd_on_Controller    docker start mongo
+    ...    AND    wait until keyword succeeds    ${service_status_check_time}    2s    Check_gaea_services_status    1
+
+Gaea_running_stop_influxdb_check_sevices
+    [Tags]    SDWANDEV-3003
+    ${switchs}=    create list    8550
+    Start_Ne_with_topo    &{path}[topo]/1cr_topo.json    ${switchs}
+    start_A_Ne    CR    8566    5    1    2
+    Exec_Cmd_on_Controller    sudo docker stop influxdb
+    wait until keyword succeeds    ${service_status_check_time}    1s    Check_gaea_services_status    0
+    stop_A_Ne    CR    8566    5    1
+    [Teardown]    run keywords    Exec_Cmd_on_Controller    docker start influxdb
+    ...    AND    wait until keyword succeeds    60s    1s    Check_influxDB_available
+    ...    AND    wait until keyword succeeds    ${service_status_check_time}    2s    Check_gaea_services_status    1
+    ...    AND    Case_tear_down
+
+Uranus Restart and Health Check
+    [Tags]    SDWANDEV-3131
+    ${switchs}=    create list    8550    8566    8582
+    Start_Ne_with_topo    &{path}[topo]/3cr_topo.json    ${switchs}
+    Measure_tasks_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_CR8566_CR8582_POP_Flows}
+    Exec_Cmd_on_Controller    sudo docker restart controller_instance;./home/jenkins/aohang/prepenvCallCmd
+    wait until keyword succeeds    80    2s    Check Uranus Health Code    ${0}
+    wait until keyword succeeds    15    2s    Check Uranus Health Code
+    Measure_tasks_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_CR8566_CR8582_POP_Flows}
+    [Teardown]    Case_tear_down
+
+*** Keywords ***
+Check Uranus Health Code
+    [Arguments]    ${expected}=${1}
+    ${res}=    get_uranus_health_code
+    should be equal    ${res}    ${expected}
+
+Check_gaea_services_status
+    [Arguments]    ${num}
+    ${status}    ${res}=    run keyword and ignore error    get_gaea_sevices_status
+    run keyword if    '${status}' == 'PASS'    Should Be Equal As Integers    ${res}    ${num}
+    ...    ELSE    Should Be Equal As Integers    ${num}    2
+
+Check_influxDB_available
+    ${conn}=    SSH Login    &{controller_host}[ip]    &{controller_host}[port]    &{controller_host}[user]    &{controller_host}[password]
+    ${cmd}=    Catenate    influx -host    &{manager_server}[influxdb_ip]    -port    &{manager_server}[influxdb_port]    -execute "show databases"
+    write    ${cmd}
+    ${res}=    read until prompt
+    Should not Contain    ${res}    Failed
+    Close Connection

@@ -1,0 +1,141 @@
+*** Settings ***
+Resource          resource/UranusKeyword.txt
+Resource          resource/SaltKeyword.txt
+
+*** Variables ***
+${r_iperf_s_port}    5201
+${l_iperf_s_port}    5202
+
+*** Test Cases ***
+Cname Speedup Web
+    [Tags]    SDWANDEV-3099
+    ${init_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    wget_https_web    dns_server    baidu.com
+    wait until keyword succeeds    5s    200ms    check_saas_packet    ${init_pop_send}    20
+
+Cname Speedup Udp
+    [Tags]    SDWANDEV-3177
+    ${init_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    netcat_udp_test    dns_server
+    wait until keyword succeeds    5s    200ms    check_saas_packet    ${init_pop_send}    1
+
+Cname Speedup iperf
+    [Tags]    SDWANDEV-3178
+    [Setup]    init_iperf_server
+    ${init_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    Iperf3_band_From_PC_With_Port    &{anycast_Service}[ctrl_ip]    dns_server    ${l_iperf_s_port}    5
+    run keyword and continue on failure    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    150    dns_server
+    Iperf3_loss_From_PC_With_Port    &{anycast_Service}[ctrl_ip]    5M    remote_proxy_server    ${r_iperf_s_port}    5    ${True}
+    ...    64
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    1.8    remote_proxy_server
+    ${end_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    ${pkg}=    evaluate    ${end_pop_send}-${init_pop_send}
+    should be true    ${pkg} > 80000
+    [Teardown]    teardown_iperf_server
+
+Cname Speedup Web after change mapping
+    [Tags]    SDWANDEV-3100
+    [Setup]    change_anycast_web_server
+    ${init_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    wget_http_web    dns_server    nginx.com
+    wait until keyword succeeds    5s    200ms    check_saas_packet    ${init_pop_send}    5
+    [Teardown]    teardown_anycast_web_server
+
+Cname Speedup iperf_restart_anycast
+    [Tags]    SDWANDEV-3101
+    [Setup]    init_iperf_server
+    ${init_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    restart_anycast
+    sleep    2
+    Iperf3_band_From_PC_With_Port    &{anycast_Service}[ctrl_ip]    dns_server    ${l_iperf_s_port}    7
+    run keyword and continue on failure    wait until keyword succeeds    8s    1s    check_iperf_band_result_in_pc    120    dns_server
+    ${end_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    ${pkg}=    evaluate    ${end_pop_send}-${init_pop_send}
+    should be true    ${pkg} > 30000
+    [Teardown]    teardown_iperf_server
+
+Cname CLI Test
+    [Tags]    SDWANDEV-3970
+    ${vport_tx_p}    ${vport_tx_b}    ${tunnel_tx_p}    ${tunnel_tx_b}    ${link_tx_p}    ${link_tx_b}    ${bond_tx_p}
+    ...    ${bond_tx_b}=    Get_Anycast_IO_Packet_from_CLI
+    wget_https_web    dns_server    baidu.com
+    wait until keyword succeeds    5s    200ms    Check_Any_CLI_PACKET    ${vport_tx_p}    ${vport_tx_b}    ${tunnel_tx_p}
+    ...    ${tunnel_tx_b}    ${link_tx_p}    ${link_tx_b}    ${bond_tx_p}    ${bond_tx_b}    ${15}
+
+*** Keywords ***
+wget_https_web
+    [Arguments]    ${pc}    ${expect}
+    ssh_pc    ${pc}
+    SSH_Write_Command_And_Check_String    rm index.html;wget https://&{anycast_Service}[ctrl_ip] --no-check-certificate    saved
+    SSH_Write_Command_And_Check_String    grep ${expect} index.html    ${expect}
+    SSH_Write_Command_And_Check_String    rm index.html;wget http://&{anycast_Service}[ctrl_ip]    saved
+    SSH_Write_Command_And_Check_String    grep ${expect} index.html    ${expect}
+    close connection
+
+netcat_udp_test
+    [Arguments]    ${pc}
+    ${sess_server_pc}    ssh login salt master
+    start command    pkill -9 nc
+    start command    echo hello|nc -u -l 5202 -s &{salt-master}[ip]>nc_out.txt&
+    ssh_pc    ${pc}
+    start command    pkill -9 nc
+    SSH_Write_Command_And_Check_String    echo helloback|nc -u &{anycast_Service}[ctrl_ip] 5202    hello
+    close connection
+    switch connection    ${sess_server_pc}
+    SSH_Write_Command_And_Check_String    cat nc_out.txt    helloback
+    SSH_Write_Command_And_Check_String    pkill -9 nc    pkill -9 nc
+    close connection
+
+init_iperf_server
+    ${internet_server_connect} =    Start Iperf Internet Server    ${r_iperf_s_port}
+    ${salt-master_connect}=    Init_Iperfs_Server_In_PC    salt-master    ${l_iperf_s_port}
+    ${server_list}=    create list    ${internet_server_connect}    ${salt-master_connect}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+teardown_iperf_server
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+
+restart_anycast
+    ssh Login    &{anycast_service}[ctrl_ip]    &{anycast_service}[ssh_port]    &{anycast_service}[user]    &{anycast_service}[passwd]
+    write sudo cmd    service aiwan-anyc restart    &{anycast_service}[passwd]
+    close connection
+
+Check_SAAS_PACKET
+    [Arguments]    ${init_pop_send}    ${pkg_num}
+    ${end_pop_send}=    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{Saas_Service1}[ne_id]    ${0}
+    ${pkg}=    evaluate    ${end_pop_send}-${init_pop_send}
+    should be true    ${pkg} >= ${pkg_num}
+
+change_anycast_web_server
+    ssh Login    &{anycast_service}[ctrl_ip]    &{anycast_service}[ssh_port]    &{anycast_service}[user]    &{anycast_service}[passwd]
+    write sudo cmd    sed -i 's/101.133.146.193/192.168.0.100/g' /opt/aiwan/anyc/config/anyc.json    &{anycast_service}[passwd]
+    write sudo cmd    service aiwan-anyc restart    &{anycast_service}[passwd]
+    close connection
+
+teardown_anycast_web_server
+    ssh Login    &{anycast_service}[ctrl_ip]    &{anycast_service}[ssh_port]    &{anycast_service}[user]    &{anycast_service}[passwd]
+    write sudo cmd    sed -i 's/192.168.0.100/101.133.146.193/g' /opt/aiwan/anyc/config/anyc.json    &{anycast_service}[passwd]
+    write sudo cmd    service aiwan-anyc restart    &{anycast_service}[passwd]
+    close connection
+
+wget_http_web
+    [Arguments]    ${pc}    ${expect}
+    ssh_pc    ${pc}
+    SSH_Write_Command_And_Check_String    rm index.html;wget http://&{anycast_Service}[ctrl_ip]    saved
+    SSH_Write_Command_And_Check_String    grep ${expect} index.html    ${expect}
+    close connection
+
+Check_Any_CLI_PACKET
+    [Arguments]    ${vport_tx_p}    ${vport_tx_b}    ${tunnel_tx_p}    ${tunnel_tx_b}    ${link_tx_p}    ${link_tx_b}
+    ...    ${bond_tx_p}    ${bond_tx_b}    ${pkg_num}
+    ${vport_tx_p2}    ${vport_tx_b2}    ${tunnel_tx_p2}    ${tunnel_tx_b2}    ${link_tx_p2}    ${link_tx_b2}    ${bond_tx_p2}
+    ...    ${bond_tx_b2}=    Get_Anycast_IO_Packet_from_CLI
+    ${check_list}=    create list    vport    tunnel    link    bond
+    : FOR    ${check}    IN    @{check_list}
+    \    ${pkg}=    evaluate    ${${check}_tx_p2}-${${check}_tx_p}
+    \    ${byte}=    evaluate    ${${check}_tx_b2}-${${check}_tx_b}
+    should be true    ${pkg} >= ${pkg_num}
+    ${res}=    evaluate    ${byte} >= ${pkg_num}*64
+    should be true    ${res}

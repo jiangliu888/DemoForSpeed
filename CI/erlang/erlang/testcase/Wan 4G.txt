@@ -1,0 +1,110 @@
+*** Settings ***
+Suite Setup       setup
+Suite Teardown    teardown
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+
+*** Variables ***
+${r_iperf_s_port}    5201
+${loss}           0.15
+
+*** Test Cases ***
+4G_default_backup_perpacket
+    [Tags]    SDWANDEV-1630
+    ${link_ids}    ${links}    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    ${b_score_list}    ${b_p_list}    ${b_b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    ${link_ids_n}    ${links_n}=    Check End2End Links    nanjing    &{guangzhou_cpe}[chassis_id]    8
+    ${b_score_list_n}    ${b_p_list_n}    ${b_b_list_n}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids_n}
+    Iperf3_loss_From_PC_With_Port    &{nanjing_pc}[inner_ip]    10M    guangzhou    ${r_iperf_s_port}    5    ${False}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    guangzhou
+    Iperf3_loss_From_PC_With_Port    &{nanjing_pc}[inner_ip]    10M    guangzhou    ${r_iperf_s_port}    5    ${True}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    guangzhou
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    ${score_list_n}    ${p_list_n}    ${b_list_n}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids_n}
+    Local_4G_port_no_Packet    ${b_p_list}    ${p_list}    2    ${links}
+    remote_4G_port_no_Packet    ${b_p_list_n}    ${p_list_n}    2    ${links_n}
+
+4G_default_backup_perpacket_when_performance_test
+    [Tags]    SDWANDEV-1633
+    [Setup]
+    ${link_ids}    ${links}    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    ${b_score_list}    ${b_p_list}    ${b_b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    ${link_ids_n}    ${links_n}=    Check End2End Links    nanjing    &{guangzhou_cpe}[chassis_id]    8
+    ${b_score_list_n}    ${b_p_list_n}    ${b_b_list_n}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids_n}
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    5    ${False}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    64    guangzhou
+    ...    95    ${False}
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    5    ${True}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    68    guangzhou
+    ...    95    ${False}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    ${score_list_n}    ${p_list_n}    ${b_list_n}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids_n}
+    Local_4G_port_no_Packet    ${b_p_list}    ${p_list}    2    ${links}
+    remote_4G_port_no_Packet    ${b_p_list_n}    ${p_list_n}    2    ${links_n}
+    [Teardown]
+
+4G_default_backup_perpacket_When_4G_down_UP
+    [Tags]    SDWANDEV-1634
+    ${link_ids}    ${links}    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    ${b_score_list}    ${b_p_list}    ${b_b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    ${link_ids_n}    ${links_n}=    Check End2End Links    nanjing    &{guangzhou_cpe}[chassis_id]    8
+    ${b_score_list_n}    ${b_p_list_n}    ${b_b_list_n}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids_n}
+    Iperf3_loss_From_PC_With_Port    &{nanjing_pc}[inner_ip]    10M    guangzhou    ${r_iperf_s_port}    5    ${False}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    guangzhou
+    shutdown_guangzhou_wan2_port    ${False}
+    sleep    3s
+    unshutdown_guangzhou_wan2_port    ${False}
+    Iperf3_loss_From_PC_With_Port    &{nanjing_pc}[inner_ip]    10M    guangzhou    ${r_iperf_s_port}    5    ${True}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    guangzhou
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    ${score_list_n}    ${p_list_n}    ${b_list_n}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids_n}
+    Local_4G_port_no_Packet    ${b_p_list}    ${p_list}    2    ${links}
+    remote_4G_port_no_Packet    ${b_p_list_n}    ${p_list_n}    2    ${links_n}
+
+*** Keywords ***
+setup
+    ${office_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${r_iperf_s_port}
+    ${server_list}=    create list    ${office_server_connect}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+teardown
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+
+Local_4G_port_no_Packet
+    [Arguments]    ${b_p_list}    ${p_list}    ${4g_port}    ${links}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}    get index from list    ${links}    ${link}
+    \    run keyword if    "${link['local-wan-id']}" == "${4g_port}"    should be equal    ${b_p_list[${i}]}    ${p_list[${i}]}
+
+remote_4G_port_no_Packet
+    [Arguments]    ${b_p_list}    ${p_list}    ${4g_port}    ${links}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}    get index from list    ${links}    ${link}
+    \    run keyword if    "${link['remote-wan-id']}" == "${4g_port}"    should be equal    ${b_p_list[${i}]}    ${p_list[${i}]}
+
+Local_4G_port_no_Flow_and_All_Good
+    [Arguments]    ${b_f_list}    ${f_list}    ${qos_list}    ${4g_port}    ${links}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}    get index from list    ${links}    ${link}
+    \    run keyword if    "${link['local-wan-id']}" == "${4g_port}"    should be equal    ${b_f_list[${i}]}    ${f_list[${i}]}
+    \    run keyword if    "${link['local-wan-id']}" == "${4g_port}"    should be equal    ${qos_list[${i}]}    good
+
+remote_4G_port_no_Flow_and_All_Good
+    [Arguments]    ${b_f_list}    ${f_list}    ${qos_list}    ${4g_port}    ${links}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}    get index from list    ${links}    ${link}
+    \    run keyword if    "${link['remote-wan-id']}" == "${4g_port}"    should be equal    ${b_f_list[${i}]}    ${f_list[${i}]}
+    \    run keyword if    "${link['remote-wan-id']}" == "${4g_port}"    should be equal    ${qos_list[${i}]}    good
+
+shutdown_guangzhou_wan2_port
+    [Arguments]    ${remote}
+    ${port}=    set variable if    ${remote}    &{mirror_switch_240}[guangzhou_cpe_if2_r]    &{mirror_switch_240}[guangzhou_cpe_if2]
+    ${c_l_id}=    shutdown_switch_port    m_240    ${port}
+    set suite variable    ${s_c_l_id}    ${c_l_id}
+
+unshutdown_guangzhou_wan2_port
+    [Arguments]    ${remote}
+    ${port}=    set variable if    ${remote}    &{mirror_switch_240}[guangzhou_cpe_if2_r]    &{mirror_switch_240}[guangzhou_cpe_if2]
+    unshutdown_switch_port    ${s_c_l_id}    ${port}

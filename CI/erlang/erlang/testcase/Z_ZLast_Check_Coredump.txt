@@ -1,0 +1,22 @@
+*** Settings ***
+Library           ../libs/uranus/UranusKeyword.py
+Library           ../libs/uranus/UranusKeyword.py
+Library           ../libs/configCenter/ConsulKeyword.py
+Resource          resource/SshKeyword.txt
+Resource          resource/SwitchKeyword.txt
+Resource          resource/ManagerKeyword.txt
+Resource          resource/InsightKeyword.txt
+Library           ../libs/insight/InsightKeyword.py
+
+*** Test Cases ***
+Check_coredump
+    [Tags]    SDWANDEV-4499   SanityCheck
+    :FOR    ${cpe}    IN    @{cpe_list}
+    \    run keyword and continue on failure    Check_CPE_No_CoreDump    ${cpe}
+    :FOR    ${cpe}    IN    @{slave_cpe_list}
+    \    run keyword and continue on failure    Check_CPE_No_CoreDump    ${cpe}
+    :FOR    ${POP}    IN    @{world_pop_list}
+    \    run keyword and continue on failure    Check_POP_World_No_CoreDump    ${POP}
+    ${services_list}    combine lists    ${saas_service_list}    ${anyc_service_list}
+    :FOR    ${service}    IN    @{services_list}
+    \    run keyword and continue on failure    Check_Services_No_CoreDump    ${service}

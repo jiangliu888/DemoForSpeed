@@ -1,0 +1,21 @@
+{
+
+	"projectId": "j8g2j8",
+	"baseUrl": "http://172.17.0.1:8089",
+	"env": {
+		"foo": "bar",
+		"some": "value",
+		"consulUrl": "http://172.17.0.1:8500/v1/kv/configs/v1",
+		"consulToken": "3849ff79-5a3b-a8e9-e9f3-1f0c4882fda5"
+	},
+	"ignoreTestFiles": "*utils.js",
+	"pluginsFile": "cypress/plugins",
+	"supportFile": "cypress/support",
+	"fixturesFolder": "cypress/fixtures",
+	"reporter": "cypress-multi-reporters",
+	"reporterOptions": {
+		"configFile": "reporter-config.json"
+	},
+	"viewportHeight":1200,
+	"viewportWidth":2000
+}

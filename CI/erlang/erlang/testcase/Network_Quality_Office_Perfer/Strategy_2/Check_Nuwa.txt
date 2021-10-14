@@ -1,0 +1,76 @@
+*** Settings ***
+Resource          ../../resource/SshKeyword.txt
+
+*** Test Cases ***
+Check_Nuwa_Connection
+    [Tags]    SDWANDEV-2651    SDWANDEV-3077
+    run keyword and ignore error    Ensure_CPE_Flow_Work    local    office
+    Ensure_CPE_Flow_Work    nanjing    office
+    Ensure_CPE_Flow_Work    guangzhou    office
+    run keyword and continue on failure    Ensure_CPE_Flow_Work    local    private
+    : FOR    ${union}    IN    @{union_check_list}
+    \    Check_CPE_Nuwa_connecion    ${union[0]}    ${union[1]}    ${union[2]}
+
+Check_lwip_Stream_Connection
+    [Tags]    SDWANDEV-3153    SDWANDEV-3154    debug
+    ${s_n}    ${s_n_c}    ${s_n_l}    ${s_n_c_l}    Get_CPE_Numa_Stream_Number    wuhan
+    ${s_n_n}    ${s_n_c_n}    ${s_n_l_n}    ${s_n_c_l_n}    Get_CPE_Numa_Stream_Number    nanjing
+    SCP_File_From_H1_To_H2_without_CheckSum    wuhan    &{nanjing_pc}[inner_ip]    DontDelete.o    target.o
+    ${s_n2}    ${s_n_c2}    ${s_n_l2}    ${s_n_c_l2}    Get_CPE_Numa_Stream_Number    wuhan
+    ${s_n_n2}    ${s_n_c_n2}    ${s_n_l_n2}    ${s_n_c_l_n2}    Get_CPE_Numa_Stream_Number    nanjing
+    ${inc}    evaluate    ${s_n_c2}-${s_n_c}
+    ${inc2}    evaluate    ${s_n_c_l2}-${s_n_c_l}
+    ${inc_n}    evaluate    ${s_n_c_n2}-${s_n_c_n}
+    ${inc2_n}    evaluate    ${s_n_c_l_n2}-${s_n_c_l_n}
+    should be true    ${inc}==0
+    should be true    ${inc2}==2
+    should be true    ${inc_n}==0
+    should be true    ${inc2_n}==2
+    should be true    ${s_n_n2}==0
+    should be true    ${s_n2}==0
+    should be true    ${s_n_l2}==0
+    should be true    ${s_n_l_n2}==0
+
+Check_Stream_Connection
+    [Tags]    SDWANDEV-2652
+    ${s_n}    ${s_n_c}    ${s_n_l}    ${s_n_c_l}    Get_CPE_Numa_Stream_Number    nanjing
+    should be true    ${s_n}<=${s_n_c}
+    should be true    ${s_n_l}==0
+    should be true    ${s_n_c_l}==0
+    Nping_From_PC    nanjing    &{wuhan_pc}[inner_ip]    80
+    ${s_n2}    ${s_n_c2}    ${s_n_l2}    ${s_n_c_l2}    Get_CPE_Numa_Stream_Number    nanjing
+    ${inc}    evaluate    ${s_n2}-${s_n}
+    ${inc2}    evaluate    ${s_n_c2}-${s_n_c}
+    should be true    ${inc}<=200
+    should be true    ${inc2}<=200
+    should be true    ${inc2}>=180
+
+Check_lwip_Stream_Connection_When_Scp_Fail
+    [Tags]    SDWANDEV-3155    debug
+    ${s_n}    ${s_n_c}    ${s_n_l}    ${s_n_c_l}    Get_CPE_Numa_Stream_Number    wuhan
+    ${s_n_n}    ${s_n_c_n}    ${s_n_l_n}    ${s_n_c_l_n}    Get_CPE_Numa_Stream_Number    nanjing
+    ssh_pc    wuhan
+    write    scp -P 5022 DontDelete.o &{nanjing_pc}[inner_ip]:~/target.o &
+    close connection
+    ${s_n2}    ${s_n_c2}    ${s_n_l2}    ${s_n_c_l2}    Get_CPE_Numa_Stream_Number    wuhan
+    ${s_n_n2}    ${s_n_c_n2}    ${s_n_l_n2}    ${s_n_c_l_n2}    Get_CPE_Numa_Stream_Number    nanjing
+    ${inc}    evaluate    ${s_n_c2}-${s_n_c}
+    ${inc2}    evaluate    ${s_n_c_l2}-${s_n_c_l}
+    ${inc_n}    evaluate    ${s_n_c_n2}-${s_n_c_n}
+    ${inc2_n}    evaluate    ${s_n_c_l_n2}-${s_n_c_l_n}
+    should be true    ${inc}==0
+    should be true    ${inc2}==1
+    should be true    ${inc_n}==0
+    should be true    ${inc2_n}==1
+    should be true    ${s_n_n2}==0
+    should be true    ${s_n2}==0
+    should be true    ${s_n_l2}==0
+    should be true    ${s_n_l_n2}==0
+
+*** Keywords ***
+Check_CPE_Nuwa_connecion
+    [Arguments]    ${cpe}    ${peer}    ${type}
+    ${ret}    ${r_ret}=    Get_CPE_Nuwa_Connection_Number    ${cpe}    ${peer}
+    ${num}    set variable if    '${type}'=='parallel'    1    2
+    should be true    ${ret} >= ${num}
+    run keyword if    '${type}'!='parallel'    should be true    ${r_ret} == 1

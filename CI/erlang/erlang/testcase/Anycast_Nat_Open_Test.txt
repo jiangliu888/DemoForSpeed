@@ -1,0 +1,113 @@
+*** Settings ***
+Suite Setup       Setup_NatOpen
+Suite Teardown    TearDown_NatOpen
+Resource          resource/UranusKeyword.txt
+Resource          resource/SaltKeyword.txt
+
+*** Variables ***
+${r_iperf_s_port}    5101
+${l_iperf_s_port}    5102
+${domain_wait}    5s
+${flow_ttl}       5
+${ll_iperf_s_port}    5103
+
+*** Test Cases ***
+Open Room Normal
+    [Tags]    SDWANDEV-3282    debug
+    ${room}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+
+PC After CPE in Room Normal
+    [Tags]    SDWANDEV-3280    debug
+    ${room}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip2]    ${l_iperf_s_port}
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip2]    ${l_iperf_s_port}    guangzhou    &{guangzhou_pc}[inner_ip]
+
+different game different room
+    [Tags]    SDWANDEV-3281    debug
+    ${room}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip2]    ${l_iperf_s_port}
+    ${room2}=    create_room    guangzhou    &{salt-master}[ip3]    33335    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    ${room3}=    create_room    guangzhou    &{salt-master}[ip4]    10025    &{guangzhou_pc}[inner_ip]    ${ll_iperf_s_port}
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip2]    ${l_iperf_s_port}
+    check_room_open    guangzhou    ${room2}    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    check_room_open    guangzhou    ${room3}    &{guangzhou_pc}[inner_ip]    ${ll_iperf_s_port}
+
+different CPE different room
+    [Tags]    SDWANDEV-3282    debug
+    ${room}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip2]    ${l_iperf_s_port}
+    ${room2}=    create_room    changsha    &{salt-master}[ip3]    33335    &{changsha_pc}[inner_ip]    ${r_iperf_s_port}
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip2]    ${l_iperf_s_port}
+    check_room_open    changsha    ${room2}    &{changsha_pc}[inner_ip]    ${r_iperf_s_port}
+
+Room Normal After CPE restart
+    [Tags]    SDWANDEV-3283    debug
+    ${room}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    restart_cpe    guangzhou
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+
+ReOpen Room Normal
+    [Tags]    SDWANDEV-3284    debug
+    ${room}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    ${room2}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    should be equal    ${room}    ${room2}
+
+Enter Room Normal
+    [Tags]    SDWANDEV-3285    debug
+    ${room}=    create_room    guangzhou    &{salt-master}[ip3]    33334    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}    dns_server
+    check_room_open    guangzhou    ${room}    &{guangzhou_pc}[inner_ip]    ${r_iperf_s_port}    remote_proxy_server
+
+*** Keywords ***
+Check_NatOpen_Bond_Link
+    : FOR    ${cpe}    IN    @{opwrt_list}
+    \    wait until keyword succeeds    5s    500ms    Check CPE Anyc Bond And Links    ${cpe}    Service
+
+Setup_NatOpen
+    Setup_Nat_Open_ON_ALL_CPE
+    Check_NatOpen_Bond_Link
+    Open_Cpe_Debug_mode_with_natopen_model    guangzhou
+
+TearDown_NatOpen
+    Delete_Nat_Open_On_All_Sites_Company1
+    close_cpe_debug_mode    guangzhou
+
+create_room
+    [Arguments]    ${pc}    ${ip}    ${port}    ${s_ip}    ${s_port}
+    ${sess_server_pc}    ssh login salt master
+    write    pkill -9 nc
+    start command    echo hello|nc -u -l ${port} -v -s ${ip} &>nc_out.txt&
+    ssh_pc    ${pc}
+    write    pkill -9 nc
+    Write    echo helloback|nc -u ${ip} ${port} -s ${s_ip} -p ${s_port}
+    close connection
+    switch connection    ${sess_server_pc}
+    SSH_Write_Command_And_Check_String    cat nc_out.txt    helloback
+    SSH_Write_Command_And_Check_String    pkill -9 nc    pkill -9 nc
+    ${rc}    ${stderr}=    execute command    grep &{anycast_Service}[ctrl_ip] nc_out.txt|awk -F " " '{print $3,$4}'    return_stderr=True
+    should not be empty    ${rc}
+    should be empty    ${stderr}
+    close connection
+    [Return]    ${rc}
+
+check_room_open
+    [Arguments]    ${room_pc}    ${room}    ${s_ip}    ${s_port}    ${player}=salt master    ${player_ip}=None
+    ssh_pc    ${room_pc}    room
+    start command    echo hello|nc -u -l \ -s ${s_ip} -p ${s_port} &>nc_out.txt&
+    run keyword if    '${player}'=='salt master'    ssh login salt master
+    ...    ELSE    ssh_pc    ${player}
+    run keyword if    '${player_ip}'=='None'    SSH_Write_Command_And_Check_String    echo helloback|nc -u ${room}    hello
+    ...    ELSE    SSH_Write_Command_And_Check_String    echo helloback|nc -u ${room} -s ${player_ip}    hello
+    close connection
+    switch connection    room
+    SSH_Write_Command_And_Check_String    cat nc_out.txt    helloback
+    SSH_Write_Command_And_Check_String    pkill -9 nc    pkill -9 nc
+
+check_room_open_iperf
+    [Arguments]    ${room_pc}    ${room}    ${s_ip}    ${s_port}
+    ${room_iperf_server}=    Init_Iperfs_Server_In_PC_with_port    ${room_pc}    ${s_port}
+    ${ps}    Split String    1 ${room}
+    ${p}    get from list    ${ps}    2
+    Iperf3_loss_From_PC_With_Port    &{anycast_Service}[ctrl_ip]    10M    remote_proxy_server    ${p}    5    ${True}
+    ...    64
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    1    remote_proxy_server
+    [Teardown]    Close_Iperfs_Server_In_LocalPC    ${room_iperf_server}

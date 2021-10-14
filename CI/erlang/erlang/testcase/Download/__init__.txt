@@ -1,0 +1,20 @@
+*** Settings ***
+Suite Setup       Suite_Setup
+Suite Teardown    run keywords   Delete_Company_Relation
+...               AND    Teardown_TC_config
+...               AND    Wait Until Keyword Succeeds    15s   5    Confirm Link Score   remote    &{local_cpe}[chassis_id]
+
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+
+*** Variables ***
+${flow_ttl}       600
+${domain_wait}    15s
+${CM_code}        11
+
+*** Keywords ***
+Suite_Setup
+    Create_Company_Relation
+    Clear TC Config
+    Wait Until Keyword Succeeds    20s   5    Confirm Link Score   remote    &{local_cpe}[chassis_id]   ${50}   less
+

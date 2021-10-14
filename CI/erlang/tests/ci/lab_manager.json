@@ -1,0 +1,20 @@
+{
+  "aiwan-config:aiwan-switch": {
+    "resource": {
+      "managers": {
+        "manager": [
+          {
+            "id": 1,
+            "ipv4-address": "10.194.20.105",
+            "ipv4-port": 0
+          },
+          {
+            "id": 2,
+            "ipv4-address": "10.194.20.2",
+            "ipv4-port": 0
+          }
+        ]
+      }
+    }
+  }
+}

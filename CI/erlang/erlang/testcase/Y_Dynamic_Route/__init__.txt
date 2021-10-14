@@ -1,0 +1,20 @@
+*** Settings ***
+Suite Setup       Setup
+Suite Teardown    Teardown
+Resource          ../resource/SshKeyword.txt
+Resource          ../resource/DynamicRouteKeyword.txt
+Library           ../../libs/switch/SwitchKeyword.py
+
+*** Variables ***
+
+*** Keywords ***
+Setup
+    unshutdown_nanjing_ospf_port
+    Wait Until Keyword Succeeds    140    5s    check_register_routing_in_cpe    nanjing
+    check_register_routing_in_cpe    nanchang
+    check_register_routing_in_cpe    wuhan
+
+Teardown
+    shutdown_nanjing_ospf_port
+    ${nets}=    create list    10.196.12.0/24    172.19.15.0/24
+    Wait Until Keyword Succeeds    30s    2s    check_dynamic_routing_not_in_cpe    wuhan    ${nets}

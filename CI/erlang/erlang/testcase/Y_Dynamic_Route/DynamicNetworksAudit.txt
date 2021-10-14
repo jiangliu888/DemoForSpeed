@@ -1,0 +1,89 @@
+*** Settings ***
+Suite Setup
+Suite Teardown
+Resource          ../resource/SshKeyword.txt
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/DynamicRouteKeyword.txt
+
+*** Variables ***
+${dyn_route_wait}    5s
+
+*** Test Cases ***
+Dynamic_routing_report_filter
+    [Tags]    SDWANDEV-4454
+    ${nets}=    create list    1.1.1.1/32
+    ${nets2}=    create list    10.0.200.0/24
+    ${peers}=    set variable    &{nanjing_cpe}[office_peer]
+    : FOR    ${cpe}    IN    @{peers}
+    \    run keyword if    '${cpe}'=='nanchang'    check_dynamic_endpoint_not_in_cpe    ${cpe}    10.0.200.0/24    &{nanjing_cpe}[chassis_id]
+    \    ...    ELSE    check_dynamic_routing_not_in_cpe    ${cpe}    ${nets2}
+    \    check_dynamic_routing_not_in_cpe    ${cpe}    ${nets}
+    ${nets}=    create list    172.19.17.0/24
+    ${peers}=    set variable    &{nanchang_cpe}[office_peer]
+    : FOR    ${cpe}    IN    @{peers}
+    \    check_dynamic_routing_in_cpe    nanjing    ${nets}
+
+Dynamic_routing_receive_filter
+    [Tags]    SDWANDEV-4455
+    ${nets}=    create list    10.194.15.0/24
+    check_dynamic_routing_not_in_cpe    nanchang    ${nets}
+    ${nets}=    create list    10.196.12.0/24
+    check_dynamic_routing_not_in_cpe    nanchang    ${nets}
+
+ospf_routing_on_ospf_peer
+    [Tags]    SDWANDEV-4463
+    ${nets}=    create list    172.19.14.0/24    172.19.15.0/24    10.0.200.0/24    172.20.15.0/24    172.21.15.0/24
+    check_ospf_routing_from_pc    nanchang    ${nets}
+
+Mulit_Dynamic_routing_report
+    [Tags]    SDWANDEV-4452
+    check_dynamic_endpoint_in_cpe_with_metric    nanchang    172.19.15.0/24    &{nanjing_cpe}[chassis_id]    100
+    check_dynamic_endpoint_in_cpe_with_metric    nanchang    172.19.15.0/24    &{wuhan_cpe}[chassis_id]    200
+    ${r_nj_bond}=    get_e2e_dest_site_bond    &{nanchang_cpe}[chassis_id]    &{nanjing_cpe}[chassis_id]
+    ${r_wh_bond}=    get_e2e_dest_site_bond    &{nanchang_cpe}[chassis_id]    &{wuhan_cpe}[chassis_id]
+    ${bonds}=    create list    ${r_nj_bond[0]['portNumber']}    ${r_wh_bond[0]['portNumber']}
+    Check_CPE_Flow_Table0_IP_with_Mulit_Bonds    172.19.15.0/24    &{nanchang_cpe}[chassis_id]    ${bonds}
+
+CPE_regsiter_ospf_type5_nets
+    [Tags]    SDWANDEV-4451    debug
+    [Setup]    route_on_nanchang_pc    add
+    ${reg}=    evaluate    [{'dstCidr':"172.19.88.89/32","priority":10}]
+    Wait Until Keyword Succeeds    5s    200ms    check_register_routing_in_cpe    nanchang    ${reg}
+    [Teardown]    route_on_nanchang_pc    del
+
+When_nanjing_cpe_down_nexthop_wuhan
+    [Tags]    SDWANDEV-4443    SDWANDEV-4464
+    ${should_contain}=    create list    172.19.17.2    172.21.14.25    172.21.14.1    10.0.200.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    5s    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    shutdown_nanjing
+    Wait Until Keyword Succeeds    2s    200ms    check_dynamic_routing_endpoint_status_in_cpe    nanchang    &{nanjing_cpe}[chassis_id]    ${false}
+    check_dynamic_routing_endpoint_status_in_cpe    wuhan    &{nanjing_cpe}[chassis_id]    ${false}
+    ${should_contain}=    create list    172.19.17.2    172.21.15.27    172.21.15.1    &{wuhan_pc}[inner_ip]
+    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    [Teardown]    run keywords    unshutdown_nanjing
+    ...    AND    Wait Until Keyword Succeeds    30    200ms    check_dynamic_routing_endpoint_status_in_cpe    nanchang
+    ...    &{nanjing_cpe}[chassis_id]    ${true}
+
+When_nanjing_cpe_wan_down_nexthop_wuhan
+    [Tags]    SDWANDEV-4445
+    ${should_contain}=    create list    172.19.17.2    172.21.14.25    172.21.14.1    10.0.200.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    10s    500ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    shutdown_nanjing_port    &{nanjing_switch}[nanjing_wan_if]
+    ${should_contain}=    create list    172.19.17.2    172.21.15.27    172.21.15.1    &{wuhan_pc}[inner_ip]
+    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    [Teardown]    run keywords    unshutdown_nanjing_port    &{nanjing_switch}[nanjing_wan_if]
+    ...    AND    Wait Until Keyword Succeeds    30s    200ms    check_dynamic_routing_endpoint_status_in_cpe    nanchang
+    ...    &{nanjing_cpe}[chassis_id]    ${true}
+
+When_nanjing_wuhan_ospf_down_nexthop_wuhan
+    [Tags]    SDWANDEV-4444
+    ${should_contain}=    create list    172.19.17.2    172.21.14.25    172.21.14.1    10.0.200.1    &{wuhan_pc}[inner_ip]
+    Wait Until Keyword Succeeds    5s    200ms    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    shutdown_nanjing_port    &{nanjing_switch}[ospf_if]
+    ${should_contain}=    create list    172.19.17.2    172.21.15.27    172.21.15.1    &{wuhan_pc}[inner_ip]
+    traceroute_on_pc    nanchang    &{wuhan_pc}[inner_ip]    ${should_contain}
+    [Teardown]    run keywords    unshutdown_nanjing_port    &{nanjing_switch}[ospf_if]
+    ...    AND    Wait Until Keyword Succeeds    ${dyn_route_wait}    200ms    check_dynamic_routing_endpoint_status_in_cpe    nanchang
+    ...    &{wuhan_cpe}[chassis_id]    ${true}
+
+*** Keywords ***

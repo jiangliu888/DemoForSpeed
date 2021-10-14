@@ -1,0 +1,1961 @@
+#!groovy
+
+pipeline {
+    agent { label 'master' }
+    environment {
+        GITREPO = '192.168.0.100:8011'
+        USER = "dev"
+        CREDENTIALSID = "aac47fba-17c9-4426-9f2d-868eaebdc92c"
+        VER = '21.08-RC1-IT'
+    }
+    stages {
+        stage ('Build') {
+            parallel {
+                stage('build maat') {
+                    agent { label 'master' }
+                    when {
+                        anyOf {
+                            environment name: 'GERRIT_PROJECT', value: 'satellite';
+                            environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                        }
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        '''
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch: 'devel-21.08')
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        verpath="aiwan-config_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-config_*
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe-ipk_*
+                        sudo rm -rf ${WORKSPACE}/src/maat/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        docker run -e CONFIG_VERSION=${VER}-${verdate} -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.3 /home/build/src/maat/ci/build.sh
+                        sudo mv ${WORKSPACE}/src/maat/build/aiwan-config*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-config
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo touch RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-config*/*.deb*, src/pkg/aiwan-config*/RELEASENOTES', fingerprint: true
+                    }
+                }
+                
+                stage('build triton') {
+                   agent { label 'dpdk' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'triton';
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/triton/*
+                        '''
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/triton']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/triton']]
+                         ])
+                        sh '''#!/bin/bash -l
+                            verdate=`date +%Y.%m.%d.%H%M%S`
+                            verpath="aiwan-triton_${VER}-${verdate}"
+                            sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-triton_*
+                            sudo rm -rf ${WORKSPACE}/src/triton/build/*
+                            sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                            set -ex
+                            echo "Start to build package"
+                            ret=`sudo docker ps -a | grep triton_deb_aiwan_test | wc -l`
+                            if [ $ret -eq 1 ];then
+                                sudo docker rm -vf triton_deb_aiwan_test
+                            fi
+                            sudo docker run  -itd --name triton_deb_aiwan_test -v $WORKSPACE/src/triton:/root/triton triton_ci
+                            sudo docker exec -w /root/triton -i triton_deb_aiwan_test  ./build.sh ${VER}-${verdate}
+                            sudo mv ${WORKSPACE}/src/triton/build/aiwan-triton*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                            sudo docker rm -vf triton_deb_aiwan_test
+                            for name in aiwan-triton
+                                do
+                                   d="${name}_${VER}-${verdate}"
+                                   sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                                   cd ${WORKSPACE}/src/pkg/${d}
+                                   sudo touch RELEASENOTES
+                                   n=`ls ${name}*.deb`
+                                   sudo md5sum ${n} > ${n}.md5
+                                done
+                            echo "Finished to build package"
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-triton*/*.deb*, src/pkg/aiwan-triton*/RELEASENOTES', fingerprint: true
+                    }
+                }
+                
+                stage('build satellite openwrt') {
+                    agent { label 'server64' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'satellite';
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/satellite
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe-ipk*
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-mwan*ipk*
+                        sudo rm -rf ${WORKSPACE}/src/nuwa
+                        sudo rm -rf ${WORKSPACE}/src/l8w8jwt
+                        '''
+
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch:'devel-21.08', credentialsId: "${CREDENTIALSID}")
+                        }
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/satellite']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/satellite']]
+                         ])
+                        dir('src/nuwa') {
+                            git(url: "ssh://${USER}@${GITREPO}/nuwa", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/l8w8jwt') {
+                            git(url: "ssh://${USER}@${GITREPO}/l8w8jwt", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        verpath="aiwan-cpe-ipk_${VER}-${verdate}"
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        sudo chmod 777 -R ${WORKSPACE}/src/pkg/${verpath}
+                        
+                        export SOURCE_DIR=${WORKSPACE}/src/satellite
+                        export SOURCE_MAAT_DIR=${WORKSPACE}/src/maat
+                        export SATELLITE_VERSION=${VER}-${verdate}
+                        export SOURCE_NUWA_DIR=${WORKSPACE}/src/nuwa
+                        export SOURCE_JWT_DIR=${WORKSPACE}/src/l8w8jwt
+                        
+                        #cd ${WORKSPACE}/src/nuwa
+                        #git reset --hard 92f314d3
+                        #git reset --hard ab3182077fd8d8fdeb033b0156700f6e1f38804c
+                        
+                        cp -f ${WORKSPACE}/src/satellite/ipk/Makefile /home/sdn/openwrt/aiwan_feed/aiwan-cpe/Makefile
+                        #sudo rm -rf /home/sdn/openwrt/mips/512M/callhome/openwrt/bin/packages/mipsel_24kc/aiwan/aiwan-cpe*.ipk
+                        #sudo rm -rf /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-mwan*.ipk
+                        #sudo rm -rf /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-mwan*.ipk
+                        #cd /home/sdn/openwrt/mips/512M/callhome/openwrt
+                        #make V=s package/aiwan-cpe/{clean,compile} STRIP=/bin/true -j1
+                        #make package/index
+                        #cp /home/sdn/openwrt/mips/512M/callhome/openwrt/bin/packages/mipsel_24kc/aiwan/aiwan-cpe_${SATELLITE_VERSION}_mipsel_24kc.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        #if [ $? -ne 0 ];then
+                        #    echo "Copy the mips ipk failed."
+                        #    exit 1
+                        #fi
+                        
+                        sudo rm -rf /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-cpe*.ipk
+                        cd /home/sdn/openwrt/vcpe/callhome/openwrt
+                        make V=s package/aiwan-cpe/{clean,compile} STRIP=/bin/true -j1
+                        make package/index
+                        sudo cp /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-cpe_${SATELLITE_VERSION}_x86_64.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        sudo cp /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-mwan_${SATELLITE_VERSION}_x86_64.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        if [ $? -ne 0 ];then
+                            echo "Copy the x86 ipk failed."
+                            exit 1
+                        fi
+                        
+                        # For new ARM
+                        cd /home/sdn/openwrt/arm/callhome/openwrt
+                        make V=s package/aiwan-cpe/{clean,compile} STRIP=/bin/true -j1
+                        make package/index
+                        cp /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-cpe_${SATELLITE_VERSION}_arm_cortex-a7_neon-vfpv4.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        sudo cp /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-mwan_${SATELLITE_VERSION}_arm_cortex-a7_neon-vfpv4.ipk ${WORKSPACE}/src/pkg/${verpath}/
+
+                        for file in ${WORKSPACE}/src/pkg/${verpath}/*
+                        do
+                           sudo md5sum ${file} > ${file}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-cpe-ipk*/*.ipk*,src/pkg/aiwan-mwan*/*.ipk*,src/pkg/aiwan-cpe-ipk*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+                stage('build satellite openwrt (nuwa)') {
+                    agent { label 'server64' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/satellite
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe-ipk*
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-mwan*ipk*
+                        sudo rm -rf ${WORKSPACE}/src/nuwa
+                        sudo rm -rf ${WORKSPACE}/src/l8w8jwt
+                        '''
+
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch:'devel-21.08', credentialsId: "${CREDENTIALSID}")
+                        }
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/nuwa']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/nuwa']]
+                         ])
+                        dir('src/satellite') {
+                            git(url: "ssh://${USER}@${GITREPO}/satellite", branch: 'devel-21.08', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/l8w8jwt') {
+                            git(url: "ssh://${USER}@${GITREPO}/l8w8jwt", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        verpath="aiwan-cpe-ipk_${VER}-${verdate}"
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        sudo chmod 777 -R ${WORKSPACE}/src/pkg/${verpath}
+                        
+                        export SOURCE_DIR=${WORKSPACE}/src/satellite
+                        export SOURCE_MAAT_DIR=${WORKSPACE}/src/maat
+                        export SATELLITE_VERSION=${VER}-${verdate}
+                        export SOURCE_NUWA_DIR=${WORKSPACE}/src/nuwa
+                        export SOURCE_JWT_DIR=${WORKSPACE}/src/l8w8jwt
+                        
+                        cp -f ${WORKSPACE}/src/satellite/ipk/Makefile /home/sdn/openwrt/aiwan_feed/aiwan-cpe/Makefile
+                        #sudo rm -rf /home/sdn/openwrt/mips/512M/callhome/openwrt/bin/packages/mipsel_24kc/aiwan/aiwan-cpe*.ipk
+                        #sudo rm -rf /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-mwan*.ipk
+                        #sudo rm -rf /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-mwan*.ipk
+                        #cd /home/sdn/openwrt/mips/512M/callhome/openwrt
+                        #make V=s package/aiwan-cpe/{clean,compile} STRIP=/bin/true -j1
+                        #make package/index
+                        #cp /home/sdn/openwrt/mips/512M/callhome/openwrt/bin/packages/mipsel_24kc/aiwan/aiwan-cpe_${SATELLITE_VERSION}_mipsel_24kc.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        #if [ $? -ne 0 ];then
+                        #    echo "Copy the mips ipk failed."
+                        #    exit 1
+                        #fi
+                        
+                        sudo rm -rf /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-cpe*.ipk
+                        cd /home/sdn/openwrt/vcpe/callhome/openwrt
+                        make V=s package/aiwan-cpe/{clean,compile} STRIP=/bin/true -j1
+                        make package/index
+                        sudo cp /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-cpe_${SATELLITE_VERSION}_x86_64.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        sudo cp /home/sdn/openwrt/vcpe/callhome/openwrt/bin/packages/x86_64/aiwan/aiwan-mwan_${SATELLITE_VERSION}_x86_64.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        if [ $? -ne 0 ];then
+                            echo "Copy the x86 ipk failed."
+                            exit 1
+                        fi
+                        
+                        # For new ARM
+                        cd /home/sdn/openwrt/arm/callhome/openwrt
+                        make V=s package/aiwan-cpe/{clean,compile} STRIP=/bin/true -j1
+                        make package/index
+                        cp /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-cpe_${SATELLITE_VERSION}_arm_cortex-a7_neon-vfpv4.ipk ${WORKSPACE}/src/pkg/${verpath}/
+                        sudo cp /home/sdn/openwrt/arm/callhome/openwrt/bin/packages/arm_cortex-a7_neon-vfpv4/aiwan/aiwan-mwan_${SATELLITE_VERSION}_arm_cortex-a7_neon-vfpv4.ipk ${WORKSPACE}/src/pkg/${verpath}/
+
+                        for file in ${WORKSPACE}/src/pkg/${verpath}/*
+                        do
+                           sudo md5sum ${file} > ${file}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-cpe-ipk*/*.ipk*,src/pkg/aiwan-mwan*/*.ipk*,src/pkg/aiwan-cpe-ipk*/RELEASENOTES', fingerprint: true
+                    }
+                }
+                
+                stage('build prism') {
+                    agent { label 'dpdk' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'prism'
+                    }
+
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/prism/*
+                        '''
+                        dir('src/prism') {
+                            git(url: "ssh://${USER}@${GITREPO}/prism", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        for name in aiwan-prism
+                        do
+                           verpath="${name}_${VER}-${verdate}"
+                           sudo rm -rf ${WORKSPACE}/src/pkg/${name}_*
+                           sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        done
+
+                        sudo rm -rf ${WORKSPACE}/src/prism/build/*.deb
+                       ret=`sudo docker ps -a | grep prism_deb | wc -l`
+                       if [ $ret -eq 1 ];then
+                          sudo docker rm -vf prism_deb
+                       fi
+                       sudo docker run -itd --name prism_deb -v $WORKSPACE/src/prism:/root/prism prism_ci
+                       sudo docker exec -w /root/prism -i prism_deb /bin/bash -c "./build.sh ${VER}-${verdate}"
+  
+                       for name in aiwan-prism
+                        do
+                           verpath="${name}_${VER}-${verdate}"
+                           sudo mv ${WORKSPACE}/src/prism/build/${name}*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        done
+                        for name in aiwan-prism
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-prism*/*.deb*', fingerprint: true
+                    }
+                }
+                
+                stage('build orion') {
+                    agent { label 'master' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/orion/*
+                        '''
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/orion']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/orion']]
+                         ])
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        sudo docker run -v ${WORKSPACE}/src:/home/build/src orion/build:1.0.0 /home/build/src/orion/ci/build.sh ${VER}-${verdate}
+                        sudo docker rm $(docker ps -a -q -f status=exited)
+                        '''
+
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/orion/ci/deb/*.deb, src/orion/ci/deb/*.ipk', fingerprint: true
+                    }
+                }
+                
+                stage('build orion_ow') {
+                    agent { label 'server64' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/orion/*
+                        '''
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/orion']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/orion']]
+                         ])
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        ${WORKSPACE}/src/orion/ci/build_arm.sh ${VER}-${verdate}
+                        ${WORKSPACE}/src/orion/ci/build_x86.sh ${VER}-${verdate}
+                        #${WORKSPACE}/src/orion/ci/build_mips.sh ${VER}-${verdate}
+                        '''
+
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/orion/ci/deb/*.deb, src/orion/ci/deb/*.ipk', fingerprint: true
+                    }
+                }
+                
+                stage('build planet') {
+                    agent { label 'master' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'planet'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/planet/*
+                        '''
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch: 'devel-21.08')
+                        }
+                        dir('src/l8w8jwt') {
+                            git(url: "ssh://${USER}@${GITREPO}/l8w8jwt", branch: 'master')
+                        }
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/planet']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/planet']]
+                         ])
+ 
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        docker rm $(docker ps -a -q -f status=exited)
+                        #docker run -v ${WORKSPACE}/src:/home/build/src maat/build:5.0.0 /home/build/src/planet/ci/build.sh
+                        docker run -e CONFIG_VERSION=${VER}-${verdate} -e MOON_VERSION=${VER}-${verdate} -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.3 /home/build/src/planet/ci/compile.sh
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/maat/build/aiwan-config*.deb, src/planet/build/aiwan-moon*.deb, src/planet/build/aiwan-measure*.deb', fingerprint: true
+                    }
+                }
+                
+                stage('build world') {
+                    agent { label 'master' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'world';
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/world/*
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/nuwa/*
+                        '''
+                        checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/world']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/world']]
+                        ])
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch:'devel-21.08')
+                        }
+                        dir('src/nuwa') {
+                            git(url: "ssh://${USER}@${GITREPO}/nuwa", branch: 'master')
+                        }
+
+                        sh '''#!/bin/bash
+                           cd ${WORKSPACE}/src/maat
+                           sudo rm -rf build
+                           docker run -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.3 /home/build/src/maat/ci/buildlib.sh
+
+                           cd ${WORKSPACE}/src/nuwa
+                           cp ../world/utils/lwip/lwipopts.h ./lwip/lwip/lwipopts.h
+                           mkdir target
+                           cd target
+                           cmake ..
+                           make
+                           cd ../lwip
+                           make
+                           verdate=`date +%Y.%m.%d.%H%M%S`
+                           verpath="aiwan-world_${VER}-${verdate}"
+                           verpath2="aiwan-saas_${VER}-${verdate}"
+                           sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-world_*
+                           sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-saas_*
+                           sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                           sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath2}
+                           cd ${WORKSPACE}/src/world
+                           rm -rf build
+                           mkdir build
+                           cd build
+                           cmake .. -DRELEASE=1 -DCONFIG_VERSION=${VER}-${verdate}
+                           export CONFIG_VERSION=${VER}-${verdate}
+                           make
+                           make deb_package
+                           sudo mv ${WORKSPACE}/src/world/build/aiwan-world*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                           sudo mv ${WORKSPACE}/src/world/build/aiwan-saas*.deb ${WORKSPACE}/src/pkg/${verpath2}/
+                           for name in aiwan-world aiwan-saas
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               sudo touch RELEASENOTES
+                               n=`ls ${name}*.deb`
+                               sudo md5sum ${n} > ${n}.md5
+                            done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-world*/*.deb*,src/pkg/aiwan-world*/RELEASENOTES,src/pkg/aiwan-saas*/*.deb*,src/pkg/aiwan-saas*/RELEASENOTES', fingerprint: true
+                    }
+                }
+                
+                stage('build world (nuwa)') {
+                    agent { label 'master' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'nuwa';
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/world/*
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/nuwa/*
+                        '''
+                        dir('src/world') {
+                            git(url: "ssh://${USER}@${GITREPO}/world", branch: 'master')
+                        }
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch:'devel-21.08')
+                        }
+                        checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/nuwa']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/nuwa']]
+                        ])
+
+                        sh '''#!/bin/bash
+                           cd ${WORKSPACE}/src/maat
+                           sudo rm -rf build
+                           docker run -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.3 /home/build/src/maat/ci/buildlib.sh
+
+                           cd ${WORKSPACE}/src/nuwa
+                           cp ../world/utils/lwip/lwipopts.h ./lwip/lwip/lwipopts.h
+                           mkdir target
+                           cd target
+                           cmake ..
+                           make
+                           cd ../lwip
+                           make
+                           verdate=`date +%Y.%m.%d.%H%M%S`
+                           verpath="aiwan-world_${VER}-${verdate}"
+                           verpath2="aiwan-saas_${VER}-${verdate}"
+                           sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-world_*
+                           sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-saas_*
+                           sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                           sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath2}
+                           cd ${WORKSPACE}/src/world
+                           rm -rf build
+                           mkdir build
+                           cd build
+                           cmake .. -DRELEASE=1 -DCONFIG_VERSION=${VER}-${verdate}
+                           export CONFIG_VERSION=${VER}-${verdate}
+                           make
+                           make deb_package
+                           sudo mv ${WORKSPACE}/src/world/build/aiwan-world*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                           sudo mv ${WORKSPACE}/src/world/build/aiwan-saas*.deb ${WORKSPACE}/src/pkg/${verpath2}/
+                           for name in aiwan-world aiwan-saas
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               sudo touch RELEASENOTES
+                               n=`ls ${name}*.deb`
+                               sudo md5sum ${n} > ${n}.md5
+                            done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-world*/*.deb*,src/pkg/aiwan-world*/RELEASENOTES,src/pkg/aiwan-saas*/*.deb*,src/pkg/aiwan-saas*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+                stage('build dpdk') {
+                    agent { label 'POP15.3' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'dpdk'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/dpdk
+                        '''
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/dpdk']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/dpdk']]
+                         ])
+
+                        sh '''
+                        cd ${WORKSPACE}/src/dpdk
+                        git clean -fd
+                        make defconfig
+                        make -j12
+                        export RTE_TARGET=build
+                        export RTE_SDK=`pwd`
+                        cd examples/ip_pipeline
+                        make -j12
+                        cd ${WORKSPACE}/src/dpdk
+                        make planet
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/dpdk/build/*.deb', fingerprint: true
+                    }
+                }
+
+                stage('build satellite') {
+                    agent { label 'cpe-7050' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'satellite';
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/satellite
+                        sudo rm -rf ${WORKSPACE}/src/nuwa
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-mwan_*
+                        '''
+
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch:  'devel-21.08', credentialsId: "${CREDENTIALSID}")
+                        }
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/satellite']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/satellite']]
+                         ])
+                        dir('src/nuwa') {
+                            git(url: "ssh://${USER}@${GITREPO}/nuwa", branch:  'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/l8w8jwt') {
+                            git(url: "ssh://${USER}@${GITREPO}/l8w8jwt", branch:  'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        verpath="aiwan-cpe_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe_*
+                        sudo rm -rf ${WORKSPACE}/src/satellite/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                    
+                        #cd ${WORKSPACE}/src/nuwa
+                        #git reset --hard 92f314d3
+                        #git reset --hard ab3182077fd8d8fdeb033b0156700f6e1f38804c
+                        
+                        cd ${WORKSPACE}/src/satellite
+                        export SATELLITE_VERSION=${VER}-${verdate}
+                        #./docker.sh ${SATELLITE_VERSION}
+                        ./build.sh ${VER}-${verdate} -pack
+                        sudo mv ${WORKSPACE}/src/satellite/build/aiwan-cpe*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        sudo mv ${WORKSPACE}/src/satellite/build/aiwan-mwan*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-cpe
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo cp  ${WORKSPACE}/src/satellite/changelog RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-cpe*/*.deb*,src/pkg/aiwan-mwan*/*.deb*,src/pkg/aiwan-cpe*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+                stage('build satellite (nuwa)') {
+                    agent { label 'cpe-7050' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/maat/*
+                        sudo rm -rf ${WORKSPACE}/src/satellite
+                        sudo rm -rf ${WORKSPACE}/src/nuwa
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-mwan_*
+                        '''
+
+                        dir('src/maat') {
+                            git(url: "ssh://${USER}@${GITREPO}/maat", branch:  'devel-21.08', credentialsId: "${CREDENTIALSID}")
+                        }
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/nuwa']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/nuwa']]
+                         ])
+                        dir('src/satellite') {
+                            git(url: "ssh://${USER}@${GITREPO}/satellite", branch:  'devel-21.08', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/l8w8jwt') {
+                            git(url: "ssh://${USER}@${GITREPO}/l8w8jwt", branch:  'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        verpath="aiwan-cpe_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-cpe_*
+                        sudo rm -rf ${WORKSPACE}/src/satellite/build/*
+                        sudo mkdir -p ${WORKSPACE}/src/pkg/${verpath}
+                        cd ${WORKSPACE}/src/satellite
+                        export SATELLITE_VERSION=${VER}-${verdate}
+                        #./docker.sh ${SATELLITE_VERSION}
+                        ./build.sh ${VER}-${verdate} -pack
+                        sudo mv ${WORKSPACE}/src/satellite/build/aiwan-cpe*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        sudo mv ${WORKSPACE}/src/satellite/build/aiwan-mwan*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in aiwan-cpe
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           sudo cp  ${WORKSPACE}/src/satellite/changelog RELEASENOTES
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-cpe*/*.deb*,src/pkg/aiwan-mwan*/*.deb*,src/pkg/aiwan-cpe*/RELEASENOTES', fingerprint: true
+                    }
+                }
+
+               stage('Build gaea') {
+                   agent { label 'Controller-IT-71' }
+                   when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea'
+                    }
+
+                    steps {
+
+                        sh '''
+
+                        sudo rm -rf ${WORKSPACE}/src/gaea
+
+                        '''
+
+                        checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/gaea']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/gaea']]
+                        ])
+
+
+                        sh '''#!/bin/bash -l
+
+               set -ex
+               echo "Start to build gaea"
+               ret=`sudo docker ps -a | grep gaea_deb | wc -l`
+               if [ $ret -eq 1 ];then
+                 sudo docker rm -vf gaea_deb
+               fi
+               sudo docker run -itd --name gaea_deb -v $WORKSPACE/src/gaea:/root/gaea -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+               sudo docker exec -w /root/gaea -i gaea_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+               sudo docker rm -vf gaea_deb
+               sudo cp $WORKSPACE/src/gaea/ci/aiwan-gaea*.deb $WORKSPACE/src/gaea/ci/docker/
+               sudo cp $WORKSPACE/src/gaea/ci/upgrade/notes $WORKSPACE/src/gaea/ci/docker/RELEASENOTES
+                            '''
+
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/gaea/ci/docker/*', fingerprint: true
+
+                    }
+                }
+                stage('Build pontus') {
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'pontus'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/pontus
+                        '''
+                        checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/pontus']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/pontus']]
+                        ])
+                        sh '''#!/bin/bash -l
+                           set -ex
+                           echo "Start to build pontus"
+                           ret=`sudo docker ps -a | grep pontus_deb | wc -l`
+                           if [ $ret -eq 1 ];then
+                             sudo docker rm -vf pontus_deb
+                           fi
+                           sudo docker run -itd --name pontus_deb -v $WORKSPACE/src/pontus:/root/pontus -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+                           sudo docker exec -w /root/pontus -i pontus_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+                           sudo docker rm -vf pontus_deb
+                           sudo cp $WORKSPACE/src/pontus/ci/*.deb $WORKSPACE/src/pontus/ci/docker/
+                           #sudo cp $WORKSPACE/src/pontus/ci/upgrade/notes $WORKSPACE/src/pontus/ci/docker/RELEASENOTES
+                            '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pontus/ci/docker/*', fingerprint: true
+                    }
+
+                }
+
+                stage('Build ourea') {
+
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'ourea'
+                    }
+
+                    steps {
+
+                        sh '''
+
+                        sudo rm -rf ${WORKSPACE}/src/ourea
+
+                        '''
+
+                        dir('src/ourea') {
+                            git(url: "ssh://${USER}@${GITREPO}/ourea", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''#!/bin/bash -l
+
+                           set -ex
+                           echo "Start to build ourea"
+                           ret=`sudo docker ps -a | grep ourea_deb | wc -l`
+                           if [ $ret -eq 1 ];then
+                             sudo docker rm -vf ourea_deb
+                           fi
+                           sudo docker run -itd --name ourea_deb -v $WORKSPACE/src/ourea:/root/ourea -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+                           sudo docker exec -w /root/ourea -i ourea_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+                           sudo docker rm -vf ourea_deb
+                           sudo cp $WORKSPACE/src/ourea/ci/aiwan-ourea*.deb $WORKSPACE/src/ourea/ci/docker/
+                           sudo cp $WORKSPACE/src/ourea/ci/upgrade/notes $WORKSPACE/src/ourea/ci/docker/RELEASENOTES
+                            '''
+
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/ourea/ci/docker/*', fingerprint: true
+
+                    }
+
+                }
+
+                stage('Build cronus') {
+
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'cronus'
+                    }
+
+                    steps {
+
+                        sh '''
+
+                        sudo rm -rf ${WORKSPACE}/src/cronus
+
+                        '''
+
+                        checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/cronus']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/cronus']]
+                        ])
+
+
+
+                        sh '''#!/bin/bash -l
+
+                             set -ex
+							 echo "Start to build cronus"
+							 ret=`sudo docker ps -a | grep cronus_deb | wc -l`
+							 if [ $ret -eq 1 ];then
+								 sudo docker rm -vf cronus_deb
+							 fi
+							 sudo docker run -itd --name cronus_deb -v $WORKSPACE/src/cronus:/root/cronus -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+							 sudo docker exec -w /root/cronus -i cronus_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+							 sudo docker rm -vf cronus_deb
+							 sudo cp $WORKSPACE/src/cronus/ci/upgrade/notes $WORKSPACE/src/cronus/ci/RELEASENOTES
+                            '''
+
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/cronus/ci/*', fingerprint: true
+
+                    }
+
+                }
+
+                stage('build uranus') {
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'uranus'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/uranus
+                        '''
+                        dir('src/mnemosyne'){
+                            git(url: "ssh://${USER}@${GITREPO}/mnemosyne", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/uranus']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/uranus']]
+                        ])
+
+                        sh '''#!/bin/bash -l
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        verpath="aiwan-uranus_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-uranus_*
+                        sudo rm -rf ${WORKSPACE}/src/uranus/ci/*.deb
+                        sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        cp ${WORKSPACE}/src/mnemosyne/libs/openflowj-3.2.1.onos.jar /home/jenkins/.m2/repository/org/onosproject/openflowj/3.2.1.onos/
+                        echo "Start build aiwan uranus"
+                        cd $WORKSPACE/src/uranus
+						ret=`sudo docker ps -a | grep uranus_deb | wc -l`
+						if [ $ret -eq 1 ];then
+							sudo docker rm -vf uranus_deb
+						fi
+						sudo docker run -itd --name uranus_deb -v $WORKSPACE/src/uranus:/root/uranus -v $WORKSPACE/src/mnemosyne:/root/mnemosyne -v /home/sdn/repo/.m2:/root/.m2 uranus_ci_jdk11:v1
+                        sudo docker exec -w /root/uranus -i uranus_deb ./build ${VER}-${verdate}
+						sudo docker rm -vf uranus_deb
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/uranus/ci/aiwan-uranus*.deb,src/uranus/ci/controller/Dockerfile', fingerprint: true
+                    }
+                }
+                
+                stage('build thruster') {
+                    agent { label 'master' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'thruster'
+                    }
+                    steps {
+                        buildThruster()
+                    }
+                }
+                
+                stage('build thruster(openwrt)') {
+                    agent { label 'server64' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'thruster'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/thruster
+                        '''
+                        dir('src/orion'){
+                            git(url: "ssh://${USER}@${GITREPO}/orion", branch:  'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                       checkout([
+                            $class: 'GitSCM',
+                              branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+                             doGenerateSubmoduleConfigurations: false,
+                             extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/thruster']],
+                             submoduleCfg: [],
+                              userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/thruster']]
+                         ])
+
+                        sh '''#!/bin/bash -l
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        export THRUSTER_VERSION=${VER}-${verdate}
+                        ${WORKSPACE}/src/thruster/ci/build_x86.sh
+                        ${WORKSPACE}/src/thruster/ci/build_arm.sh
+                        #${WORKSPACE}/src/thruster/ci/build_mips.sh
+                        '''
+
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/thruster/ci/deb/*.ipk*', fingerprint: true
+                    }
+                }
+                
+                stage('build metis') {
+                    agent { label 'Controller15.2' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'metis'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/metis
+                        '''
+                        dir('src/metis') {
+                            git(url: "ssh://${USER}@${GITREPO}/metis", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''
+                        verdate=`date +%Y.%m.%d`
+                        verpath="metis_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis*
+                        sudo rm -rf ${WORKSPACE}/src/metis/metis*.tar.gz
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis_*/metis*.tar.gz
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis_*/metis*.tar.gz.md5
+                        sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        echo "Start to build metis"
+                        sudo chown -R jenkins:jenkins ${WORKSPACE}/src
+                        cd ${WORKSPACE}/src/metis
+                        sudo rm -rf web/node_modules/.cache
+                        sudo rm -rf server/node_modules/.cache
+                        sed -i 's/runTests$/#runTests/g' build.sh
+                        bash build.sh ${VER}-${verdate} >/tmp/webbuild.log 2>&1
+                        if [ $? -ne 0 ];then
+                            echo "build metis failed"
+                            exit 1
+                        fi
+                        error=`grep 'export .* was not found in' /tmp/webbuild.log | wc -l`
+                        if [ $error -gt 0 ]; then 
+                             echo 'build error rebuild'
+                             sudo rm -rf web/node_modules/.cache
+                             bash build.sh ${VER}-${verdate}
+                        fi
+                        sudo mv ${WORKSPACE}/src/metis/metis*.tar.gz ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in metis
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               touch   RELEASENOTES
+                               n=`ls ${name}*.gz`
+                               sudo md5sum ${n} > ${n}.md5
+                           done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/metis*/*.gz*', fingerprint: true
+                    }
+                }                
+
+            }
+        }
+        
+        stage ('Deploy Uranus and gaea') {
+            parallel {
+                stage ('deploy web server metis') {
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'metis'
+                    }
+
+                    steps {
+                        copyArtifacts filter: '**/*.gz', target: 'gz', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        cp ${WORKSPACE}/gz/metis_*.gz /opt/aiwan/metis/
+                        export LANG=C
+                        echo "Done the source loading."
+                        cd /opt/aiwan/metis/server
+                        sudo npm run stop
+                        if [ $? -ne 0 ];then
+                            echo "stop metis failed"
+                            exit 1
+                        fi
+                        echo "Done the npm stop. Now extract the gz."
+                        cd ..
+                        pwd
+                        sudo tar zxf metis_${VER}-${verdate}.tar.gz
+                        if [ $? -ne 0 ];then
+                            echo "extract metis failed"
+                            exit 1
+                        fi
+                        sudo sed -i 's/cb44168b-baf7-8f64-a1bb-e0723d7e8943/7de011b3-26e4-3317-5ab0-055e4c4385ec/g' /opt/aiwan/metis/server/config/config.default.js
+                        sudo sed -i 's/10.192.20.15:8500/10.192.20.20:8500/g' /opt/aiwan/metis/server/config/config.default.js
+                        sudo sed -i 's/192.168.0.220/10.192.20.210/g' /opt/aiwan/metis/server/config/config.default.js
+                        sudo sed -i 's/\\/v1\\/cpes/\\/v1\\/asset\\/cpes/g' /opt/aiwan/metis/server/config/config.default.js
+                        sudo sed -i 's/https:\\/\\/tuhao.netgrounder.com/http:\\/\\/10.194.20.105:8000/g' /opt/aiwan/metis/server/config/config.default.js
+                        sudo sed -i 's/1827564c0e7694dacd01472b2211a653cd236b1f/a4e8759692327b386a32ff2506a4dc717210c043/g' /opt/aiwan/metis/server/config/config.default.js
+                        cd server
+                        echo "Now start the npm."
+                        sudo npm run start
+                        if [ $? -ne 0 ];then
+                            echo "start metis failed"
+                            exit 1
+                        fi
+                        echo "Done the npm run start."
+                        '''
+                    }
+                }
+                stage ('deploy auth server') {
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'triton';
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-triton*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-triton*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                          cd ${WORKSPACE}/deb
+                          ver_u=`ls aiwan-triton*`
+                          sudo dpkg -i $ver_u
+                          #sudo  sed -i "s/localhost/10.184.20.2/g" /opt/aiwan/triton/config/config.json
+                          sudo systemctl daemon-reload
+                          sleep 5s
+                          sudo service aiwan-triton start
+                          #sleep 30s
+                          #bash /home/sdn/reg_auth.sh
+                        '''
+                    }
+                }
+                stage ('deploy controller_instance') {
+                    agent { label 'Controller-IT-71' }
+                    when {
+						anyOf {
+							environment name: 'GERRIT_PROJECT', value: 'uranus';
+							environment name: 'GERRIT_PROJECT', value: 'cronus';
+						}
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/controller/*
+                        '''
+                        copyArtifacts filter: '**/aiwan-cronus*.deb', target: 'deb/controller', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: '**/aiwan-uranus*.deb', target: 'deb/controller', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: 'src/uranus/ci/controller/Dockerfile', target: 'deb/controller', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb/controller
+                        ret=`sudo docker ps -a | grep controller_instance | wc -l`
+						if [ $ret -eq 1 ];then
+							sudo docker rm -vf controller_instance
+						fi
+                        sudo docker build -t controller_instance:test .
+
+                        sudo docker run --cpus 12 --memory 16G --cap-add=SYS_ADMIN -itd --name controller_instance -v /var/log/controller_instance:/var/log/   \
+                         -v /opt/aiwan/cronus/config:/opt/aiwan/cronus/config/   \
+                         -v /opt/aiwan/uranus/config:/opt/aiwan/uranus/config/ -v /opt/aiwan/config:/opt/aiwan/config/ \
+                         -p 6653:6653 -p 6633:6633 -p 8181:8181 -p 8101:8101 -p 4335:4335   \
+                         -p 9092:9092 -p 5005:5005 -p 6116:6116 controller_instance:test
+                         #sudo docker exec -t controller_instance mkdir -p /var/log/cronus/
+                         #sudo docker exec -t controller_instance touch /var/log/cronus/gc.log
+                         #sudo docker exec -t controller_instance /opt/aiwan/cronus/bin/cronus >/dev/null&
+                        '''
+                    }
+                }
+                stage('deploy pontus') {
+
+                    agent { label 'Controller-IT-71' }
+
+                    steps {
+
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/pontus/*
+                        '''
+                        copyArtifacts filter: '**/aiwan-pontus*.deb', target: 'deb/pontus', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: 'src/pontus/ci/docker/Dockerfile', target: 'deb/pontus', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+
+                            cd ${WORKSPACE}/deb/pontus
+                            sudo docker build -t pontus:test .
+                            pontus_port=6226
+                            pontus_metric_port=9091
+                            ret=`sudo docker ps -a | grep pontus_instance | wc -l`
+                            if [ $ret -eq 1 ];then
+                                sudo docker rm -vf pontus_instance
+                            fi
+                            sudo docker run -itd --name pontus_instance -p $pontus_port:6226 -p $pontus_metric_port:9091 -v /var/log/pontus:/var/log/pontus -v /opt/aiwan/pontus/config:/opt/aiwan/pontus/config/ pontus:test
+                        '''
+                    }
+
+                }
+                stage('deploy ourea') {
+
+                    agent { label 'Controller-IT-71' }
+
+                    steps {
+
+                        sh '''
+
+                        rm -rf ${WORKSPACE}/deb/ourea/*
+
+                        '''
+
+                        copyArtifacts filter: 'src/ourea/ci/docker/aiwan-ourea*.deb', target: 'deb/ourea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        copyArtifacts filter: 'src/ourea/ci/docker/Dockerfile', target: 'deb/ourea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+
+
+                        sh '''#!/bin/bash
+
+                            cd ${WORKSPACE}/deb/ourea
+                            sudo docker build -t ourea:test .
+                            ourea_port=6326
+
+                            ourea_metric_port=9095
+
+                            ret=`sudo docker ps -a | grep ourea_instance | wc -l`
+
+                            if [ $ret -eq 1 ];then
+
+                                sudo docker rm -vf ourea_instance
+
+                            fi
+
+                            sudo docker run -itd --name ourea_instance -p $ourea_port:6326 -p $ourea_metric_port:9095  -v /var/log/ourea:/var/log/ourea -v /opt/aiwan/ourea/config:/opt/aiwan/ourea/config ourea:test
+
+                        '''
+
+                    }
+
+                }
+
+                stage ('deploy gaea ') {
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea';
+                    }
+                    steps {
+
+                        sh '''
+
+                        rm -rf ${WORKSPACE}/deb/gaea/*
+
+                        '''
+
+                        copyArtifacts filter: 'src/gaea/ci/docker/aiwan-gaea*.deb', target: 'deb/gaea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        copyArtifacts filter: 'src/gaea/ci/docker/Dockerfile', target: 'deb/gaea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+
+                            cd ${WORKSPACE}/deb/gaea
+
+                            sudo docker build -t gaea:test .
+
+                            gaea_port=6126
+
+                            gaea_metric_port=9090
+
+                            ret=`sudo docker ps -a | grep gaea_instance | wc -l`
+
+                            if [ $ret -eq 1 ];then
+
+                                sudo docker rm -vf gaea_instance
+
+                            fi
+
+                            sudo docker run -itd --name gaea_instance -p $gaea_port:6426 -p $gaea_metric_port:9090 -v /var/log/gaea:/var/log/gaea -v /opt/aiwan/gaea/config:/opt/aiwan/gaea/config/ gaea:test
+
+                        '''
+
+                    }
+                }
+
+            }
+        }
+
+        stage ('Deploy') {
+            parallel {
+                stage ('deploy prism') {
+                    agent { label 'Controller-IT-71' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'prism'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/*.deb
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-prism*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -i aiwan-prism*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install prism failed."
+                            exit 1
+                        fi
+                        sleep 1
+                        sudo systemctl restart aiwan-prism
+                        if [ $? -ne 0 ];then
+                            echo "restart prism failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                
+                stage ('deploy orion server') {
+                    agent { label 'Manager210' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/*.deb
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-orion-server*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -i aiwan-orion-server*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-orion-server failed."
+                            exit 1
+                        fi
+                        #sudo sed -i 's/10.192.20.20/10.184.20.105/g' /etc/collectd/collectd.conf.d/aiwan_server.conf
+                        #sudo sed -i 's/10.192.20.210/10.184.20.105/g' /etc/collectd/collectd.conf.d/aiwan_server.conf
+                        sudo systemctl restart collectd
+                        if [ $? -ne 0 ];then
+                            echo "restart collectd failed after aiwan-orion-server reinstalled."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy orion(pop)') {
+                    agent { label 'POP-IT-11.2' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-orion-pop*.deb
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-orion-pop*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''
+                        cd ${WORKSPACE}/deb
+
+                        echo y | sudo dpkg -i aiwan-orion-pop*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-orion-pop failed."
+                            exit 1
+                        fi
+                        sudo sed -i 's/127.0.0.1/10.192.20.210/g' /etc/collectd/collectd.conf.d/aiwan_client_pop.conf
+                        sudo systemctl restart collectd
+                        if [ $? -ne 0 ];then
+                            echo "restart collectd failed after aiwan-orion-pop reinstalled."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy gwcpe-orion') {
+                    agent {  label 'Manager210' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/deb/aiwan-orion-client*_x86_64.ipk
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.36 "rm -rf /home/jenkins/ipk/aiwan-orion-client*.ipk"
+                        '''
+                        copyArtifacts filter: '**/aiwan-orion-client*x86_64.ipk', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        dir('src/erlang') {
+                            git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash
+                        pwd
+                        ls -ltr deb/
+                        sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/deb/aiwan-orion-client*x86_64.ipk root@10.192.15.74:/home/jenkins/ipk/
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.36 "opkg install --force-reinstall /home/jenkins/ipk/aiwan-orion-client*_x86_64.ipk"
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-orion-client in x86 cpe failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy orion(cpe-32)') {
+                    agent { label 'CPE-IT-32' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-orion-client*.deb*
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-orion-client*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        echo y | sudo dpkg -i ${WORKSPACE}/deb/aiwan-orion-client*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-orion-client on cpe32 failed."
+                            exit 1
+                        fi
+                        sudo sed -i 's/127.0.0.1/10.192.20.210/g' /etc/collectd/collectd.conf.d/aiwan_client_cpe.conf
+                        sudo systemctl restart collectd
+                        if [ $? -ne 0 ];then
+                            echo "restart collectd failed on cpe32 after aiwan-orion-client reinstalled."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                stage ('deploy orion(cpe-33)') {
+                    agent { label 'CPE-IT-33' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/aiwan-orion-client*.deb*
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-orion-client*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        echo y | sudo dpkg -i ${WORKSPACE}/deb/aiwan-orion-client*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-orion-client on cpe33 failed."
+                            exit 1
+                        fi
+                        sudo sed -i 's/127.0.0.1/10.192.20.210/g' /etc/collectd/collectd.conf.d/aiwan_client_cpe.conf
+                        sudo systemctl restart collectd
+                        if [ $? -ne 0 ];then
+                            echo "restart collectd failed on cpe33 after aiwan-orion-client reinstalled."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                stage ('deploy orion(cpe-34)') {
+                    agent { label 'CPE-IT-34' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'orion'
+                    }
+
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-orion-client*.deb
+                        '''
+
+                        copyArtifacts filter: '**/aiwan-orion-client*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        echo y | sudo dpkg -i ${WORKSPACE}/deb/aiwan-orion-client*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-orion-client on cpe34 failed."
+                            exit 1
+                        fi
+                        sudo sed -i 's/127.0.0.1/10.192.20.210/g' /etc/collectd/collectd.conf.d/aiwan_client_cpe.conf
+                        sudo systemctl restart collectd
+                        if [ $? -ne 0 ];then
+                            echo "restart collectd failed on cpe34 after aiwan-orion-client reinstalled."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy pop(world)') {
+                    agent { label 'POP-IT-11.2' }
+                    when {
+                        anyOf {
+                            environment name: 'GERRIT_PROJECT', value: 'world';
+                            environment name: 'GERRIT_PROJECT', value: 'nuwa';
+                        }
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-world*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-saas*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-world*.deb,**/aiwan-saas*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo systemctl stop aiwan-world
+                        sudo systemctl stop aiwan-saas
+
+                        sudo dpkg -r aiwan-world
+                        if [ $? -ne 0 ];then
+                            echo "rm world failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -r aiwan-saas
+                        if [ $? -ne 0 ];then
+                            echo "rm saas failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-world*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install world failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-saas*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install saas failed."
+                            exit 1
+                        fi
+
+                        sudo systemctl start aiwan-world.service
+                        sudo systemctl restart aiwan-moon.service
+                        sleep 15s
+                        sudo systemctl start aiwan-saas
+                        '''
+                    }
+                }
+
+                stage ('deploy pop(moon)') {
+                    agent { label 'POP-IT-11.2' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'planet'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-moon*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-moon*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo dpkg -r aiwan-moon
+                        if [ $? -ne 0 ];then
+                            echo "rm moon failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -P aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm aiwan-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-config*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-moon*.deb
+                        sudo systemctl start netopeer2-server.service
+                        sudo systemctl start aiwan-moon.service
+                        '''
+                    }
+                }
+
+                stage ('deploy uranus, restart pop') {
+                    agent { label 'POP-IT-11.2' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea'
+                    }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-moon.service
+                        
+                        sudo systemctl start aiwan-moon.service
+                        '''
+                    }
+                }
+
+                stage ('deploy uranus, restart cpe-36') {
+                    agent { label 'Manager210' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea'
+                    }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.36 "/etc/init.d/aiwan-cpe restart"
+                        sleep 10s
+                        '''
+                    }
+                }
+
+                stage ('deploy uranus, restart cpe-32') {
+                    agent { label 'CPE-IT-32' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea'
+                    }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+
+                stage ('deploy uranus, restart cpe-33') {
+                    agent { label 'CPE-IT-33' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea'
+                    }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+
+                stage ('deploy uranus, restart cpe-34') {
+                    agent { label 'CPE-IT-34' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea'
+                    }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+
+                stage ('deploy uranus, restart cpe-35') {
+                    agent { label 'CPE-IT-35' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'gaea'
+                    }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+
+                stage ('deploy cpe-36') {
+                    agent {  label 'Manager210' }
+                    when {
+                        anyOf {
+                            environment name: 'GERRIT_PROJECT', value: 'satellite';
+                            environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                        }
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/erlang
+                        sudo rm -rf ${WORKSPACE}/deb/aiwan-cpe*ipk*
+                        sudo rm -rf ${WORKSPACE}/deb/aiwan-mwan*ipk*
+                        '''
+                        dir('src/erlang') {
+                            git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        copyArtifacts filter: '**/aiwan-cpe*_x86_64.ipk, **/aiwan-mwan*_x86_64.ipk', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        echo "clear the openwrt aiwan-cpe ipk folder"
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.36 " rm -rf /home/jenkins/ipk/aiwan-cpe*.ipk"
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.36 " rm -rf /home/jenkins/ipk/aiwan-mwan*.ipk"
+                        echo "copy the ipk file to cpe"
+                        sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/deb/aiwan-cpe*_x86_64.ipk root@10.192.9.36:/home/jenkins/ipk/
+                        sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/deb/aiwan-mwan*_x86_64.ipk root@10.192.9.36:/home/jenkins/ipk/
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.36 "opkg install --force-reinstall /home/jenkins/ipk/aiwan-mwan*_x86_64.ipk"
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-mwan in remote cpe failed."
+                            exit 1
+                        fi
+                        echo "copy the install script to cpe"
+                        sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/src/erlang/tests/ci/install_gw_cpe.sh root@10.192.9.36:/home/jenkins/ipk/
+                        echo "call the install sh script"
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.36 "cd /home/jenkins/ipk/; sh install_gw_cpe.sh"
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-cpe in gateway cpe failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy thruster-x86openwrt') {
+                    agent {  label 'Manager210' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'thruster'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/deb/aiwan-thruster*x86_64.ipk*
+                        '''
+                        copyArtifacts filter: '**/aiwan-thruster*_x86_64.ipk', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        echo "clear the openwrt thruster ipk folder"
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no  root@10.192.9.36 " rm -rf /home/jenkins/ipk/aiwan-thruster*.ipk"
+                        echo "copy the thruster ipk file to cpe"
+                        sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/deb/aiwan-thruster*_x86_64.ipk root@10.192.9.36:/home/jenkins/ipk/
+                        #echo "copy the install script to cpe"
+                        #sshpass -p rocks scp -o StrictHostKeyChecking=no ${WORKSPACE}/src/erlang/tests/ci/install_gw_cpe.sh root@10.192.9.36:/home/jenkins/ipk/
+                        echo "call the install cmd"
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.36 "cd /home/jenkins/ipk/; opkg install --force-reinstall aiwan-thruster*x86_64.ipk"
+                        if [ $? -ne 0 ];then
+                            echo "install aiwan-thruster in x86 gateway cpe failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+                stage ('deploy cpe-32') {
+                    agent { label 'CPE-IT-32' }
+                    when {
+                        anyOf {
+                            environment name: 'GERRIT_PROJECT', value: 'satellite';
+                            environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                        }
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/dpctl', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        sudo dpkg -i aiwan-cpe*.deb
+                        '''
+                    }
+                }
+
+                stage ('deploy thruster-cpe32') {
+                    agent { label 'CPE-IT-32' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'thruster'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-thruster*.deb*
+                        '''
+                        copyArtifacts filter: '**/aiwan-thruster*.deb*', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -i aiwan-thruster*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install thruster failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                
+                stage ('deploy cpe-33') {
+                    agent { label 'CPE-IT-33' }
+                    when {
+                        anyOf {
+                            environment name: 'GERRIT_PROJECT', value: 'satellite';
+                            environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                        }
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/dpctl', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sudo dpkg -i aiwan-config*.deb
+                        sudo dpkg -i aiwan-cpe*.deb
+                        '''
+                    }
+                }
+
+                stage ('deploy thruster-cpe-33') {
+                    agent { label 'CPE-IT-33' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'thruster'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-thruster*.deb*
+                        '''
+                        copyArtifacts filter: '**/aiwan-thruster*.deb*', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -i aiwan-thruster*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install thruster failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                
+                stage ('deploy cpe-34') {
+                    agent { label 'CPE-IT-34' }
+                    when {
+                        anyOf {
+                            environment name: 'GERRIT_PROJECT', value: 'satellite';
+                            environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                        }
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sleep 1
+                        sudo dpkg -i aiwan-config*.deb
+                        sudo dpkg -i aiwan-cpe*.deb
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage ('deploy thruster-cpe-34') {
+                    agent { label 'CPE-IT-34' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'thruster'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-thruster*.deb*
+                        '''
+                        copyArtifacts filter: '**/aiwan-thruster*.deb*', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        echo `pwd`
+                        sudo dpkg -i aiwan-thruster*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install thruster failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+                
+        stage ('deploy cpe-35') {
+                    agent { label 'CPE-IT-35' }
+                    when {
+                        anyOf {
+                            environment name: 'GERRIT_PROJECT', value: 'satellite';
+                            environment name: 'GERRIT_PROJECT', value: 'nuwa'
+                        }
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-config*.deb
+                        rm -rf ${WORKSPACE}/deb/aiwan-cpe*.deb
+                        rm -rf ${WORKSPACE}/deb/dpctl
+                        '''
+                        copyArtifacts filter: '**/aiwan-config*.deb, **/aiwan-cpe*.deb, **/aiwan-exporter*.deb, **/dpctl', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+                        sudo dpkg -r aiwan-config
+                        if [ $? -ne 0 ];then
+                            echo "rm config failed."
+                            exit 1
+                        fi
+                        sleep 1
+                        sudo dpkg -i aiwan-config*.deb
+                        sudo dpkg -i aiwan-cpe*.deb
+                        '''
+                    }
+                }
+
+        stage ('deploy thruster-cpe-35') {
+                    agent { label 'CPE-IT-35' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'thruster'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/aiwan-thruster*.deb*
+                        '''
+                        copyArtifacts filter: '**/aiwan-thruster*.deb*', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        echo `pwd`
+                        sudo dpkg -i aiwan-thruster*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install thruster failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+
+        stage ('test') {
+            agent { label 'master' }
+            steps {
+                sh '''
+                sudo rm -rf ${WORKSPACE}/src/erlang
+                sudo rm -rf ${WORKSPACE}/output
+                '''
+                dir('src/erlang') {
+                    git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                }
+                sh '''#!/bin/bash
+                export PYTHONPATH=${WORKSPACE}/src/erlang
+                cd ${WORKSPACE}/src/erlang
+                pybot -L trace --include *-1872 --outputdir ${WORKSPACE}/output  --variablefile erlang/config/it_tb.yaml erlang/testcase
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            node ('master') {
+                archiveArtifacts 'output/*'
+            }
+        }
+    }
+}
+
+void buildThruster () {
+      sh '''
+      sudo rm -rf ${WORKSPACE}/src/thruster
+      '''
+     checkout([
+          $class: 'GitSCM',
+            branches: [[name: '${GERRIT_PATCHSET_REVISION}']],
+           doGenerateSubmoduleConfigurations: false,
+           extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'src/thruster']],
+           submoduleCfg: [],
+            userRemoteConfigs: [[credentialsId: "${CREDENTIALSID}", refspec: '${GERRIT_REFSPEC}', url: 'ssh://dev@192.168.0.100:8011/thruster']]
+       ])
+      dir('src/orion'){
+          git(url: "ssh://${USER}@${GITREPO}/orion", branch:  'master', credentialsId: "${CREDENTIALSID}")
+      }
+
+      sh '''#!/bin/bash -l
+      verdate=`date +%Y.%m.%d.%H%M%S`
+      docker rm $(docker ps -a -q -f status=exited)
+      docker run -e THRUSTER_VERSION=${VER}-${verdate} -v ${WORKSPACE}/src:/home/build/src maat/build:6.0.3 /home/build/src/thruster/ci/build.sh
+      '''
+
+      archiveArtifacts allowEmptyArchive: true, artifacts: 'src/thruster/ci/deb/*.deb*', fingerprint: true
+}

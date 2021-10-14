@@ -1,0 +1,10 @@
+*** Settings ***
+Suite Setup       Suite_SetUp
+Suite Teardown    Suit_TearDown
+Resource          resource/UranusKeyword.txt
+Resource          resource/SshKeyword.txt
+
+*** Variables ***
+${flow_ttl}       600
+${domain_wait}    15s
+${CM_code}        11

@@ -1,0 +1,110 @@
+*** Settings ***
+Suite Setup       delete_route    nanchang
+Suite Teardown    wait until keyword succeeds    3x    1s    ensure_master_and_office_work
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+Library           ../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+
+*** Test Cases ***
+Auth_Audit_Service_Start_And_Stop_Auto
+    [Tags]    SDWANDEV-4578
+    ssh cpe    nanchang
+    check_cpe_auth_service    nanchang    ${False}
+    check_cpe_audit_service    nanchang    ${True}
+    close connection
+    set_consul_device_auth_audit    nanchang    ${1}    ${1}
+    ssh cpe    nanchang
+    wait until keyword succeeds    20s    500ms    check_cpe_auth_service    nanchang    ${True}
+    close connection
+    [Teardown]    case_teardown
+
+Auth_Audit_config_change
+    [Tags]    SDWANDEV-4579
+    ssh cpe    nanchang
+    check_cpe_audit_config    nanchang    &{audit_server}[ip]
+    close connection
+    set_consul_device_auth_audit_config    nanchang    192.168.5.5    ${1}    114.123.11.2    ${1}
+    ssh cpe    nanchang
+    wait until keyword succeeds    15s    1s    check_cpe_audit_config    nanchang    114.123.11.2
+    wait until keyword succeeds    10s    200ms    check_cpe_auth_config    nanchang    192.168.5.5
+    close connection
+    [Teardown]    teardown
+
+*** Keywords ***
+teardown
+    set_consul_device_auth_audit_config    nanchang    &{auth_server}[ip]    ${1}    &{audit_server}[ip]    ${1}
+    ssh cpe    nanchang
+    write cpe cmd    nanchang    service aiwan-thruster restart    /etc/init.d/aiwan-thruster restart
+    wait until keyword succeeds    2s    200ms    check_cpe_audit_config    nanchang    &{audit_server}[ip]
+    wait until keyword succeeds    2s    200ms    check_cpe_auth_config    nanchang    &{auth_server}[ip]
+    close connection
+    case_teardown
+    ssh cpe    nanchang
+    write cpe cmd    nanchang    service auth stop    /etc/init.d/auth stop
+    close connection
+
+Check_CPE_Auth_Service
+    [Arguments]    ${cpe}    ${Start}
+    write cpe cmd    ${cpe}    cat /etc/config/auth    cat /etc/config/auth
+    write cpe cmd    ${cpe}    cat /etc/hotplug.d/iface/99-ifup    cat /etc/hotplug.d/iface/99-ifup
+    ${res}=    write cpe cmd    ${cpe}    ps -ef|grep wifidog|grep -v "grep" -c    ps -w|grep wifidog|grep -v "grep" -c
+    ${auth_res}    get line    ${res}    0
+    run keyword if    ${start}==${False}    write cpe cmd    ${cpe}    ip route delete &{auth_server}[ip] dev tun1    ip route delete &{auth_server}[ip] dev tun1
+    ${res}=    write cpe cmd    ${cpe}    ip route show|grep "&{auth_server}[ip]" |grep "tun1" -c    ip route show|grep "&{auth_server}[ip]" |grep "tun1" -c
+    ${res_route}=    get line    ${res}    0
+    run keyword if    ${start}    should be true    '${auth_res}' == '1'
+    ...    ELSE    should be true    '${auth_res}' == '0'
+    run keyword if    ${start}    should be true    '${res_route}' == '1'
+    ...    ELSE    should be true    '${res_route}' == '0'
+
+Check_CPE_Audit_Service
+    [Arguments]    ${cpe}    ${Start}
+    write cpe cmd    ${cpe}    cat /etc/config/auth    cat /etc/config/audit
+    ${res}=    write cpe cmd    ${cpe}    ps -ef|grep proap|grep -v "grep" -c    ps -w|grep proap|grep -v "grep" -c
+    ${audit_res}    get line    ${res}    0
+    run keyword if    ${start}    should be true    '${audit_res}' >= '4'
+    ...    ELSE    should be true    '${audit_res}' == '0'
+
+set_consul_device_auth_audit
+    [Arguments]    ${cpe}    ${auth}    ${audit}
+    set_device_auth_audit    &{${cpe}_cpe}[minion_id]    ${auth}    ${audit}
+    modify_company_version    ${suite_company_id}
+
+Check_CPE_Auth_Config
+    [Arguments]    ${cpe}    ${ip}
+    ${res}=    write cpe cmd    ${cpe}    cat /etc/wifidog.conf|grep Hostname| awk -F " " \ '{print $NF}'    cat /etc/wifidog.conf|grep Hostname| awk -F " " \ '{print $NF}'
+    ${auth_res}    get line    ${res}    0
+    should be true    '${auth_res}'=='${ip}'
+
+Check_CPE_Audit_Config
+    [Arguments]    ${cpe}    ${ip}
+    ${res}=    write cpe cmd    ${cpe}    cat /etc/proap.conf|grep DataServer|awk -F "=" '{print $NF}'    cat /etc/proap.conf|grep DataServer|awk -F "=" '{print $NF}'
+    ${a_res}    get line    ${res}    0
+    ${audit_res}    replace string    ${a_res}    ${SPACE}    ${EMPTY}
+    should be true    '${audit_res}'=='${ip}:&{audit_server}[port]'
+
+set_consul_device_auth_audit_config
+    [Arguments]    ${cpe}    ${auth_ip}    ${auth}    ${audit_ip}    ${audit}
+    set_device_auth_audit_config    &{${cpe}_cpe}[minion_id]    https://${auth_ip}:8006    ${auth}    https://${audit_ip}:3080    ${audit}
+    modify_company_version    ${suite_company_id}
+
+case_teardown
+    set_consul_device_auth_audit    nanchang    ${0}    ${1}
+    ssh cpe    nanchang
+    Comment    write cpe cmd    nanchang    service aiwan-thruster restart    /etc/init.d/aiwan-thruster restart
+    wait until keyword succeeds    25s    1s    check_cpe_auth_service    nanchang    ${False}
+    wait until keyword succeeds    2s    200ms    check_cpe_audit_service    nanchang    ${True}
+    close connection
+
+delete_route
+    [Arguments]    ${cpe}
+    ssh cpe    ${cpe}
+    write cpe cmd    ${cpe}    ip route delete &{auth_server}[ip] dev tun1    ip route delete &{auth_server}[ip] dev tun1
+    close connection
+
+ensure_master_and_office_work
+    enshare_cpe_master    nanchang
+    wait until keyword succeeds    40s    200ms    check_openwrt_cpe_dhcp    nanchang    0
+    Ensure_CPE_Flow_Work    nanjing    office

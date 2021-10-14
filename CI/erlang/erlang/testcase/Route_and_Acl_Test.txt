@@ -1,0 +1,90 @@
+*** Settings ***
+Suite Setup       nanjing_iperf_setup
+Suite Teardown    run keywords    nanjing_iperf_teardown
+...               AND    wait until keyword succeeds    10    1s    Ensure_CPE_Flow_Work    nanjing    office
+Resource          resource/UranusKeyword.txt
+Resource          resource/SshKeyword.txt
+
+*** Variables ***
+${l_iperf_s_port}    5201
+
+*** Test Cases ***
+CPE_check_acl_work
+    [Tags]    SDWANDEV-3580
+    Ping_From_CPE_To_H2    guangzhou    &{changsha_pc}[inner_ip]    3    0
+    ${aclName_list}=    create list    deny_to_changsha    deny_tcp_to_nanjing
+    add_company_acl    ${suite_company_id}    deny_to_changsha    ${suite_guangzhou_site_id}    ${500}    deny    ${None}
+    ...    &{changsha_pc}[inner_ip]\/32
+    add_company_acl    ${suite_company_id}    deny_tcp_to_nanjing    ${suite_guangzhou_site_id}    ${500}    deny    ${None}
+    ...    &{nanjing_pc}[inner_ip]\/32    6
+    Ping_From_CPE_To_H2    guangzhou    &{nanjing_pc}[inner_ip]    3    0
+    check_cpe_to_nanjing_iperf_result    guangzhou    iperf3: error
+    check_guangzhou_to_changsha_acl_deny
+    [Teardown]    Delete_acl    ${aclName_list}
+
+CPE_check_acl_priority
+    [Tags]    SDWANDEV-3581
+    Ping_From_CPE_To_H2    guangzhou    &{changsha_pc}[inner_ip]    3    0
+    check_cpe_to_nanjing_iperf_result    changsha    iperf Done
+    ${aclName_list}=    create list    deny_all    permit_icmp_to_changsha    permit_icmp_to_guangzhou    permit_tcp_to_nanjing
+    add_company_acl    ${suite_company_id}    deny_all    ${None}    ${500}    deny    ${None}
+    ...    ${None}    1,6,17
+    ${p}=    create list    1    6    17
+    wait until keyword succeeds    10x    1s    Check_Cpe_Acl_Enable    changsha    ${500}
+    ...    REJECT    all    ${p}
+    check_guangzhou_to_changsha_acl_deny
+    check_cpe_to_nanjing_iperf_result    changsha    iperf3: error
+    add_company_acl    ${suite_company_id}    permit_icmp_to_changsha    ${suite_guangzhou_site_id}    ${499}    permit    ${None}
+    ...    &{changsha_pc}[inner_ip]\/32    1
+    add_company_acl    ${suite_company_id}    permit_icmp_to_guangzhou    ${suite_changsha_site_id}    ${499}    permit    ${None}
+    ...    &{guangzhou_pc}[inner_ip]\/32    1
+    add_company_acl    ${suite_company_id}    permit_icmp_to_guangzhou    ${suite_changsha_site_id}    ${499}    permit    &{guangzhou_pc}[inner_ip]\/32
+    ...    ${None}    1
+    add_company_acl    ${suite_company_id}    permit_tcp_to_nanjing    ${suite_changsha_site_id}    ${499}    permit    ${None}
+    ...    ${None}    6
+    ${p}=    create list    1
+    wait until keyword succeeds    10x    1s    Check_Cpe_Acl_Enable    changsha    ${499}    RETURN    &{guangzhou_pc}[inner_ip]\/32    ${p}
+    Ping_From_CPE_To_H2    guangzhou    &{changsha_pc}[inner_ip]    3    0
+    wait until keyword succeeds    5x    1s    check_cpe_to_nanjing_iperf_result    changsha    iperf Done
+    [Teardown]    Delete_acl    ${aclName_list}
+
+Check_guangzhou_to_changsha_withoutUnion_but_with_route
+    [Tags]    SDWANDEV-3582
+    [Setup]    deleteUnion_and_UnionRoute
+    ssh_pc    guangzhou
+    ssh_write_command_and_check_string    ping &{changsha_pc}[inner_ip] -c 3 -i 0.3    100% packet loss
+    close connection
+    Create_route_with_dstCIDR    gz-cs    ${suite_guangzhou_site_id}    ${500}    ${suite_nanjing_site_id}    &{changsha_pc}[inner_ip]\/32
+    Create_route_with_dstCIDR    cs-gz    ${suite_changsha_site_id}    ${500}    ${suite_nanjing_site_id}    &{guangzhou_pc}[inner_ip]\/32
+    wait until keyword succeeds    10    1s    Ping_From_CPE_To_H2    guangzhou    &{changsha_pc}[inner_ip]    3
+    ...    0
+    [Teardown]    route_withoutUnion_teardown
+
+*** Keywords ***
+deleteUnion_and_UnionRoute
+    delete_company_unions    ${suite_company_id}    ${suite_guangzhou-changsha_union_id}
+    ${routeName_list}=    create list    guangzhou-changsha    changsha-guangzhou
+    Delete_route    ${routeName_list}
+
+route_withoutUnion_teardown
+    patch_company_union    ${suite_company_id}    ${suite_guangzhou-changsha_union_id}    guangzhou-changsha    ${False}    ${suite_guangzhou_site_id}    ${suite_changsha_site_id}
+    ${routeName_list}=    create list    gz-cs    cs-gz
+    Delete_route    ${routeName_list}
+    Create_route_with_dstCIDR    guangzhou-changsha    ${suite_guangzhou_site_id}    ${500}    ${suite_changsha_site_id}    &{changsha_cpe}[nets]
+    Create_route_with_dstCIDR    changsha-guangzhou    ${suite_changsha_site_id}    ${500}    ${suite_guangzhou_site_id}    &{guangzhou_cpe}[nets]
+
+nanjing_iperf_setup
+    ${nanjing_server_connect}=    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    set suite variable    ${suite_nanjing_server}    ${nanjing_server_connect}
+
+nanjing_iperf_teardown
+    Close_Iperfs_Server_In_LocalPC    ${suite_nanjing_server}
+
+check_cpe_to_nanjing_iperf_result
+    [Arguments]    ${cpe}    ${result}
+    ssh_cpe    ${cpe}
+    Write OpenWrt Cmd    iptables -t filter -L -nx    &{${cpe}_cpe}[passwd]
+    close connection
+    ssh_pc    ${cpe}
+    ssh_write_command_and_check_string    iperf3 -c &{nanjing_pc}[inner_ip] -t 1    ${result}
+    close connection

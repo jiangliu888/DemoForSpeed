@@ -1,0 +1,158 @@
+#!groovy
+
+pipeline {
+    agent { label 'master' }
+    environment {
+        GITREPO = '192.168.0.100:8011'
+        USER = "dev"
+        CREDENTIALSID = "aac47fba-17c9-4426-9f2d-868eaebdc92c"
+    }
+    stages {
+        stage('prepare dependency'){
+            agent { label 'uranus_FT' }
+             steps {
+                sh '''
+                    sudo rm -rf ${WORKSPACE}/src/
+                    '''
+                dir('src/mnemosyne'){
+                    git(url: "ssh://${USER}@${GITREPO}/mnemosyne", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                }
+            }
+        }
+        stage('Build gaea and uranus') {
+            parallel {
+                stage('build gaea'){
+                    agent { label 'uranus_FT' }
+                    steps {
+                        dir('src/gaea') {
+                            git(url: "ssh://${USER}@${GITREPO}/gaea", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                            set -ex
+                            echo "Start to build gaea package"
+                            cd $WORKSPACE/src/gaea
+                            export FOR_COVERTEST="coverTest"
+                            sudo ./build.sh
+                            if [ "$?" -ne 0 ];then
+                                error 'Build aiwan gaea failure!'
+                            fi
+                            echo "Finished to build package"
+                            '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/gaea/ci/*.deb', fingerprint: true
+                    }
+                }
+                stage('build uranus'){
+                    agent { label 'uranus_FT' }
+                    steps {
+                        dir('src/uranus') {
+                            git(url: "ssh://${USER}@${GITREPO}/uranus", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                            echo "Start build aiwan uranus"
+                            cd $WORKSPACE/src/uranus
+                            export FOR_COVERTEST="coverTest"
+                            chmod a+x ./build
+                            sudo ./build
+                            if [ "$?" -ne 0 ];then
+                                error 'Build aiwan uranus failure!'
+                            fi
+                            '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/uranus/ci/*.deb', fingerprint: true
+                    }
+                }
+            }
+        }
+        stage ('Deploy uranus and gaea') {
+            agent { label 'uranus_FT' }
+            steps {
+                sh '''
+                    rm -rf ${WORKSPACE}/deb/*
+                    '''
+                copyArtifacts filter: '**/aiwan-uranus*.deb,,**/aiwan-gaea*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                sh '''#!/bin/bash
+                    cd ${WORKSPACE}/deb
+                    sudo service aiwan-gaea stop
+                    sudo service aiwan-uranus stop
+                    sudo dpkg -P aiwan-gaea
+                    sudo dpkg -P aiwan-uranus
+                    mongo gaea --eval "db.dropDatabase()"
+                    ver_u=`ls aiwan-uranus*`
+                    sudo dpkg -i $ver_u
+                    ver=`ls aiwan-gaea*`
+                    sudo dpkg -i $ver
+                    sudo sed -i 's/poll-interval = 300000/poll-interval = 5000/g' /opt/aiwan/gaea/config/application.conf
+                    sudo sed -i 's/poll-delay = 120000/poll-delay = 6000/g'  /opt/aiwan/gaea/config/application.conf
+                    sudo sed -i 's/ne-sync-all-interval = 600000/ne-sync-all-interval = 2000/g' /opt/aiwan/gaea/config/application.conf
+                    sudo sed -i 's/area-selector-delay = 120000/area-selector-delay = 30000/g' /opt/aiwan/gaea/config/application.conf
+                    sudo sed -i 's/area-select-interval = 300/area-select-interval = 10/g'  /opt/aiwan/gaea/config/application.conf
+                    sudo sed -i 's/link-select-interval = 30/link-select-interval = 10/g'  /opt/aiwan/gaea/config/application.conf
+                    sudo sed -i 's/link-select-duration = 300/link-select-duration = 30/g' /opt/aiwan/gaea/config/application.conf
+                    sudo systemctl daemon-reload
+                    sudo service aiwan-uranus start
+                    sudo service aiwan-gaea start
+                    sleep 120s
+                    '''
+            }
+        }
+        stage ('test') {
+            agent { label 'uranus_FT' }
+            steps {
+                sh '''
+                sudo rm -rf ${WORKSPACE}/src/erlang
+                sudo rm -rf ${WORKSPACE}/output
+                sudo rm -rf ${WORKSPACE}/coverOutput
+                '''
+                dir('src/erlang') {
+                    git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                }
+                sh '''#!/bin/bash
+                set -x
+                if (! cmp ${WORKSPACE}/src/erlang/third-party/aiwan-switch/sysrepo/create_measure_result.py ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/sysrepo/create_measure_result.py >/dev/null 2>&1) || (! cmp ${WORKSPACE}/src/erlang/third-party/aiwan-switch/run.sh ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/run.sh >/dev/null 2>&1) || (! cmp ${WORKSPACE}/src/erlang/third-party/aiwan-switch/sysrepo/restart_create_measure_result.sh ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/sysrepo/restart_create_measure_result.sh >/dev/null 2>&1)
+                then
+                    echo 'measure or run file not same'
+                    cp ${WORKSPACE}/src/erlang/third-party/aiwan-switch/sysrepo/create_measure_result.py ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/sysrepo/create_measure_result.py
+                    cp ${WORKSPACE}/src/erlang/third-party/aiwan-switch/run.sh ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/run.sh
+                    cd ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/
+                    cp ${WORKSPACE}/src/erlang/third-party/aiwan-switch/sysrepo/restart_create_measure_result.sh  ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/sysrepo/restart_create_measure_result.sh
+                    cp ${WORKSPACE}/src/uranus/gaea/src/main/yang/aiwan-config@2018-07-17.yang  ${WORKSPACE}/src/uranus/ci/pt/aiwan-switch/sysrepo/yang/ -rf
+                    sh build.sh
+                fi
+                sudo cp ${WORKSPACE}/src/erlang/third-party/mininet/node.py  /usr/lib/python2.7/dist-packages/mininet/node.py -rf
+                sudo cp ${WORKSPACE}/src/erlang/third-party/mininet/aiswitch.py /usr/lib/python2.7/dist-packages/mininet/aiswitch.py -rf
+                export PYTHONPATH=${WORKSPACE}/src/uranus/ci/pt/aiwan-master:${WORKSPACE}/src/erlang
+
+                cd ${WORKSPACE}/src/erlang
+                robot -L trace --include NOTdebug --outputdir $WORKSPACE/output  --variablefile $WORKSPACE/src/erlang/erlang/config/ft_uranus.yaml --variable repo_path:${WORKSPACE}/src/erlang --variable aiwan_master_path:${WORKSPACE}/src/uranus/ci/pt/aiwan-master  erlang/ft_testcase 
+                #robot -L trace  --outputdir ${WORKSPACE}/output  --variablefile ${WORKSPACE}/src/erlang/erlang/config/ft_uranus.yaml --variable repo_path:${WORKSPACE}/src/erlang --variable aiwan_master_path:${WORKSPACE}/src/uranus/ci/pt/aiwan-master  -t Start_3CR  erlang/ft_testcase
+
+                sudo mkdir -p ${WORKSPACE}/coverOutput/execfile
+                sudo mkdir -p ${WORKSPACE}/coverOutput/classesfile
+                sudo mkdir -p ${WORKSPACE}/coverOutput/srcfile
+                sudo mkdir -p ${WORKSPACE}/coverOutput/html
+                sudo java -jar /opt/aiwan/gaea/jacoco/jacococli.jar dump --port 3456 --destfile ${WORKSPACE}/coverOutput/execfile/gaea.exec
+                sudo java -jar /opt/aiwan/uranus/jacoco/jacococli.jar dump --port 3457 --destfile ${WORKSPACE}/coverOutput/execfile/uranus.exec
+                sudo java -jar /opt/aiwan/uranus/jacoco/jacococli.jar merge ${WORKSPACE}/coverOutput/execfile/gaea.exec ${WORKSPACE}/coverOutput/execfile/uranus.exec --destfile ${WORKSPACE}/coverOutput/execfile/merged.exec
+                sudo cp -r ${WORKSPACE}/src/uranus/cronus/target/classes/com ${WORKSPACE}/coverOutput/classesfile
+                sudo cp -r ${WORKSPACE}/src/gaea/build/classes/scala/main/com ${WORKSPACE}/coverOutput/classesfile
+
+                sudo cp -r ${WORKSPACE}/src/uranus/cronus/src/main/java/com ${WORKSPACE}/coverOutput/srcfile
+                sudo cp -r ${WORKSPACE}/src/gaea/src/main/java/com ${WORKSPACE}/coverOutput/srcfile
+                sudo cp -r ${WORKSPACE}/src/gaea/src/main/scala/com ${WORKSPACE}/coverOutput/srcfile
+
+                sudo java -jar /opt/aiwan/uranus/jacoco/jacococli.jar report ${WORKSPACE}/coverOutput/execfile/merged.exec --classfiles ${WORKSPACE}/coverOutput/classesfile --sourcefiles ${WORKSPACE}/coverOutput/srcfile --name ft-report --html ${WORKSPACE}/coverOutput/html
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            node ('uranus_FT') {
+                archiveArtifacts 'output/*'
+                archiveArtifacts 'coverOutput/html/**/*'
+            }
+        }
+    }
+}
+

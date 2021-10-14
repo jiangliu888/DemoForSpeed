@@ -1,0 +1,115 @@
+*** Settings ***
+Documentation     GET /api/v1/channel/configs/devices?limit=&skip=&companyId=
+...
+...               必参：companyId
+...
+...               1. 创建2组不同渠道公司，每组2个公司，如渠道1，渠道2；
+...               2. 普通公司账户不能查询任何公司的站点信息；
+...               3. 渠道账户可以查询该渠道下所有公司的站点信息，渠道账户不能查询其他渠道和非渠道的公司站点信息；
+...               4. 渠道下的公司账户不能查询任何公司站点信息；
+Suite Setup
+Suite Teardown
+Library           ../../libs/portal/RequestApi.py
+Library           Collections
+Library           ../../libs/portal/JsonValidate.py
+Library           Dialogs
+
+*** Variables ***
+@{sn}             2011    2012    2013    2014    2015    2021    2022
+...               2023    2024    2071    2072    2073    2031    2032
+...               2033    2041    2043    2045    2051    2052    2053
+...               2054    2055    2056    2100    2101    2102    ft2104
+...               ft2105
+
+*** Test Cases ***
+1. authority limitation
+    [Tags]    SDWANDEV-4505
+    ${code}    ${resp}    get site info    test5_1@qq.com    test55!    companyId=${测试公司5_id}    #公司账户查询自己公司站点信息
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${resp}    get site info    test5_1@qq.com    test55!    companyId=${测试公司6_id}    #公司账户查询其他公司站点信息
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=${测试公司6_id}    #渠道账户查询渠道公司6站点信息
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    1
+    should be equal    ${resp}[devices][0][companyId]    ${测试公司6_id}
+    should be equal    ${resp}[devices][0][sn]    2002
+    should be equal as integers    ${resp}[total]    1
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=${测试公司7_id}    #渠道账户查询渠道公司7站点信息
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    1
+    should be equal    ${resp}[devices][0][companyId]    ${测试公司7_id}
+    should be equal    ${resp}[devices][0][sn]    2003
+    should be equal as integers    ${resp}[total]    1
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=${测试公司5_id}    #渠道账户查询其他公司站点信息
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=${测试公司8_id}    #渠道账户查询其他渠道公司站点信息
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${resp}    get site info    test6_2@qq.com    test66!    companyId=${测试公司6_id}    #公司(属渠道)账户查询渠道公司站点信息
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+
+2. params verify
+    [Tags]    SDWANDEV-4517
+    # 参数测试
+    #    测试公司6下再创建29个站点，总计30个
+    ${j}    evaluate    1
+    : FOR    ${i}    IN    @{sn}
+    \    create site    testsite6_${j}    ${测试公司6_id}    ${i}
+    \    ${j}    evaluate    ${j}+1
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    \    #不携带公司id
+    should be equal as integers    ${code}    404
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=${测试公司6_id}    #正确的公司id
+    should be equal as integers    ${code}    200
+    should be equal as integers    ${resp}[total]    30
+    length should be    ${resp}[devices]    20
+    check response format    ${resp}    site info
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=fffffffffffffffff    #错误的公司id
+    should be equal as integers    ${code}    403
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&yyy=xxx    #携带未知参数
+    should be equal as integers    ${code}    200
+
+3. limit&skip verify
+    [Tags]    SDWANDEV-4537
+    #    skip&limit参数空值传入
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&skip=&limit=
+    should be equal as integers    ${resp}[total]    30
+    length should be    ${resp}[devices]    20
+    check response format    ${resp}    site info
+    #    limit参数测试
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    limit=5&companyId=${测试公司6_id}    #中间值
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    5
+    check response format    ${resp}    site info
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    limit=100&companyId=${测试公司6_id}    #上界值
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    30
+    check response format    ${resp}    site info
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    limit=0&companyId=${测试公司6_id}    #下界值
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    20
+    check response format    ${resp}    site info
+    #    skip参数测试
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    skip=15&companyId=${测试公司6_id}    #中间值
+    length should be    ${resp}[devices]    15
+    check response format    ${resp}    site info
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    skip=0&companyId=${测试公司6_id}    #下界值
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    20
+    check response format    ${resp}    site info
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    skip=100&companyId=${测试公司6_id}    #上界值
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    0
+    check response format    ${resp}    site info
+    #    skip+limit参数测试
+    ${code}    ${resp}    get site info    test6_1@qq.com    test66!    skip=20&limit=30&companyId=${测试公司6_id}
+    should be equal as integers    ${code}    200
+    length should be    ${resp}[devices]    10
+    check response format    ${resp}    site info
+
+*** Keywords ***

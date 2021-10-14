@@ -1,0 +1,238 @@
+*** Settings ***
+Library           ../../libs/manager/ManagerKeyword.py
+Library           ../../libs/prism/PrismKeyword.py
+Resource          SshKeyword.txt
+
+*** Keywords ***
+Check_NE_Mem_INFO_From_Manager
+    [Arguments]    ${cpe}
+    ssh_cpe    ${cpe}
+    ${ne_id}=    Get_CPE_Minion_Id    ${cpe}
+    ${lable_names}=    create list    memory
+    ${lable_values}=    create list    used
+    ${mem_used_from_m}=    get_ne_metric_value    ${ne_id}    collectd_memory    ${lable_names}    ${lable_values}
+    ${lable_values}=    create list    slab_unrecl
+    ${mem_slab_unrecl_from_m}=    get_ne_metric_value    ${ne_id}    collectd_memory    ${lable_names}    ${lable_values}
+    ${mem_used_from_CPE}=    GET_CPE_INFO    ${cpe}    free \ | grep Mem|awk -F " " '{print $3}'
+    ${lable_values}=    create list    free
+    ${mem_free_from_m}=    get_ne_metric_value    ${ne_id}    collectd_memory    ${lable_names}    ${lable_values}
+    ${mem_free_from_CPE}=    GET_CPE_INFO    ${cpe}    free \ | grep Mem|awk -F " " '{print $4}'
+    ${lable_values}=    create list    buffered
+    ${mem_buf_from_m}=    get_ne_metric_value    ${ne_id}    collectd_memory    ${lable_names}    ${lable_values}
+    ${mem_buf_from_CPE}=    GET_CPE_INFO    ${cpe}    cat /proc/meminfo |grep ^Buffer|awk -F " " '{print $2}'
+    ${lable_values}=    create list    cached
+    ${mem_cache_from_m}=    get_ne_metric_value    ${ne_id}    collectd_memory    ${lable_names}    ${lable_values}
+    ${mem_cache_from_CPE}=    GET_CPE_INFO    ${cpe}    cat /proc/meminfo |grep ^Cached|awk -F " " '{print $2}'
+    ${mem_cache2_from_CPE}=    GET_CPE_INFO    ${cpe}    cat /proc/meminfo |grep SReclaimable|awk -F " " '{print $2}'
+    close connection
+    ${used_gap}=    evaluate    abs((${mem_slab_unrecl_from_m}+${mem_used_from_m})/1024 - ${mem_used_from_CPE}) < 100*1024
+    ${free_gap}=    evaluate    abs(${mem_free_from_m}/1024 - ${mem_free_from_CPE}) < 100*1024
+    ${buf_gap}=    evaluate    abs(${mem_buf_from_m} - ${mem_buf_from_CPE}*1024) < 100*1024*1024
+    ${cache_gap}=    evaluate    abs(${mem_cache_from_m}/1024 - (${mem_cache_from_CPE}+${mem_cache2_from_CPE})) < 500*1024
+    should be true    ${used_gap}
+    should be true    ${free_gap}
+    should be true    ${buf_gap}
+    Comment    should be true    ${cache_gap}
+
+Check_NE_CPU_INFO_From_Manager
+    [Arguments]    ${cpe}
+    ssh_cpe    ${cpe}
+    ${ne_id}=    Get_CPE_Minion_Id    ${cpe}
+    ${lable_names}=    create list    cpu    type
+    ${cpu_list}=    create list    0    1    2    3
+    ${mode_list}=    create list    user    nice    system    idle    wait
+    ...    interrupt    softirq    steal
+    : FOR    ${cpu}    IN    @{cpu_list}
+    \    Check_NE_CPU_P_INFO_From_Manager    ${ne_id}    ${cpu}    ${lable_names}
+    ${cpu_1}=    get_ne_metric_value    ${ne_id}    collectd_load_shortterm
+    ${cpu_1_from_CPE}=    GET_CPE_INFO    ${cpe}    uptime|grep load|awk -F " " '{print $(NF-2)}'|sed 's/,//g'
+    ${gap}=    evaluate    abs(${cpu_1}-${cpu_1_from_CPE}) < 1
+    should be true    ${gap}
+    ${cpu_5}=    get_ne_metric_value    ${ne_id}    collectd_load_midterm
+    ${cpu_5_from_CPE}=    GET_CPE_INFO    ${cpu}    uptime |grep load|awk -F " " '{print $(NF-1)}'|sed 's/,//g'
+    ${gap}=    evaluate    abs(${cpu_5}-${cpu_5_from_CPE}) < 1
+    should be true    ${gap}
+    ${cpu_15}=    get_ne_metric_value    ${ne_id}    collectd_load_longterm
+    ${cpu_15_from_CPE}=    GET_CPE_INFO    ${cpu}    uptime |grep load|awk -F " " '{print $(NF)}'|sed 's/,//g'
+    ${gap}=    evaluate    abs(${cpu_15}-${cpu_15_from_CPE}) < 1
+    should be true    ${gap}
+    close connection
+
+Check_NE_Measure_Task_Count
+    [Arguments]    ${ne_id}    ${task_id}    ${b_time}    ${e_time}
+    check_ne_measure_result_counters_with_task    ${ne_id}    ${task_id}    ${b_time}    ${e_time}
+
+Check_NE_Measure_Task_Value
+    [Arguments]    ${ne_id}    ${task_id}    ${b_time}    ${max}    ${min}    ${end_time}=${None}
+    ${values}=    get_ne_measure_result_value_with_task    ${ne_id}    ${task_id}    ${b_time}    ${end_time}
+    : FOR    ${value}    IN    @{values}
+    \    ${in_range}=    evaluate    ${value} <= ${max} and ${value} >= ${min}
+    \    should be true    ${in_range}
+
+Check_NE_Disk_INFO_From_Manager
+    [Arguments]    ${cpe}
+    ssh_cpe    ${cpe}
+    ${ne_id}=    Get_CPE_Minion_Id    ${cpe}
+    ${label_name}=    create list    df    type
+    ${label_value}=    create list    root    free
+    ${disk_avail_from_m}=    get_ne_metric_value    ${ne_id}    collectd_df_df_complex    ${label_name}    ${label_value}
+    ${disk_avail_from_CPE}=    GET_CPE_INFO    ${cpe}    df -k|grep /$|awk -F " " '{print $4}'
+    ${label_value}=    create list    root    used
+    ${disk_used_from_m}=    get_ne_metric_value    ${ne_id}    collectd_df_df_complex    ${label_name}    ${label_value}
+    ${disk_used_from_CPE}=    GET_CPE_INFO    ${cpe}    df -k|grep /$|awk -F " " '{print $3}'
+    ${used_gap}=    evaluate    abs(${disk_used_from_m}/(1024*1024) - ${disk_used_from_CPE}/1024)< 9
+    ${avail_gap}=    evaluate    abs(${disk_avail_from_m}/(1024*1024) - ${disk_avail_from_CPE}/1024)< 9
+    should be true    ${avail_gap}
+    should be true    ${used_gap}
+    close connection
+
+Check_NE_CPU_P_INFO_From_Manager
+    [Arguments]    ${ne_id}    ${cpu}    ${lable_names}
+    ${mode_list}=    create list    user    nice    system    idle    wait
+    ...    interrupt    softirq    steal
+    ${cpu_name}=    evaluate    'cpu{}'.format(${cpu})
+    ${cpu_from_CPE}=    GET_CPE_INFO    ${cpu}    cat /proc/stat |grep ^${cpu_name}
+    ${cpu_f_c}=    split string    ${cpu_from_CPE}
+    : FOR    ${m}    IN    @{mode_list}
+    \    ${lable_values}=    create list    ${cpu}    ${m}
+    \    ${cpu_m}=    get_ne_metric_value    ${ne_id}    collectd_cpu_percent    ${lable_names}    ${lable_values}
+    \    ${i} =    get index from list    ${mode_list}    ${m}
+    \    ${index} =    evaluate    ${i} +1
+    \    ${cpu_c}=    Get From List    ${cpu_f_c}    ${index}
+    \    ${gap}=    evaluate    abs(${cpu_m}-${cpu_c})
+
+Check_NE_Core_INFO_From_Manager
+    [Arguments]    ${cpe}
+    ${ne_id}=    Get_CPE_Minion_Id    ${cpe}
+    ${lable_names}=    create list    filecount
+    ${lable_values}=    create list    opt_aiwan_cores
+    ${core_total_from_m}=    get_ne_metric_value    ${ne_id}    collectd_filecount_files    ${lable_names}    ${lable_values}
+    should be equal as integers    ${core_total_from_m}    0
+
+Check_NE_Network_INFO_From_Manager
+    [Arguments]    ${pop}
+    ${pop_id}=    Set Variable If    '${pop}' == 'local'    &{local_pop}[minion_id]    '${pop}' == 'remote'    &{remote_pop}[minion_id]
+    ${ports}=    Set Variable If    '${pop}' == 'local'    &{local_pop}[logic_ports]    '${pop}' == 'remote'    &{remote_pop}[logic_ports]
+    ${lable_names}=    create list    kni_network
+    : FOR    ${p}    IN    @{ports}
+    \    ${i} =    get index from list    ${ports}    ${p}
+    \    ${lable_values}=    create list    ${p}
+    \    ${receive_packets_total}=    get_ne_metric_value    ${pop_id}    collectd_kni_network_receive_packets    ${lable_names}    ${lable_values}
+    \    should be true    ${receive_packets_total} > 0
+    \    ${receive_bytes_total}=    get_ne_metric_value    ${pop_id}    collectd_kni_network_receive_bytes    ${lable_names}    ${lable_values}
+    \    should be true    ${receive_bytes_total} > 0
+    \    ${receive_errs_total}=    get_ne_metric_value    ${pop_id}    collectd_kni_network_receive_errs    ${lable_names}    ${lable_values}
+    \    should be equal as integers    ${receive_errs_total}    0
+    \    ${transmit_packets_total}=    get_ne_metric_value    ${pop_id}    collectd_kni_network_transmit_packets    ${lable_names}    ${lable_values}
+    \    should be true    ${transmit_packets_total} > 0
+    \    ${transmit_bytes_total}=    get_ne_metric_value    ${pop_id}    collectd_kni_network_transmit_bytes    ${lable_names}    ${lable_values}
+    \    should be true    ${transmit_bytes_total} > 0
+    \    ${transmit_errs_total}=    get_ne_metric_value    ${pop_id}    collectd_kni_network_transmit_errs    ${lable_names}    ${lable_values}
+    \    should be equal as integers    ${transmit_errs_total}    0
+    \    Comment    ${network_state}=    get_ne_metric_value    ${pop_id}    collectd_kni_network_state    ${lable_names}
+    \    ...    ${lable_values}
+    \    Comment    should be equal as integers    ${network_state}    1
+
+Check_NE_LInk_INFO_From_Manager
+    [Arguments]    ${cpe}    ${remote_cpe}    ${link_num}
+    ${ne_id}=    Get_CPE_Chassis_Id    ${cpe}
+    ${d_id}=    Get_CPE_Minion_Id    ${cpe}
+    ${r_ne_id}=    Get_CPE_Chassis_Id    ${remote_cpe}
+    ${bonds}=    get_e2e_dest_site_bond    ${ne_id}    ${r_ne_id}
+    ${total_link_p}    set variable    ${0}
+    ${total_link_b}    set variable    ${0}
+    ${link_ids}    ${links}=    Check End2End Links    ${cpe}    ${r_ne_id}    ${link_num}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    ${key}=    create list    link    bond    tunnel    dstNe    srcWan
+    ...    dstWan    linkType
+    : FOR    ${id}    IN    @{link_ids}
+    \    ${i}    get index from list    ${link_ids}    ${id}
+    \    ${b_cpe}=    get from list    ${b_list}    ${i}
+    \    ${score_cpe}=    get from list    ${score_list}    ${i}
+    \    ${p_cpe}=    get from list    ${p_list}    ${i}
+    \    ${link}=    get from list    ${links}    ${i}
+    \    ${link_type}=    get_expect_link_type    ${link}
+    \    ${value}    evaluate    [str(${id}),str(${bonds[0]['portNumber']}),str(${link["tunnel-number"]}),str(${link["remote-id"]}),str(${link["local-wan-id"]}),str(${link["remote-wan-id"]}),'${link_type}']
+    \    ${Bytes}=    get_ne_metric_value    ${d_id}    collectd_link_e2e_transmit_bytes    ${key}    ${value}
+    \    ${Packets}=    get_ne_metric_value    ${d_id}    collectd_link_e2e_transmit_packets    ${key}    ${value}
+    \    ${score}=    get_ne_metric_value    ${d_id}    collectd_link_e2e_score    ${key}    ${value}
+    \    should be true    ${score_cpe} < 500
+    \    ${score_gap}=    evaluate    abs(${score} - ${score_cpe}) <2
+    \    should be true    ${score_gap}
+    \    ${p_gap}=    evaluate    abs(${Packets}-${p_cpe})<140
+    \    should be true    ${p_gap}
+    \    ${b_gap}=    evaluate    abs(${Bytes}-${b_cpe})<30000
+    \    should be true    ${b_gap}
+    \    ${total_link_p}=    evaluate    ${total_link_p}+${Packets}
+    \    ${total_link_b}=    evaluate    ${total_link_b}+${Bytes}
+    ${key}=    create list    bond    srcID    dstID
+    ${values}=    evaluate    [str(${bonds[0]['portNumber']}),str(${bonds[0]['srcId']}),str(${bonds[0]["dstId"]})]
+    ${B_Packets_r}=    get_ne_metric_value    ${d_id}    collectd_bond_transmit_packets    ${key}    ${values}
+    ${B_Packets_s}=    get_ne_metric_value    ${d_id}    collectd_bond_receive_packets    ${key}    ${values}
+    ${B_P_S_gap}=    evaluate    abs(${B_Packets_r} - ${total_link_p}) <2
+    should be true    ${score_gap}
+
+Check_Task_Status
+    [Arguments]    ${task_id}
+    ${status}    ${step}=    get task current status    ${task_id}
+    should be equal    ${status}    ${0}
+    should be equal    ${step}    end
+
+Get_SPI_Info_Manager
+    [Arguments]    ${cpe}    ${spi_name}
+    ${d_id}=    Get_CPE_Minion_Id    ${cpe}
+    ${tag_id}=    get_company_spi_tag_id_by_name    ${suite_company_id}    ${spi_name}
+    ${label_name}=    create list    spi
+    ${label_value}=    create list    ${tag_id}
+    ${node_spi_bytes}=    get_ne_metric_value    ${d_id}    collectd_spi_transmit_bytes    ${label_name}    ${label_value}
+    ${node_spi_packets}=    get_ne_metric_value    ${d_id}    collectd_spi_transmit_packets    ${label_name}    ${label_value}
+    [Return]    ${node_spi_bytes}    ${node_spi_packets}
+
+Check_Manager_SPI_Value
+    [Arguments]    ${cpe}    ${r_p_v}=0.0    ${bulk_p_v}=0.0    ${d_p_v}=0.0
+    ${r_p}    ${bulk_p}    ${d_p}    Get_Manager_SPI_Value    ${cpe}
+    ${ret}=    evaluate    ${r_p}>=${r_p_v}
+    should be true    ${ret}
+    should be true    '${bulk_p}'=='${bulk_p_v}'
+    ${ret}=    evaluate    ${d_p}>=${d_p_v}
+    should be true    ${ret}
+
+Get_Manager_SPI_Value
+    [Arguments]    ${cpe}
+    ${r_b}    ${r_p}=    Wait Until Keyword Succeeds    11s    1s    Get_SPI_Info_Manager    ${cpe}
+    ...    QOS_${cpe}_Pri_high_Tag
+    ${bulk_b}    ${bulk_p}=    Get_SPI_Info_Manager    ${cpe}    QOS_${cpe}_Pri_medium_Tag
+    ${d_b}    ${d_p}=    Get_SPI_Info_Manager    ${cpe}    QOS_Default_Tag
+    [Return]    ${r_p}    ${bulk_p}    ${d_p}
+
+Get_Manager_Saas_SPI_Value
+    [Arguments]    ${cpe}
+    ${r_b}    ${r_p}=    Wait Until Keyword Succeeds    11s    1s    Get_SPI_Info_Manager    ${cpe}
+    ...    QOS_${cpe}_Pri_high_Tag
+    ${bulk_b}    ${bulk_p}=    Get_SPI_Info_Manager    ${cpe}    QOS_${cpe}_Pri_medium_Tag
+    ${d_b}    ${d_p}=    Get_SPI_Info_Manager    ${cpe}    QOS_Default_Tag
+    [Return]    ${r_p}    ${bulk_p}    ${d_p}
+
+Check_Manager_SAAS_SPI_Value
+    [Arguments]    ${cpe}    ${r_p_v}=0.0    ${bulk_p_v}=0.0    ${bg_p_v}=0.0    ${d_p_v}=0.0
+    ${r_p}    ${bulk_p}    ${bg_p}    ${d_p}    Get_Manager_Saas_SPI_Value    ${cpe}
+    should be true    '${r_p}'=='${r_p_v}'
+    should be true    '${bulk_p}'=='${bulk_p_v}'
+    should be true    '${bg_p}'=='${bg_p_v}'
+
+Get_Expect_Link_Type
+    [Arguments]    ${link}
+    ${local_mode}=    get_vport_if_type_from_reg_conf_by_number    ${link['local-id']}    ${link['local-wan-id']}
+    ${remote_mode}=    get_vport_if_type_from_reg_conf_by_number    ${link['remote-id']}    ${link['remote-wan-id']}
+    ${l_type}=    Set Variable If    '${local_mode}'=='MIA' or '${remote_mode}'=='MIA'    MIA    FIA
+    [Return]    ${l_type}
+
+Check_Aiwan_Hardware_Status_From_AlertMng
+    [Arguments]    ${cpe}    ${b_time}
+    ${d_id}=    Get_CPE_Minion_Id    ${cpe}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    ${hardware_status_from_m}=    get_cpe_last_dedicate_alarm    ${suite_company_id}    ${d_id}    ${ne_id}    firing    CpeHardwareError
+    ...    ${b_time}
+    length should be    ${hardware_status_from_m}    ${1}
+    should be equal as strings    ${hardware_status_from_m[0]['labels']['siteName']}    ${cpe}
+    should be equal as strings    ${hardware_status_from_m[0]['labels']['severity']}    Emergency

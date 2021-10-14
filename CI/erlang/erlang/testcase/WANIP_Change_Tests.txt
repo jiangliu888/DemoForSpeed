@@ -1,0 +1,132 @@
+*** Settings ***
+Suite Teardown
+Resource          resource/UranusKeyword.txt
+Resource          resource/SshKeyword.txt
+Library           ../libs/uranus/UranusKeyword.py
+Library           ../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+
+*** Test Cases ***
+Gateway PPPoE WAN IP Change
+    [Tags]    SDWANDEV-1537    SanityCheck    onlyCI
+    [Setup]    wait until keyword succeeds    40    1    Check Link Stats
+    wait until keyword succeeds    10s    1    Gateway Pingable Check
+    ssh_cpe    guangzhou
+    ${ip}=    Get Nic IP    &{guangzhou_cpe}[internet_if]
+    ${changed_ip}=    PPPOE IP Change    gz_routeos    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[internet_if]
+    should not be equal    ${ip}    ${changed_ip}
+    close connection
+    wait until keyword succeeds    40s    200ms    Check Link Stats
+    # current design will re-calculate the cac/eac, later may not
+    ssh_cpe    guangzhou
+    Gateway Nic Stop    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if2]
+    wait until keyword succeeds    8s    500ms    Gateway Pingable Check
+    wait until keyword succeeds    90s    500ms    All_Netconf_Devices_Avaiable
+    [Teardown]    Gateway WAN Nic Restore    guangzhou    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if]    &{guangzhou_cpe}[internet_if2]
+
+WAN1 Disable
+    [Tags]    SDWANDEV-1998    SanityCheck    SDWANDEV-1971    SDWANDEV-1969    onlyCI
+    [Setup]    wait until keyword succeeds    70    1    Check Link Stats
+    wait until keyword succeeds    15s    1    Gateway Pingable Check
+    ssh_cpe    guangzhou
+    Gateway Nic Stop    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[internet_if]
+    close connection
+    # need to restart aiwa-cpe as there's no switch for control plane
+    Restart_Cpe    guangzhou
+    # check the interface status from controller
+    wait until keyword succeeds    30s    100ms    Check Wan Status    ${False}
+    # after re-register check the interface's homeCode prefer
+    Check Prefer And Selected Cac Eac
+    Gateway WAN Nic Restore    guangzhou    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if]    &{guangzhou_cpe}[internet_if2]
+    Restart_Cpe    guangzhou
+    wait until keyword succeeds    30s    100ms    Check Wan Status    ${True}
+    # after re-register with wan1 the interface's homeCode and prefer should be right
+    Check Prefer And Selected Cac Eac
+    wait until keyword succeeds    70s    1s    Check Link Stats
+    ssh_cpe    guangzhou
+    Gateway Nic Stop    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if2]
+    wait until keyword succeeds    10s    500ms    Gateway Pingable Check
+    [Teardown]    run keywords    wait until keyword succeeds    5x    1    Gateway WAN Nic Restore    guangzhou
+    ...    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if]    &{guangzhou_cpe}[internet_if2]
+    ...    AND    Restart_Cpe    guangzhou
+    ...    AND    wait until keyword succeeds    70s    1    Check Link Stats
+    ...    AND    wait until keyword succeeds    15s    1    Confirm Netconf Available    guangzhou
+
+WAN1 Disable Before Register
+    [Tags]    SDWANDEV-3538    debug
+    [Setup]    Unregister Guangzhou CPE
+    ssh_cpe    guangzhou
+    Gateway Nic Stop    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[internet_if]
+    close connection
+    # register cpe the 1st time
+    Restart_Cpe    guangzhou
+    # check the interface status from controller
+    wait until keyword succeeds    30s    100ms    Check Wan Status    ${False}
+    # after 1st register check the interface's homeCode prefer
+    ${status}=    run keyword and return status    Check Prefer And Selected Cac Eac
+    should not be true    ${status}
+    Gateway WAN Nic Restore    guangzhou    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if]    &{guangzhou_cpe}[internet_if2]
+    Restart_Cpe    guangzhou
+    wait until keyword succeeds    30s    100ms    Check Wan Status    ${True}
+    # after re-register with wan1, there should be correct cac/eac for the interface, and prefer should be right
+    wait until keyword succeeds    75s    500ms    Check Prefer And Selected Cac Eac
+    wait until keyword succeeds    70s    200ms    Check Link Stats
+    ssh_cpe    guangzhou
+    Gateway Nic Stop    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if2]
+    wait until keyword succeeds    10s    500ms    Gateway Pingable Check
+    [Teardown]    run keywords    Print CPE Netconf Port    guangzhou
+    ...    AND    wait until keyword succeeds    5x    1    Gateway WAN Nic Restore    guangzhou
+    ...    &{guangzhou_cpe}[wan_alias]    &{guangzhou_cpe}[wan2_alias]    &{guangzhou_cpe}[internet_if]    &{guangzhou_cpe}[internet_if2]
+    ...    AND    Restart_Cpe    guangzhou
+    ...    AND    wait until keyword succeeds    120s    1    Check Link Stats
+    ...    AND    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    10x    2s    Ensure_CPE_Flow_Work
+    ...    guangzhou    office
+
+*** Keywords ***
+Check Controller End2End Bond Deleted
+    [Arguments]    ${ne_id}    ${remote_id}
+    ${bonds}=    get_e2e_dest_site_bond    ${ne_id}    ${remote_id}
+    length should be    ${bonds}    ${0}
+
+Check Link Stats
+    ${link_ids}    ${links}=    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} < 9999
+
+Check Prefer And Selected Cac Eac
+    @{cac_list}    set variable    &{guangzhou_cpe}[prefer_cac]
+    @{eac_list}    set variable    &{guangzhou_cpe}[prefer_eac]
+    ${area}=    get_cpe_home_code_prefer    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if]    ${0}
+    should be equal as integers    ${area['cac']}    @{cac_list}[0]
+    should be equal as integers    ${area['eac']}    @{eac_list}[0]
+    Ensure_CPE_Wan_Select_Right_EAC    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if]    ${0}    @{cac_list}[0]    @{eac_list}[0]
+    ${area}=    get_cpe_home_code_prefer    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if2]    ${0}
+    should be equal as integers    ${area['cac']}    @{cac_list}[1]
+    should be equal as integers    ${area['eac']}    @{eac_list}[1]
+    Ensure_CPE_Wan_Select_Right_EAC    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if2]    ${0}    @{cac_list}[1]    @{eac_list}[1]
+
+Check Wan Status
+    [Arguments]    ${expected_status}
+    ${wan_status}=    get wan if status from reg conf by name    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if]
+    should be equal    @{wan_status}[0]    ${expected_status}
+
+Unregister Guangzhou CPE
+    ${cpe}=    set variable    guangzhou
+    ${l_items}=    create list    tunnel    link    bond    controller    manager
+    Print CPE Netconf Port    ${cpe}
+    unregister_ne    &{${cpe}_cpe}[chassis_id]
+    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    &{${cpe}_cpe}[chassis_id]
+    Print CPE Netconf Port    ${cpe}
+    ${callhome_4G}=    run keyword if    '${cpe}' == 'guangzhou'    Check Current Callhome Uses 4G    ${cpe}
+    ...    ELSE    set variable    ${False}
+    ${timeout}=    set variable if    ${callhome_4G}    15s    10s
+    Wait Until Keyword Succeeds    ${timeout}    200ms    Confirm No Data in Sysrepo Startup    ${cpe}    ${l_items}
+    ${bonds_from_controller}=    get_e2e_dest_site_bond_from_db    &{${cpe}_cpe}[chassis_id]    &{Saas_Service1}[ne_id]
+    length should be    ${bonds_from_controller}    ${0}
+
+Confirm Netconf Available
+    [Arguments]    ${cpe}
+    ${netconf}=    check_device_status    &{${cpe}_cpe}[chassis_id]    NETCONF
+    should be equal    ${netconf}    ${True}

@@ -1,0 +1,178 @@
+#!groovy
+
+pipeline {
+    agent { label 'master' }
+    environment {
+        GITREPO = '192.168.0.100:8011'
+        USER = "dev"
+        CREDENTIALSID = "aac47fba-17c9-4426-9f2d-868eaebdc92c"
+        VER = "21.04.1-RC${BUILD_NUMBER}"
+        REPO_VER = "2104"
+        verdate = sh(script: "echo `date +%Y.%m.%d`", returnStdout: true).trim()
+    }
+    stages {
+        stage ('reset controller prism metis and config web') {
+                  agent { label 'Controller-IT-20.20' }
+                  steps {
+                   sh '''
+                   sudo rm -rf ${WORKSPACE}/src/RoaringDog
+                   '''
+                   dir('src/RoaringDog') {
+                       git(url: "ssh://${USER}@${GITREPO}/RoaringDog", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                   }
+                   dir('src/erlang') {
+                      git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                   }
+                   sh '''#!/bin/bash
+                     cd /opt/aiwan/metis/server
+                     echo "Call npm run stop"
+                     sudo npm run stop
+                     if [ $? -ne 0 ];then
+                         echo "stop metis failed"
+                         exit 1
+                     fi
+                     sudo systemctl stop aiwan-gaea
+                     if [ $? -ne 0 ];then
+                         echo "stop aiwan-gaea failed"
+                         exit 1
+                     fi
+                     sudo systemctl stop aiwan-prism
+                     if [ $? -ne 0 ];then
+                         echo "stop aiwan-prism failed"
+                         exit 1
+                     fi
+                     sudo docker stop controller
+                     if [ $? -ne 0 ];then
+                         echo "stop controller docker failed"
+                         exit 1
+                     fi
+                     # drop gaea/metis/prism db
+                     mongo 10.192.20.210/gaea --eval "db.dropDatabase()"
+                     if [ $? -ne 0 ];then
+                         echo "clear gaea db failed"
+                         exit 1
+                     fi
+                     mongo 10.192.20.210/insight --eval "db.dropDatabase()"
+                     if [ $? -ne 0 ];then
+                         echo "clear metis db failed"
+                         exit 1
+                     fi
+                     mongo 10.192.20.210/prism --eval "db.dropDatabase()"
+                     if [ $? -ne 0 ];then
+                         echo "clear prism db failed"
+                         exit 1
+                     fi
+                     # drop consul data
+                     sudo docker exec -i node1 consul kv delete -http-addr=10.192.20.20:8500 -token="7de011b3-26e4-3317-5ab0-055e4c4385ec" -recurse config
+                     if [ $? -ne 0 ];then
+                         echo "drop consul data failed"
+                         exit 1
+                     fi
+                     sudo systemctl start aiwan-gaea
+                     if [ $? -ne 0 ];then
+                         echo "start aiwan-gaea failed"
+                         exit 1
+                     fi
+                     sudo systemctl start aiwan-prism
+                      if [ $? -ne 0 ];then
+                         echo "start aiwan-prism failed"
+                         exit 1
+                     fi
+                    sudo docker start controller
+                     if [ $? -ne 0 ];then
+                         echo "start docker controller (uranus) failed"
+                         exit 1
+                     fi
+                     sleep 120s
+
+                     echo "Call npm run start"
+                     sudo npm run start
+                     if [ $? -ne 0 ];then
+                         echo "start metis failed"
+                         exit 1
+                     fi
+                   cd  ${WORKSPACE}/src/
+                   sudo docker rm e2etest
+                   sudo cp RoaringDog/cypress/fixtures/integration_testbed/variables-utils.js RoaringDog/cypress/integration/utils/variables-utils.js
+                   #sudo cp RoaringDog/cypress/fixtures/integration_testbed/sites.json RoaringDog/cypress/fixtures/companies/sites/site.json
+                   sudo cp RoaringDog/cypress/fixtures/integration_testbed/companies.json RoaringDog/cypress/fixtures/companies/companies.json
+                   sudo docker run -i -v $PWD:/e2e -w /e2e --shm-size=1g --name e2etest harbor.netgrounder.com:800/cypress/forci:latest  sh -c "ln -s /usr/local/lib/node_modules /e2e/RoaringDog; cd RoaringDog; cypress run --spec "cypress/integration/st_setup/*test.js"; junit-merge -d cypress/results -o cypress/results/result.xml;xunit-viewer -r cypress/results/result.xml -o cypress/results/result.html;rm -rf /e2e/RoaringDog/node_modules"
+                   result=`grep 'type=".*Error'RoaringDog/cypress/results/result.xml |wc -l`
+                   if [ $result -ne 0 ]; then
+                       echo "failure: $result"
+                       exit 1
+                   fi
+                   '''
+				    archiveArtifacts allowEmptyArchive: true, artifacts: 'src/RoaringDog/cypress/results/*, src/RoaringDog/cypress/results/**/*, src/RoaringDog/cypress/videos/**/*,src/RoaringDog/cypress/screenshots/**/*', fingerprint: true
+                    }
+               }
+        
+        stage ('restart cpe pop and saas') {
+            parallel {
+            stage ('deploy uranus, restart cpe-36') {
+                    agent { label 'Manager210' }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sshpass -p rocks ssh -o StrictHostKeyChecking=no root@10.192.9.36 "/etc/init.d/aiwan-cpe restart"
+                        sleep 10s
+                        '''
+                    }
+                }
+
+            stage ('deploy uranus, restart cpe-32') {
+                    agent { label 'CPE-IT-32' }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+            stage ('deploy uranus, restart cpe-33') {
+                    agent { label 'CPE-IT-33' }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+            stage ('deploy uranus, restart cpe-34') {
+                    agent { label 'CPE-IT-34' }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+            stage ('deploy uranus, restart cpe-35') {
+                    agent { label 'CPE-IT-32' }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl stop aiwan-cpe
+                        sudo systemctl start aiwan-cpe
+                        '''
+                    }
+                }
+            stage ('deploy uranus, restart pop and saas') {
+                    agent { label 'POP-IT-11.2' }
+                    steps {
+                        sh '''
+                        #sleep 120s
+                        sudo systemctl restart aiwan-moon.service
+                        sleep 2s
+                        sudo systemctl restart aiwan-saas.service
+                        '''
+                    }
+                }
+        }
+        }
+    }
+    
+}

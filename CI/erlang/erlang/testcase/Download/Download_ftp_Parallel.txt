@@ -1,0 +1,99 @@
+*** Settings ***
+Suite Setup       Suite Setup Steps
+Suite Teardown    run keywords    Suite_stop_tcpdump
+...               AND    Close All Connections
+Test Setup
+Resource          ../resource/UranusKeyword.txt
+
+*** Variables ***
+${expected_speed}    0.95
+${expected_speed_private}    30
+${expected_speed_sideway}    45
+${expected_speed_gateway}    9.5
+${expected_unit}    MB/s
+${check_timeout}    40
+${S2_ftp_40M_log}    Strategy2_ftp40M.log
+${S2_ftp_1G_log}    Strategy2_ftp1G.log
+${S2_ftp_512M_log}    Strategy2_ftp512M.log
+${S2_Private_ftp_1G_log}    Strategy2_Private_ftp1G.log
+${tcpdump}        Strategy2_ftp_tcpdump.pcap
+${p_tcpdump}      PStrategy2_ftp_tcpdump.pcap
+${wan_tcpdump}    strategy2_ftp_wan_tcpdump.pcap
+${lan_tcpdump}    strategy2_ftp_lan_tcpdump.pcap
+${check_timeout_p}    60
+${check_timeout_sideway}    45
+${check_timeout_gateway}    110
+
+*** Test Cases ***
+Strategy2_Ftp_Download_40M
+    [Tags]    Ftp    50M    SDWANDEV-215    long
+    ssh login remote
+    Wait Until Keyword Succeeds    ${check_timeout}    0.5    Check Curl Process    40M
+    Check Curl Download Speed    ${S2_ftp_40M_log}
+
+Sideway Strategy2 Ftp Download 1G
+    [Tags]    Ftp    1G    SDWANDEV-819    sideway    long
+    ssh login wuhan
+    Wait Until Keyword Succeeds    ${check_timeout_sideway}    0.5    Check Curl Process    1G
+    Check Curl Download Speed    ${S2_ftp_1G_log}    ${expected_speed_sideway}
+    close connection
+
+Strategy2_Private_Ftp_Download_1G
+    [Tags]    Ftp    1G    SDWANDEV-225    long
+    ssh login remote
+    Write    curl -X GET ftp://anonymous@&{local_pc}[intranet_ip]/1G -o /dev/null > ${S2_Private_ftp_1G_log} 2>&1 &
+    read until prompt
+    read
+    Wait Until Keyword Succeeds    ${check_timeout_p}    0.5    Check Curl Process    1G
+    Check Curl Download Speed    ${S2_Private_ftp_1G_log}    ${expected_speed_private}
+
+Gateway Strategy2 Ftp Download 512M
+    [Tags]    Ftp    1G    SDWANDEV-1781    Gateway    long
+    wait until keyword succeeds    5s    100ms    gateway pingable check
+    ssh login guangzhou
+    ${rc}    ${stderr}=    execute command    pkill -9 curl    return_stderr=True
+    should be empty    ${stderr}
+    Write    curl -X GET ftp://anonymous@&{nanjing_pc}[inner_ip]/512M -o /dev/null > ${S2_ftp_512M_log} 2>&1 &
+    read until prompt
+    Wait Until Keyword Succeeds    ${check_timeout_gateway}    0.5    Check Curl Process    512M
+    Check Curl Download Speed    ${S2_ftp_512M_log}    ${expected_speed_gateway}
+    close connection
+
+*** Keywords ***
+Check Curl Download Speed
+    [Arguments]    ${test_log_file}    ${expected}=${expected_speed}
+    # print some of the log for review
+    Write    tail ${test_log_file}
+    ${res}=    read until prompt
+    should not contain    ${res}    No such file or directory
+    # judgement for case
+    Write    cat ${test_log_file} | tail -n 1 | awk -F ' ' '{print $NF}'
+    ${res}=    read until prompt
+    ${res}=    Get Line    ${res}    0
+    ${match}    ${speed}    ${speed_dec}    ${unit}=    should match regexp    ${res}    (\\d+(\.\\d+)?)(k|M)
+    run keyword if    '${unit}' == 'k'    Should be true    ${expected}*1024 < ${speed}    The download speed should be greater than ${expected} ${expected_unit}
+    ...    ELSE    Should be true    ${expected} <= ${speed}    The download speed should be greater than ${expected} ${expected_unit}
+
+Check Curl Process
+    [Arguments]    ${file}
+    Write    ps -ef | grep curl | grep ${file}|grep -v "grep"
+    ${res}=    read until prompt
+    should not contain    ${res}    curl
+
+Suite Setup Steps
+    Nping_From_PC    remote    &{local_pc}[inner_ip]
+    Nping_From_PC    remote    &{local_pc}[inner_ip]
+    #Suite_Start_tcpdump
+    Start Tcpdump in Wuhan PC    ${tcpdump}    ${wan_tcpdump}    ${lan_tcpdump}
+    SSH Login    &{remote_pc}[ctrl_ip]    &{remote_pc}[ctrl_port]    &{remote_pc}[user]    &{remote_pc}[passwd]
+    ${rc}    ${stderr}=    execute command    pkill -9 curl    return_stderr=True
+    should be empty    ${stderr}
+    Write    rm -rf ${S2_ftp_40M_log} ${S2_Private_ftp_1G_log} 1G 40M
+    read until prompt
+    Write    curl -X GET ftp://anonymous@&{local_pc}[inner_ip]/40M -o /dev/null > ${S2_ftp_40M_log} 2>&1 &
+    read until prompt
+    SSH Login Wuhan
+    ${rc}    ${stderr}=    execute command    pkill -9 curl    return_stderr=True
+    should be empty    ${stderr}
+    Write    curl -X GET ftp://anonymous@&{nanjing_pc}[inner_ip]/512M -o /dev/null > ${S2_ftp_1G_log} 2>&1 &
+    read until prompt

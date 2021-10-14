@@ -1,0 +1,22 @@
+[
+    {
+        "name":"CR_13350-4-1",
+        "port_num":2,
+        "use_group":true
+    },
+    {
+        "name":"CR_13366-4-3",
+        "port_num":2,
+        "use_group":true
+    },
+    { 
+        "name":"ER_12838-4-11",
+        "port_num":3,
+        "use_group":true
+    },
+    { 
+        "name":"CPE_20992-4-21",
+        "port_num":3,
+        "use_group":false
+    }
+]

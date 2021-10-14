@@ -1,0 +1,17 @@
+[
+    {
+        "name":"CR_8550-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {
+        "name":"CR_8566-5-1",
+        "port_num":2,
+        "use_group":false
+    },
+    { 
+        "name":"CR_8582-6-1",
+        "port_num":2,
+        "use_group":false
+    }
+]

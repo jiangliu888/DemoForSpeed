@@ -1,0 +1,21 @@
+# 华为云需要安装华为云python sdk。参照如下
+# https://support.huaweicloud.com/devg-sdk/sdk_02_0004.html
+# https://support.huaweicloud.com/sdk-python-devg-obs/obs_22_0105.html
+
+# 阿里云同样需要安装sdk
+# https://help.aliyun.com/document_detail/53090.html
+
+# microsoft需要参考https://docs.azure.cn/zh-cn/virtual-machines/windows/disks-upload-vhd-to-managed-disk-powershell，将速宝vhd传入azure中
+# 需要在windows环境中执行需要azcopy v10，Azure PowerShell模块
+# 上面两行已经用sdk方法实现，需要azure-mgmt-compute>=8.0.0, 同时要下载linux azcopy包azcopy_linux_amd64_10.6.0.tar.gz
+#    AZURE_CLIENT_ID: '37e0b886-5df0-4cf6-ba44-71343bbffd82'
+#    AZURE_SUBSCRIPTION_ID: "11fbc75d-96a0-40d5-803e-4aaef769f9a6"
+#    AZURE_TENANT_ID: "cd6a4204-b6b5-4c80-8411-5281749b15a3"
+#    AZURE_CLIENT_SECRET: 'mv49uMT5ZT1FPAu__jmB-bFQ-FuXv_2X7Z'
+# 这四个参数的值可以参考https://docs.microsoft.com/zh-cn/azure/active-directory/develop/howto-create-service-principal-portal
+# python 模块需要
+# azure-mgmt-resource~=2.0
+# azure-mgmt-network~=2.2
+# azure-mgmt-compute~=4.3
+
+# aws 所有sdk 用法参考https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Client.import_image

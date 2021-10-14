@@ -1,0 +1,109 @@
+uranus_host:
+    ip:   "127.0.0.1"
+    es_ip: "172.17.0.1"
+    es_port: "9200"
+    port:   '6326'
+    cli_port:   '8101'
+    netconf_port: '6633'
+    onos_port: '8181'
+    user:   "karaf"
+    passwd: "karaf"
+controller_host:
+    ip: "127.0.0.1"
+    port: "22"
+    user: "jenkins"
+    password: "rocks"
+pontus_host:
+    ip: "127.0.0.1"
+    port: "6226"
+gaea_host:
+    ip: "127.0.0.1"
+    port: "6126"
+path:
+    topo: 'erlang/config/ft_topo'
+company1:
+    name: 'bestaiwan'
+    remark: 'best ai wan'
+    location: 'shanghai'
+    key: 'cUUMG+vPbnvjUV21'
+company2:
+    name: 'alibaba'
+    remark: 'alibaba'
+    location: 'beijing'
+    key: 'AAAAB3NzaC1yc2EA'
+cpe_net:
+    "16192": '10.50.1.0/24'
+    "16208": '10.50.2.0/24'
+    "17009": '10.50.3.0/24'
+    "16224": '10.50.4.0/24'
+    "17026": '10.50.5.0/24'
+    "17043": '10.50.6.0/24'
+    "17792": '10.50.7.0/24'
+    "17808": '10.50.8.0/24'
+    "20992": '10.50.9.0/24'
+    "net_all": '10.50.0.0/16'
+    "dst_net": '1.1.1.0/24'
+    "net_change": 10.60.1.0/24
+cpe_saas:
+    areaCode: 134530251
+fake_pop:
+    phy_port: ['eth0','eth1','eth2']
+    phy_port2: ['eth0','eth1']
+    group_list: [['group1'],['group1'],['group2']]
+    group_list2: [['group1'],['group2'],['group1','group2']]
+    group_list_port2: [['group1'],['group2']]
+    group_list_port2_4: [['group1'],['group4']]
+    group_list_port3: [['group1'],['group2'],['group3']]
+manager_server:
+    ip: 127.0.0.1
+    port: 8080
+    influxdb_ip: 127.0.0.1
+    influxdb_port: 8086
+consul_test:
+    pop_list: [[520,536],[552,568]]
+    region: [1,2]
+    country: [100,200]
+    area: [5,6]
+    district: [50,100]
+    openflow_ip_list: [["127.0.0.7", "127.0.0.8"],["127.0.0.9"]]
+    openflow_port_list: [[6635, 6655],[6675]]
+    openflow_ip_specific_list: [["127.0.0.10", "127.0.0.11"],["127.0.0.12"]]
+    openflow_port_specific_list: [[6636, 6656],[6676]]
+    openflow_neid_specific: [513,512]
+default_netConfig:
+    mtu: 1300
+    keepAlive: 0
+    strategy: 1
+fwRule:
+    name: 'default'
+    priority: 100
+    protocol: 17
+    srcIp: "192.168.100.0"
+    srcPort: 80
+    dstIP: "192.168.100.0"
+    dstPort: 22
+    icmpType: 3
+    icmpCode: 4
+saasRule:
+    name: "default"
+    priority: 1000
+    natType: "DOMAIN"
+    pattern: ".baidu."
+    ttl: 600
+    agent: 134530240
+spiRule:
+    scrcidr: "192.168.1.0/24"
+    dstcidr: "192.168.2.0/24"
+    l4proto: "6,17"
+    srcport: "10-100,1000"
+    dstport: "10-100,1001"
+    dstdomain: "www.google.com"
+    priority: 100
+    tag: 127
+consul_server:
+    ip: "127.0.0.1"
+    port: "8500"
+    token: "ed80e266-d085-7fb5-0381-ce5fc818b71f"
+alert_server:
+    ip: 127.0.0.1
+    port: 8000

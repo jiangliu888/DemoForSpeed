@@ -1,0 +1,131 @@
+*** Settings ***
+Suite Setup
+Suite Teardown
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${salt_port}    4505
+${switch_timeout}    120
+
+*** Test Cases ***
+Set CPE OF IP
+    [Tags]    SDWANDEV-4345
+    [Setup]  Stop_All_Slave_CPE
+    ${cpe_of_list}  create list   local   remote   nanjing   wuhan   chongqing   zhenjiang   changsha   nanchang
+    update cpeGlobalConfig ne controllers   &{uranus_host}[of_ip]
+    :FOR    ${cpe}    IN    @{cpe_of_list}
+    \   wait until keyword succeeds  15    1s    Check CPE NE Config   ${cpe}   &{uranus_host}[of_ip]
+    :FOR    ${cpe}    IN    @{cpe_of_list}
+    \   Restart_Cpe    ${cpe}
+    :FOR    ${cpe}    IN    @{cpe_of_list}
+    \   wait until keyword succeeds  15    1s    Check CPE Openflow IP    ${cpe}    &{uranus_host}[of_ip]
+    wait until keyword succeeds    10    2s    All_Of_Devices_Avaiable
+    update cpeGlobalConfig ne controllers   &{uranus_host}[of_domain]
+    :FOR    ${cpe}    IN    @{cpe_list}
+    \   wait until keyword succeeds  15    1s    Check CPE NE Config   ${cpe}   &{uranus_host}[of_domain]
+    :FOR    ${cpe}    IN    @{cpe_of_list}
+    \   Restart_Cpe    ${cpe}
+    :FOR    ${cpe}    IN    @{cpe_of_list}
+    \   wait until keyword succeeds  15    1s    Check CPE Openflow IP    ${cpe}    &{uranus_host}[es_ip]
+    wait until keyword succeeds    10    2s    All_Of_Devices_Avaiable
+    [Teardown]   run keywords  update cpeGlobalConfig ne controllers   &{uranus_host}[of_domain]
+    ...  AND   wait until keyword succeeds    10    2s    All_Of_Devices_Avaiable
+    ...  AND   Restart_All_Slave_CPE
+
+Set POP OF IP
+    [Tags]    SDWANDEV-4346
+    Update Pop OF and Check   &{uranus_host}[of_ip]
+    Update Pop OF and Check   &{uranus_host}[of_domain]
+    [Teardown]   Update Pop OF and Check
+
+Change OF Domain IP For Pop
+    [Tags]   SDWANDEV-4348
+    Update Pop OF Domain IP and Check   add    &{uranus_host}[of_ip]
+    [Teardown]  Update Pop OF Domain IP and Check   remove    &{uranus_host}[ip]
+
+Change OF Domain IP For CPE
+    [Tags]   SDWANDEV-4347
+    ${cpe_of_list}  create list   local   wuhan   changsha
+    Update CPE OF Domain IP and Check    ${cpe_of_list}   add    &{uranus_host}[of_ip]
+    [Teardown]   Update CPE OF Domain IP and Check    ${cpe_of_list}   remove    &{uranus_host}[ip]
+
+*** Keywords ***
+Update CPE Hosts
+    [Arguments]  ${cpe}  ${host_name}    ${dst_host_ip}
+    ${tmp_file}=    set variable   /tmp/hosts_bak
+    ssh_cpe  ${cpe}
+    write cpe cmd  ${cpe}    rm ${tmp_file}    rm ${tmp_file}
+    write   touch ${tmp_file}
+    read until prompt
+    write cpe cmd   ${cpe}   cp /etc/hosts ${tmp_file}   cp /etc/hosts ${tmp_file}
+    ${cmd}=     set variable   echo "${dst_host_ip} ${host_name}" >> ${tmp_file}
+    write cpe cmd   ${cpe}   ${cmd}  ${cmd}
+    write cpe cmd   ${cpe}   cp ${tmp_file} /etc/hosts    cp ${tmp_file} /etc/hosts
+    ${res}=     write cpe cmd    ${cpe}   cat /etc/hosts   cat /etc/hosts
+    should contain  ${res}   ${host_name}
+    close connection
+
+Update Pop OF and Check
+    [Arguments]   ${domain}=&{uranus_host}[of_domain]
+    update cpeGlobalConfig ne controllers   ${domain}
+    :FOR    ${pop}  IN    @{pop_list}
+    \   Restart_Pop_Moon    ${pop}
+    wait until keyword succeeds    20    2s    All_Of_Devices_Avaiable
+
+Add Pop Hosts OF
+    [Arguments]  ${pop}  ${host_name}    ${dst_host_ip}
+    ssh_pop  ${pop}
+    write sudo cmd    rm /tmp/hosts
+    write   touch /tmp/hosts
+    read until prompt
+    write sudo cmd    cp /etc/hosts /tmp/hosts
+    write sudo cmd    echo "${dst_host_ip} ${host_name}" >> /tmp/hosts
+    write sudo cmd    cp /tmp/hosts /etc/hosts
+    ${res}=     write sudo cmd  cat /etc/hosts
+    should contain  ${res}   ${host_name}
+    close connection
+
+Remove Pop Hosts OF
+    [Arguments]  ${pop}  ${host_name}
+    ssh_pop  ${pop}
+    write sudo cmd    sed -i "/${host_name}/d" /etc/hosts
+    ${res}=  write sudo cmd  cat /etc/hosts
+    should not contain  ${res}  ${host_name}
+    close connection
+
+Remove CPE Hosts OF
+    [Arguments]  ${cpe}  ${host_name}
+    ssh_cpe  ${cpe}
+    write cpe cmd  ${cpe}   sed -i "/${host_name}/d" /etc/hosts    sed -i "/${host_name}/d" /etc/hosts
+    ${res}=  write sudo cmd  cat /etc/hosts
+    should not contain  ${res}  ${host_name}
+    close connection
+
+Update CPE OF Domain IP and Check
+    [Arguments]  ${of_cpe_list}   ${action}    ${of_ip}=&{uranus_host}[of_ip]
+    :FOR   ${cpe}   IN    @{of_cpe_list}
+    \   run keyword if  '${action}' == 'add'   Update CPE Hosts    ${cpe}  &{uranus_host}[of_domain]    ${of_ip}
+    \   ...    ELSE    Remove CPE Hosts OF   ${cpe}    &{uranus_host}[of_domain]
+    \   Restart_Cpe    ${cpe}
+    :FOR   ${cpe}   IN    @{of_cpe_list}
+    \   wait until keyword succeeds  20x    2s    Check CPE Openflow IP    ${cpe}    ${of_ip}
+    wait until keyword succeeds    25    2s    All_Of_Devices_Avaiable
+
+Update Pop OF Domain IP and Check
+    [Arguments]  ${action}    ${of_ip}=&{uranus_host}[of_ip]
+    :FOR    ${pop}  IN    @{pop_list}
+    \   run keyword if   '${action}' == 'add'    Add Pop Hosts OF    ${pop}   &{uranus_host}[of_domain]   ${of_ip}
+    \   ...   ELSE   Remove Pop Hosts OF    ${pop}    &{uranus_host}[of_domain]
+    \    Restart_Pop_Moon    ${pop}
+    \   wait until keyword succeeds  20x   2   Check Pop Openflow IP   ${pop}   ${of_ip}
+    wait until keyword succeeds    25    2s    All_Of_Devices_Avaiable
+
+Check Pop Openflow IP
+    [Arguments]  ${pop}    ${ip}
+    ssh_pop    ${pop}
+    ${port}=    set variable   6633
+    ${res}=    write sudo cmd    netstat -an | grep ${port} | grep ESTABLISHED
+    close connection
+    should contain    ${res}    ${ip}

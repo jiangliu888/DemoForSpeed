@@ -1,0 +1,55 @@
+*** Settings ***
+Suite Setup       run keywords    Private_Net_SetUP
+...               AND    init_iperf_server
+Suite Teardown    run keywords    stop_iperf_server
+...               AND    Set_CPE_Wan_Bandwidth
+...               AND    Private_Net_TearDown
+Library           ../../libs/common/SetHttp.py
+Library           ../../libs/uranus/UranusKeyword.py
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${r_iperf_s_port}    5201
+${l_iperf_s_port}    5202
+
+*** Keywords ***
+init_iperf_server
+    ${internet_server_connect} =    Init_Iperfs_Server_In_PC    dns_server    ${r_iperf_s_port}
+    ${passthrought_server}=    Init_Iperfs_Server_In_PC_Bind_Address    salt-master    &{salt-master}[ip]    ${r_iperf_s_port}
+    ${office_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    wuhan    ${r_iperf_s_port}
+    ${office_server_connect2} =    Init_Iperfs_Server_In_PC_with_Port_without_kill_server    wuhan    ${l_iperf_s_port}
+    ${office_server_connect3} =    Init_Iperfs_Server_In_PC_with_Port    remote    ${r_iperf_s_port}
+    ${office_server_connect4} =    Init_Iperfs_Server_In_PC_with_Port    local    ${r_iperf_s_port}
+    ${office_server_connect5} =    Init_Iperfs_Server_In_PC_with_Port_without_kill_server    local    ${l_iperf_s_port}
+    ${office_server_connect6} =    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    ${office_server_connect7} =    Init_Iperfs_Server_In_PC_with_Port_without_kill_server    nanjing    ${r_iperf_s_port}
+    ${office_server_connect8} =    Init_Iperfs_Server_In_PC_with_Port    guangzhou    ${l_iperf_s_port}
+    ${server_list}=    create list    ${internet_server_connect}    ${passthrought_server}    ${office_server_connect}    ${office_server_connect2}    ${office_server_connect3}
+    ...    ${office_server_connect4}    ${office_server_connect5}    ${office_server_connect6}    ${office_server_connect7}    ${office_server_connect8}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+stop_iperf_server
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+
+Private_Net_SetUP
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{chongqing_pc}[site_name]'
+    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${True}
+    ${l_p_len}=    evaluate    len(&{local_pc}[intranet_range])
+    ${c_p_len}=    evaluate    len(&{chongqing_pc}[intranet_range])
+    wait until keyword succeeds    ${union_timer}    2s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{chongqing_pc}[site_name]_site_id}
+    ...    &{chongqing_cpe}[chassis_id]    2    1    ${c_p_len}
+    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{chongqing_cpe}[chassis_id]    ${suite_&{chongqing_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    2    2    ${l_p_len}
+    Nping_From_PC    chongqing    &{local_pc}[inner_ip]
+    Nping_From_PC    chongqing    &{local_pc}[inner_ip]
+
+Private_Net_TearDown
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{chongqing_pc}[site_name]'
+    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${False}
+    wait until keyword succeeds    10s    2s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{chongqing_pc}[site_name]_site_id}
+    ...    &{chongqing_cpe}[chassis_id]
+    wait until keyword succeeds    3s    200ms    check_e2e_match_route    &{chongqing_cpe}[chassis_id]    ${suite_&{chongqing_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    1    2    0

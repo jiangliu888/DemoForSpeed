@@ -1,0 +1,79 @@
+*** Settings ***
+Documentation     GET /api/v1/channel/metrics/network?deviceId=,&startTime=&endTime=
+...
+...
+...               必参：deviceId, startTime;
+Suite Setup
+Suite Teardown
+Library           ../../libs/portal/JsonValidate.py
+Library           ../../libs/portal/RequestApi.py
+Library           Collections
+
+*** Test Cases ***
+1. authority limitation
+    [Tags]    SDWANDEV-4548
+    ${code}    ${res}    get network info    ${test_data}[account5_1]    ${test_data}[psd5_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #公司账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #正确渠道账户查询公司1
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_3]&startTime=1624424653    #正确渠道账户查询公司2
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    ${code}    ${res}    get network info    ${test_data}[account6_2]    ${test_data}[psd6_2]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #公司(属渠道)账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+    ${code}    ${res}    get network info    ${test_data}[account8_1]    ${test_data}[psd8_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #其他渠道账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+
+2. params verify
+    [Tags]    SDWANDEV-4549
+    #必参校验
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    \    #不携带任何参数
+    should be equal as integers    ${code}    404
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]    #携带deviceId
+    should be equal as integers    ${code}    404    #期待400，待修改
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #携带deviceId&startTime
+    should be equal as integers    ${code}    200
+    check response format    ${res}    network info
+    #异常参数校验
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&xxx=yyy    #携带未知参数
+    should be equal as integers    ${code}    200    #期待400，待修改
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=abcd&startTime=1624432213    #错误deviceId
+    should be equal as integers    ${code}    404
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&endTime=1624432210    #endtime<starttime
+    should be equal as integers    ${code}    500
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&endTime=1624432213    #endtime=starttime
+    should be equal as integers    ${code}    200
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&endTime=    #endTime空值传入
+    should be equal as integers    ${code}    200
+    check response format    ${res}    network info
+    #deviceId带多参数
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&startTime=1624432213&endTime=1624432713
+    should be equal as integers    ${code}    200
+    check response format    ${res}    network info
+
+3. sampling number
+    [Documentation]    \#每2分钟一个采样点    #2分钟及以上每隔2分钟增加1个采样点
+    [Tags]    SDWANDEV-4550
+    #采样点数量校验
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&startTime=1624433053&endTime=1624433653    #10分钟
+    should be equal as integers    ${code}    200
+    network sampling check    ${res}    ${test_data}[deviceId_1]    6
+    network sampling check    ${res}    ${test_data}[deviceId_2]    6
+    should be equal    ${res}    ${network_data}    \    \    \    #数据值校验
+    ${code}    ${res}    get network info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&startTime=1624433053&endTime=1624438453    #1.5小时
+    should be equal as integers    ${code}    200
+    network sampling check    ${res}    ${test_data}[deviceId_1]    46
+    network sampling check    ${res}    ${test_data}[deviceId_2]    46
+
+*** Keywords ***
+network sampling check
+    [Arguments]    ${res}    ${device}    ${expect_num}
+    @{res}    convert to list    ${res}[data]
+    ${expect_num}    evaluate    ${expect_num}
+    : FOR    ${i}    IN    @{res}
+    \    ${num}=    run keyword if    '${i}[deviceId]'=='${device}'    get length    ${i}[values]
+    \    run keyword if    '${num}' != 'None'    should be equal    ${num}    ${expect_num}

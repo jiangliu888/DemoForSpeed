@@ -1,0 +1,70 @@
+*** Settings ***
+Suite Setup       AES256 Setup
+Suite Teardown    AES256 Teardown
+Resource          ../../resource/UranusKeyword.txt
+Resource          ../../resource/SshKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+
+*** Variables ***
+${l_iperf_s_port}    5201
+${r_iperf_s_port}    5500
+${ase256_key}     U2FsdGVkX1+aqQR+oS7rLMD9g7rK5mLv
+
+*** Test Cases ***
+Office_Network_Iperf_Test Strategy2
+    [Tags]    SDWANDEV-2941    AES256
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    10    local
+    [Teardown]
+
+Private_Network_Iperf_Test Strategy2
+    [Tags]    SDWANDEV-2943    AES256
+    [Setup]
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    350    remote
+    [Teardown]    Print Iperf Server Log    local   /tmp/listen_5201.txt
+
+Sideway_Office_Network_Iperf_Test Strategy2
+    [Tags]    SDWANDEV-2942    Sideway    AES256
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    400    wuhan
+    [Teardown]
+
+Sideway_Gateway_Office_Network_Iperf_Test Strategy2
+    [Tags]    Sideway    SDWANDEV-2944    AES256
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${l_iperf_s_port}
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    50    guangzhou
+    [Teardown]  Print Iperf Server Log    nanjing
+
+*** Keywords ***
+AES256 Setup
+    # SDWANDEV-2940
+    Update_Company_Key_Successful    ${suite_company_id}    ${ase256_key}    256
+    Ensure_CPE_Get_Key    ${ase256_key}
+    wait until keyword succeeds    3    200ms    sideway pingable check
+    ${series_server_connect_list}    run keyword if    ${suite_test_series_group}    Series_Iperf Setup
+    ...    ELSE    create list
+    ${parallel_server_connect_list}    run keyword if    ${suite_test_parallel_group}    Parallel_Iperf Setup
+    ...    ELSE    create list
+    ${server_list}    combine Lists    ${series_server_connect_list}    ${parallel_server_connect_list}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+AES256 Teardown
+    Update_Company_Key_Successful    ${suite_company_id}    &{company1}[key]
+    Ensure_CPE_Get_Key
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+
+Series_Iperf Setup
+    ${office_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    remote    ${r_iperf_s_port}
+    ${private_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    local    ${l_iperf_s_port}
+    Iperf3_band_From_PC_With_Port    &{remote_pc}[inner_ip]    local    ${r_iperf_s_port}
+    Iperf3_band_From_PC_With_Port    &{local_pc}[intranet_ip]    remote    ${l_iperf_s_port}
+    ${s_list}    create list    ${office_server_connect}    ${private_server_connect}
+    [Return]    ${s_list}
+
+Parallel_Iperf Setup
+    ${nanjing_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    Start Tcpdump in Wuhan PC    wuhan_pc.pcap    wuhanWan.pcap    wuhanLan.pcap
+    Start Tcpdump in Nanjing PC    nanjing_pc.pcap    nanjingWan.pcap    nanjingLan.pcap
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    wuhan    ${l_iperf_s_port}
+    ${s_list}    create list    ${nanjing_server_connect}
+    [Return]    ${s_list}

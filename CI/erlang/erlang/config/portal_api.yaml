@@ -1,0 +1,49 @@
+ssh_host:
+      ip: 10.192.20.66
+      port: 22
+      ssh_user: "sdn"
+      ssh_psd: "rocks"
+
+portal:
+      url: "http://10.192.20.66:8089"
+      super_user: "admin"
+      super_psd: "AIRwalk2013!)"
+      siteUrl: '/api/v1/channel/configs/devices'
+      alarmUrl: '/api/v1/channel/alerts'
+      bwUrl: '/api/v1/channel/metrics/bandwidth'
+      deviceSysUrl: '/api/v1/channel/metrics/system'
+      networkUrl: '/api/v1/channel/metrics/network'
+      auth: '/api/v1/tokens'
+
+test_data:
+      deviceId_1: '1002'
+      deviceId_2: '1003'
+      deviceId_3: '1009'
+      company_5: '测试公司5'
+      company_6: '测试公司6'
+      company_7: '测试公司7'
+      company_8: '测试公司8'
+      channel_1: '渠道1'
+      channel_2: '渠道2'
+      account5_1: 'test1@qq.com'
+      account6_1: 'test2@qq.com'
+      account6_2: 'test3@qq.com'
+      account6_3: 'test4@qq.com'
+      account8_1: 'test5@qq.com'
+      psd5_1: 'test51!'
+      psd6_1: 'test61!'
+      psd6_2: 'test62!'
+      psd6_3: 'test63!'
+      psd8_1: 'test81!'
+      channel_3: 'ABB_99'
+      channel_4: '信天_99'
+      company_3: 'portalapi_1_99'
+      company_4: 'best_aiwan_99'
+
+
+bandwidth_data : {'metric': 'BANDWIDTH', 'data': [{'deviceId': '1002', 'instance': 'enp1s0f0', 'interfaceType': 'WAN', 'values': [{'timestamp': 1624432213, 'number1': '0.04253609017811943', 'number2': '0.020610847281777075'}, {'timestamp': 1624432333, 'number1': '0.041692225138346355', 'number2': '0.02021001180013021'}, {'timestamp': 1624432453, 'number1': '0.04280390553709749', 'number2': '0.020501542050440424'}, {'timestamp': 1624432573, 'number1': '0.04225749476441018', 'number2': '0.020258502283425482'}, {'timestamp': 1624432693, 'number1': '0.04306606995189403', 'number2': '0.020232347093480204'}, {'timestamp': 1624432813, 'number1': '0.04238001505533854', 'number2': '0.02043596903483073'}]}, {'deviceId': '1002', 'instance': 'enp1s0f1', 'interfaceType': 'LAN', 'values': [{'timestamp': 1624432213, 'number1': '0.002541944735491388', 'number2': '0.0008506633125124998'}, {'timestamp': 1624432333, 'number1': '0.0025269826253255206', 'number2': '0.000861358642578125'}, {'timestamp': 1624432453, 'number1': '0.0025295679163012093', 'number2': '0.0008588298248981233'}, {'timestamp': 1624432573, 'number1': '0.002521514892578125', 'number2': '0.0008970896402994791'}, {'timestamp': 1624432693, 'number1': '0.002542453353316507', 'number2': '0.0008511861165364583'}, {'timestamp': 1624432813, 'number1': '0.002535883585611979', 'number2': '0.0008511861165364583'}]}, {'deviceId': '1002', 'instance': 'enp1s0f2', 'interfaceType': 'LAN', 'values': [{'timestamp': 1624432213, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432333, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432453, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432573, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432693, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432813, 'number1': '0', 'number2': '0'}]}, {'deviceId': '1003', 'instance': 'enp1s0f0', 'interfaceType': 'WAN', 'values': [{'timestamp': 1624432213, 'number1': '0.04666099548339844', 'number2': '0.02120475769042969'}, {'timestamp': 1624432333, 'number1': '0.04661074082361317', 'number2': '0.021198201881226352'}, {'timestamp': 1624432453, 'number1': '0.04751408894856771', 'number2': '0.021480941772460942'}, {'timestamp': 1624432573, 'number1': '0.04702606201171875', 'number2': '0.02117525736490886'}, {'timestamp': 1624432693, 'number1': '0.04662272135416667', 'number2': '0.021141844291201917'}, {'timestamp': 1624432813, 'number1': '0.04647305806477865', 'number2': '0.021141844291201917'}]}, {'deviceId': '1003', 'instance': 'enp1s0f1', 'interfaceType': 'LAN', 'values': [{'timestamp': 1624432213, 'number1': '0.0014274597167968752', 'number2': '0.0010954538981119795'}, {'timestamp': 1624432333, 'number1': '0.0014207204182942708', 'number2': '0.0010778150612832929'}, {'timestamp': 1624432453, 'number1': '0.0014098319471977194', 'number2': '0.0010778150612832929'}, {'timestamp': 1624432573, 'number1': '0.0014268239339192712', 'number2': '0.0010948181152343752'}, {'timestamp': 1624432693, 'number1': '0.0014546712239583335', 'number2': '0.0011226654052734378'}, {'timestamp': 1624432813, 'number1': '0.0014196795043650314', 'number2': '0.0010965800309578172'}]}, {'deviceId': '1003', 'instance': 'enp1s0f2', 'interfaceType': 'LAN', 'values': [{'timestamp': 1624432213, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432333, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432453, 'number1': '0', 'number2': '0.000008900960286458336'}, {'timestamp': 1624432573, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432693, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432813, 'number1': '0', 'number2': '0'}]}, {'deviceId': '1003', 'instance': 'enp1s0f3', 'interfaceType': 'WAN', 'values': [{'timestamp': 1624432213, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432333, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432453, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432573, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432693, 'number1': '0', 'number2': '0'}, {'timestamp': 1624432813, 'number1': '0', 'number2': '0'}]}]}
+
+device_system_data : {'metric': 'SYSTEM', 'data': [{'deviceId': '1002', 'instance': 'CPU', 'values': [{'timestamp': 1624432213, 'number1': '3.3953332233307947'}, {'timestamp': 1624432333, 'number1': '4.071491905254135'}, {'timestamp': 1624432453, 'number1': '3.9161964967215255'}, {'timestamp': 1624432573, 'number1': '4.222875258962503'}, {'timestamp': 1624432693, 'number1': '3.499392362172557'}, {'timestamp': 1624432813, 'number1': '3.5715252715754104'}]}, {'deviceId': '1003', 'instance': 'CPU', 'values': [{'timestamp': 1624432213, 'number1': '3.982182812415772'}, {'timestamp': 1624432333, 'number1': '4.254522151187842'}, {'timestamp': 1624432453, 'number1': '3.79708381205387'}, {'timestamp': 1624432573, 'number1': '4.417855863843755'}, {'timestamp': 1624432693, 'number1': '4.252170192917049'}, {'timestamp': 1624432813, 'number1': '3.7877579512622788'}]}, {'deviceId': '1002', 'instance': 'MEM', 'values': [{'timestamp': 1624432213, 'number1': '41.13519213699991'}, {'timestamp': 1624432333, 'number1': '41.1474068223089'}, {'timestamp': 1624432453, 'number1': '41.1244024983103'}, {'timestamp': 1624432573, 'number1': '41.12949195052238'}, {'timestamp': 1624432693, 'number1': '41.14852650179556'}, {'timestamp': 1624432813, 'number1': '41.14873007988405'}]}, {'deviceId': '1003', 'instance': 'MEM', 'values': [{'timestamp': 1624432213, 'number1': '35.89758295193043'}, {'timestamp': 1624432333, 'number1': '35.8818113573915'}, {'timestamp': 1624432453, 'number1': '35.73802357341319'}, {'timestamp': 1624432573, 'number1': '35.74181285262059'}, {'timestamp': 1624432693, 'number1': '35.91458350188798'}, {'timestamp': 1624432813, 'number1': '35.90014327571922'}]}]}
+
+network_data : {'metric': 'NETWORK', 'data': [{'deviceId': '1002', 'instance': '336', 'localWanId': '1', 'remoteWanId': '1', 'values': [{'timestamp': 1624433053, 'number1': '250.44', 'number2': '0', 'number3': '0.022'}, {'timestamp': 1624433173, 'number1': '250.419', 'number2': '0', 'number3': '0.039'}, {'timestamp': 1624433293, 'number1': '250.438', 'number2': '0', 'number3': '0.018'}, {'timestamp': 1624433413, 'number1': '250.467', 'number2': '0', 'number3': '0.068'}, {'timestamp': 1624433533, 'number1': '250.443', 'number2': '0', 'number3': '0.019'}, {'timestamp': 1624433653, 'number1': '250.466', 'number2': '0', 'number3': '0.017'}]}, {'deviceId': '1002', 'instance': '337', 'localWanId': '1', 'remoteWanId': '1', 'values': [{'timestamp': 1624433053, 'number1': '0.355', 'number2': '0', 'number3': '0.028'}, {'timestamp': 1624433173, 'number1': '0.363', 'number2': '0', 'number3': '0.045'}, {'timestamp': 1624433293, 'number1': '0.35', 'number2': '0', 'number3': '0.018'}, {'timestamp': 1624433413, 'number1': '0.354', 'number2': '0', 'number3': '0.016'}, {'timestamp': 1624433533, 'number1': '0.356', 'number2': '0', 'number3': '0.025'}, {'timestamp': 1624433653, 'number1': '0.361', 'number2': '0', 'number3': '0.006'}]}, {'deviceId': '1003', 'instance': '320', 'localWanId': '1', 'remoteWanId': '1', 'values': [{'timestamp': 1624433053, 'number1': '250.43', 'number2': '0', 'number3': '0.042'}, {'timestamp': 1624433173, 'number1': '250.415', 'number2': '0', 'number3': '0.043'}, {'timestamp': 1624433293, 'number1': '250.446', 'number2': '0', 'number3': '0.035'}, {'timestamp': 1624433413, 'number1': '250.43', 'number2': '0', 'number3': '0.032'}, {'timestamp': 1624433533, 'number1': '250.432', 'number2': '0', 'number3': '0.033'}, {'timestamp': 1624433653, 'number1': '250.438', 'number2': '0', 'number3': '0.031'}]}]}
+

@@ -1,0 +1,75 @@
+#!/usr/bin/expect
+#If it all goes pear shaped the script will timeout after 20 seconds.
+set timeout 30
+#First argument is assigned to the variable name
+set name [lindex $argv 0]
+#Second argument is assigned to the variable user
+set user [lindex $argv 1]
+#Third argument is assigned to the variable password
+set password [lindex $argv 2]
+#This spawns the telnet program and connects it to the variable name
+spawn telnet $name
+#The script expects login
+expect "login:"
+#The script sends the user variable
+send "$user\n\r"
+#The script expects Password
+expect "Password:"
+#The script sends the password variable
+send "$password\r\n"
+#This hands control of the keyboard over to you (Nice expect feature!)
+expect "#"
+send "inet_ctrl -H 114.114.114.114 -i 1 -t 3\r\n"
+expect {
+         -ex "wan     Yes     Yes\r\nwlan24G No      No" {}
+        timeout {
+                send_user "exit 1\n"
+                exit 1                   }
+}
+send "wlan_ctrl -i 1 -m client -s --enable 1 --ssid subao-SaaS --psk sdn@rocks\r\n"
+expect "upnpd 1 1"
+puts "sleep 30s to wait dhcp"
+sleep 30
+puts "end of sleep"
+send "inet_ctrl -H 114.114.114.114 -i 1 -t 3\r\n"
+expect {
+         -ex "wan     Yes     Yes\r\nwlan24G Yes     Yes" {}
+        timeout {
+                send_user "exit 1\n"
+                exit 1                   }
+}
+send "wlan_ctrl -i 1 -m client -s --enable 0\r\n"
+expect "upnpd 1 1"
+send "inet_ctrl -H 114.114.114.114 -i 1 -t 3\r\n"
+expect {
+         -ex "wan     Yes     Yes\r\nwlan24G No      No" {}
+        timeout {
+                send_user "exit 1\n"
+                exit 1                   }
+}
+send "eth_ctrl -w -s --ip 192.168.0.144 --netmask 255.255.255.0 --gateway 192.168.0.1 --dns1 192.168.0.1\r\n"
+expect "WAN Connected"
+send "inet_ctrl -H 114.114.114.114 -i 1 -t 3\r\n"
+expect {
+         -ex "wan     Yes     Yes" {}
+        timeout {
+                send_user "exit 1\n"
+                exit 1                   }
+}
+send "eth_ctrl -w -s --dhcp --auto-dns\r\n"
+expect "WAN Connected"
+send "inet_ctrl -H 114.114.114.114 -i 1 -t 3\r\n"
+expect {
+         -ex "wan     Yes     Yes" {}
+        timeout {
+                send_user "exit 1\n"
+                exit 1                   }
+}
+send "curl-demo https://www.baidu.com\r\n"
+expect {
+         -ex "baidu.com" {}
+        timeout {
+                send_user "exit 1\n"
+                exit 1                   }
+}
+puts "all pass"

@@ -1,0 +1,12 @@
+*** Settings ***
+Suite Setup       Suite_SetUp
+Suite Teardown    Suit_TearDown
+Resource          ../testcase/resource/UranusKeyword.txt
+Resource          ../testcase/resource/SshKeyword.txt
+Resource          ../testcase/resource/ManagerKeyword.txt
+
+*** Variables ***
+#${company_name}    test234_.'"><-=+(){}!@$%^&*`~
+${flow_ttl}       600
+${domain_wait}    15s
+${CM_code}        11

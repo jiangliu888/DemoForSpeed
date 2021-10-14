@@ -1,0 +1,212 @@
+*** Settings ***
+Resource          ../testcase/resource/SshKeyword.txt
+Library           ../libs/vcpe/CloudKeyword.py
+
+Suite Setup
+Suite Teardown
+
+
+*** Test Cases ***
+Deploy_hw_cloud_vCPE
+    [Tags]
+    Create_Cloud_Connect    hw_cloud
+    ${imageId}=    make_image_by_file    hw_cloud
+    set Suite variable    ${imageId_t}    ${imageId}
+    ${sg_id}    ${vpc_id}=    Create_network    hw_cloud
+    ${server_id}    ${ip_id}    ${ip_addr}    ${lan_id}=    Create_cloud_server    hw_cloud    ${imageId}    ${sg_id}    ${vpc_id}
+    set Suite variable    ${ip_id_t}    ${ip_id}
+    set Suite variable    ${server_id_t}    ${server_id}
+    ${pc_id}    ${pc_ip_id}    ${pc_ip_addr}=    Create_hw_pc    ${sg_id}    ${vpc_id}    ${lan_id}
+    set Suite variable    ${pc_ip_id_t}    ${pc_ip_id}
+    set Suite variable    ${pc_id_t}    ${pc_id}
+    wait until keyword succeeds    20   1s    Check_server_pingable_from_build    ${ip_addr}
+    [Teardown]    deploy_TearDown    hw_cloud
+
+Deploy_ali_cloud_vCPE
+    [Tags]    test
+    Create_Cloud_Connect    ali_cloud
+    ${imageId}=    make_image_by_file    ali_cloud
+    set Suite variable    ${imageId_t}    ${imageId}
+    ${sg_id}    ${vpc_id}=    Create_network    ali_cloud
+    ${server_id}    ${ip_id}    ${ip_addr}    ${lan_id}=    Create_cloud_server    ali_cloud    ${imageId}    ${sg_id}    ${vpc_id}
+    set Suite variable    ${ip_id_t}    ${ip_id}
+    set Suite variable    ${server_id_t}    ${server_id}
+    start_ali_server    ali_cloud    ${server_id}
+    ${pc_id}    ${pc_ip_id}    ${pc_ip_addr}=    Create_ali_pc    ${sg_id}    ${lan_id}
+    set Suite variable    ${pc_ip_id_t}    ${pc_ip_id}
+    set Suite variable    ${pc_id_t}    ${pc_id}
+    start_ali_server    ali_cloud    ${pc_id}
+    wait until keyword succeeds    10s   1s    Check_server_pingable_from_build    ${ip_addr}
+    [Teardown]    deploy_TearDown    ali_cloud
+
+Deploy_azure_cloud_vCPE
+    [Tags]
+    Create_Cloud_Connect    azure_cloud
+    Create_azure_disk_for_image
+    ${sg_id}    ${vpc_id}=    Create_network    azure_cloud
+    ${server_id}    ${ip_id}    ${ip_addr}    ${lan_id}=    Create_cloud_server    azure_cloud    &{azure_cloud}[imageDisk_id]    ${sg_id}    &{cloud}[vpcName]
+    ${host_id}    ${host_ip}=    Create_azure_pc        ${sg_id}    ${lan_id}
+    wait until keyword succeeds    40s   1s    Check_server_pingable_from_build    ${ip_addr}
+    [Teardown]    deploy_TearDown    azure_cloud
+
+Deploy_aws_cloud_vCPE
+    [Tags]
+    Create_Cloud_Connect    aws_cloud
+    ${sg_id}    ${vpc_id}=    Create_network    aws_cloud
+    set Suite variable    ${sg_id_t}    ${sg_id}
+    set Suite variable    ${vpc_id_t}    ${vpc_id}
+    ${internetGatewayId}    ${wan_sub_id}    ${lan_sub_id}    ${pubIp}    ${pubId}=    create_aws_related_network    ${vpc_id}
+    set Suite variable    ${wan_sub_id_t}    ${wan_sub_id}
+    set Suite variable    ${lan_sub_id_t}    ${lan_sub_id}
+    set Suite variable    ${pubId_t}    ${pubId}
+    set Suite variable    ${igw_t}    ${internetGatewayId}
+    ${snapshot_id}    ${image_id}    ${ebs_id}    ${linux_instance_id}=    create_server_and_make_ebs_image    ${sg_id}    ${lan_sub_id}    ${pubIp}    ${pubId}
+    set Suite variable    ${snapshot_id_t}    ${snapshot_id}
+    set Suite variable    ${image_id_t}    ${image_id}
+    set Suite variable    ${ebs_id_t}    ${ebs_id}
+    set Suite variable    ${linux_instance_id_t}    ${linux_instance_id}
+    ${pub_ip}    ${vcpe_pub_id}    ${cpe_instance_id}    ${lan_nic_id}=    create_aws_vcpe_server    ${image_id}    ${sg_id}    ${wan_sub_id}    ${lan_sub_id}
+    set Suite variable    ${lan_nic_id_t}    ${lan_nic_id}
+    set Suite variable    ${cpe_instance_id_t}    ${cpe_instance_id}
+    set Suite variable    ${vcpe_pub_id_t}    ${vcpe_pub_id}
+    wait until keyword succeeds    20s   1s    Check_server_pingable_from_build    ${pub_ip}
+    [Teardown]    aws_TearDown
+
+*** Keywords ***
+Create_Cloud_Connect
+    [Arguments]   ${cloudType}
+    run keyword if    '${cloudType}' == 'hw_cloud'    connect_to_cloud    hw_cloud    &{hw_cloud}[AK]    &{hw_cloud}[SK]    &{hw_cloud}[region]
+    ...    project_id=&{hw_cloud}[projectId]    cloud=&{hw_cloud}[cloud]    bucketServer=&{hw_cloud}[bucketServer]
+    ...    ELSE IF    '${cloudType}' == 'ali_cloud'    connect_to_cloud    ali_cloud    &{ali_cloud}[AK]    &{ali_cloud}[SK]    &{ali_cloud}[region]
+    ...    ELSE IF    '${cloudType}' == 'azure_cloud'    connect_to_cloud    azure_cloud    &{azure_cloud}[AZURE_CLIENT_ID]    &{azure_cloud}[AZURE_CLIENT_SECRET]
+    ...    &{azure_cloud}[location]    tenant_id=&{azure_cloud}[AZURE_TENANT_ID]    subscription_id=&{azure_cloud}[AZURE_SUBSCRIPTION_ID]    resourceGrpName=&{azure_cloud}[resourceGrpName]
+    ...    ELSE IF    '${cloudType}' == 'aws_cloud'    connect_to_cloud    aws_cloud    aws    aws    aws
+
+make_image_by_file
+    [Arguments]   ${cloudType}
+    create_Bucket_and_upload_imageFile    ${cloudType}    &{cloud}[bucketName]    &{${cloudType}}[region]    &{cloud}[objName]    &{cloud}[localImagePath]
+    ${imageId}=    create_image    ${cloudType}    &{cloud}[bucketName]    &{cloud}[objName]    &{cloud}[imageName]
+    [Return]    ${imageId}
+
+Create_azure_disk_for_image
+    create_azure_resourceGroup
+    create_azure_image_disk    &{azure_cloud}[vhdFilePath]    &{azure_cloud}[azcopyToolPath]    &{azure_cloud}[imageDiskName]
+
+Create_network
+    [Arguments]   ${cloudType}
+    ${vpc_id}=    create_vpc    ${cloudType}    &{cloud}[vpcName]    &{${cloudType}}[vpcCIDR]
+    run keyword if    '${cloudType}' == 'ali_cloud'    check_ali_resource_status    ali_cloud    Vpc    ${vpc_id}    Available
+    ${sg_id}=    create_sgroup_and_addrule    ${cloudType}    &{cloud}[sGroupName]    ${vpc_id}
+    [Return]    ${sg_id}    ${vpc_id}
+
+Create_notAzure_server
+    [Arguments]   ${cloudType}    ${imageId}    ${sg_id}    ${vpc_id}
+    ${wanNet_id}    ${lanNet_id}    ${server_id}=    create_server_with_2subnet    ${cloudType}    ${imageId}    ${sg_id}    ${vpc_id}    &{cloud}[wanNetName]    &{${cloudType}}[wanCIDR]    &{${cloudType}}[wangw]
+    ...    &{cloud}[lanNetName]    &{${cloudType}}[lanCIDR]    &{${cloudType}}[langw]    &{${cloudType}}[availability_zone]    &{cloud}[serverName]    &{${cloudType}}[flavorType]
+    ${floatingIP_id}    ${floatingIP_addr}=    associate_ip_to_wan    ${cloudType}    ${server_id}    ${wanNet_id}    &{cloud}[floating_network_id]
+    [Return]    ${server_id}    ${floatingIP_id}    ${floatingIP_addr}    ${lanNet_id}
+
+Create_cloud_server
+    [Arguments]   ${cloudType}    ${imageId}    ${sg_id}    ${vpc_id}
+    ${server_id}    ${floatingIP_id}    ${floatingIP_addr}    ${lanNet_id}=    run keyword if    '${cloudType}'!='azure_cloud'    Create_notAzure_server    ${cloudType}    ${imageId}    ${sg_id}    ${vpc_id}
+    ...    ELSE    create_azure_server    ${imageId}    ${vpc_id}    ${sg_id}    &{cloud}[wanNetName]    &{${cloudType}}[wanCIDR]    &{cloud}[lanNetName]    &{${cloudType}}[lanCIDR]    
+    ...    &{${cloudType}}[pubIpName]    &{${cloudType}}[wanNicName]    &{${cloudType}}[lanNicName]    &{cloud}[serverName]    &{${cloudType}}[flavorType]
+    [Return]    ${server_id}    ${floatingIP_id}    ${floatingIP_addr}    ${lanNet_id}
+
+Create_azure_pc
+    [Arguments]    ${sg_id}    ${lan_id}
+    ${server_id}    ${floatingIP_addr}=    create_azure_host    &{azure_cloud}[hostUser]    &{azure_cloud}[hostPwd]    &{azure_cloud}[hostLanName]
+    ...    ${sg_id}    ${lan_id}    &{azure_cloud}[hostName]    &{azure_cloud}[hostsize]
+    [Return]    ${server_id}    ${floatingIP_addr}
+
+Create_hw_pc
+    [Arguments]   ${sg_id}    ${vpc_id}    ${lanId}
+    ${pc_id}    ${ip_id}    ${ip_addr}=    create_hw_host    &{hw_cloud}[pcImageId]   ${sg_id}    ${vpc_id}    ${lanId}    &{hw_cloud}[availability_zone]    &{hw_cloud}[pcName]
+    ...    &{hw_cloud}[flavorType]        &{cloud}[floating_network_id]
+    [Return]    ${pc_id}    ${ip_id}    ${ip_addr}
+
+Create_ali_pc
+    [Arguments]   ${sg_id}    ${lanId}
+    ${pc_id}    ${ip_id}    ${ip_addr}=    create_ali_host    &{ali_cloud}[pcImageId]    ${sg_id}    ${lanId}    &{ali_cloud}[availability_zone]    &{ali_cloud}[pcName]    &{ali_cloud}[flavorType]
+    [Return]    ${pc_id}    ${ip_id}    ${ip_addr}
+
+Check_server_pingable_from_build
+    [Arguments]   ${ip_addr}
+    ${con}=    SSH Login With Key    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[key]
+    ${rc}    ${stderr}=    execute command    rm -f /tmp/ping.log;ping -c 10 -i 0.2 ${ip_addr} > /tmp/ping.log 2>&1 &    return_stderr=True
+    ${cmd}    Set Variable    cat /tmp/ping.log|grep 'loss' | awk -F '%' '{print $1}' | awk '{print $NF}'
+    sleep    3
+    Write    ${cmd}
+    ${res}=    read until prompt
+    ${loss}    Get Line    ${res}    0
+    Should Be equal    ${loss}    0
+    close connection
+
+deploy_notAzure_TearDown
+    [Arguments]   ${cloudType}
+    run keyword if    '${cloudType}' == 'ali_cloud'    delete_ali_Bucket    &{cloud}[bucketName]
+    delete_server    ${cloudType}   ${server_id_t}
+    delete_server    ${cloudType}   ${pc_id_t}
+    delete_image    ${cloudType}   ${imageId_t}
+    delete_ip    ${cloudType}   ${ip_id_t}
+    delete_ip    ${cloudType}   ${pc_ip_id_t}
+
+deploy_TearDown
+    [Arguments]   ${cloudType}
+    run keyword if    '${cloudType}'!='azure_cloud'    deploy_notAzure_TearDown    ${cloudType}
+    ...    ELSE    delete_azure_resource
+
+scp_image_to_aws_ubuntu
+    [Arguments]   ${ip_addr}
+    ${con}=    SSH Login With Key    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[key]
+    ${rc}    ${stderr}=    execute command    scp -i &{aws_cloud}[key_path] &{aws_cloud}[image_path] ubuntu@${ip_addr}:~/ > /dev/null &    return_stderr=True
+    Wait Until Keyword Succeeds    1200    10s    Check scp Process    &{aws_cloud}[image_name]
+    close connection
+
+Check scp Process
+    [Arguments]    ${file}
+    Write    ps -ef | grep scp | grep ${file}|grep -v "grep"
+    ${res}=    read until prompt
+    should not contain    ${res}    scp
+
+ssh_aws_host_to_mk_ebs_image
+    [Arguments]   ${ip_addr}
+    ${con}=    SSH Login With Key    ${ip_addr}    22    ubuntu    &{aws_cloud}[key_path]
+    ${rc}    ${stderr}=    execute command    sudo dd if=&{aws_cloud}[image_name] of=/dev/xvdh bs=1M > /dev/null &    return_stderr=True
+    Wait Until Keyword Succeeds    20    1s    Check dd Process    &{aws_cloud}[image_name]
+    close connection
+
+Check dd Process
+    [Arguments]    ${file}
+    Write    ps -ef | grep dd | grep ${file}|grep -v "grep"
+    ${res}=    read until prompt
+    should not contain    ${res}    dd
+
+create_aws_related_network
+    [Arguments]    ${vpcId}
+    ${internetGatewayId}    ${wan_sub_id}    ${lan_sub_id}    ${pubIp}    ${pubId}=    create_aws_network    ${vpcId}    
+    ...    &{cloud}[wanNetName]    &{aws_cloud}[wanCIDR]    &{cloud}[lanNetName]    &{aws_cloud}[lanCIDR]
+    [Return]    ${internetGatewayId}    ${wan_sub_id}    ${lan_sub_id}    ${pubIp}    ${pubId}
+
+create_server_and_make_ebs_image
+    [Arguments]    ${sg_id}    ${wan_id}    ${pubIp}    ${pub_id}
+    ${ebs_id}    ${linux_instance_id}=    create_linux_server_to_mk_image    &{aws_cloud}[image_server_id]    &{aws_cloud}[image_size]    ${sg_id}    ${wan_id}    &{aws_cloud}[image_server_name]    ${pub_id}
+    wait until keyword succeeds    20   1s    Check_server_pingable_from_build    ${pubIp}
+    sleep    10
+    scp_image_to_aws_ubuntu    ${pubIp}
+    ssh_aws_host_to_mk_ebs_image    ${pubIp}
+    ${snapshot_id}    ${image_id}=    detach_ebs_and_make_image    ${ebs_id}    &{cloud}[imageName]
+    [Return]    ${snapshot_id}    ${image_id}    ${ebs_id}    ${linux_instance_id}
+
+create_aws_vcpe_server
+    [Arguments]    ${image_id}    ${sg_id}    ${wan_id}    ${lan_id}
+    ${pub_ip}    ${pub_id}    ${cpe_instance_id}    ${lan_nic_id}=    create_aws_server    ${image_id}    &{aws_cloud}[vcpe_size]    ${sg_id}    ${wan_id}    ${lan_id}    &{cloud}[serverName]
+    [Return]    ${pub_ip}    ${pub_id}    ${cpe_instance_id}    ${lan_nic_id}
+
+aws_TearDown
+    delete_aws_server    ${cpe_instance_id_t}
+    delete_aws_server    ${linux_instance_id_t}
+    delete_aws_image    ${image_id_t}    ${snapshot_id_t}    ${ebs_id_t}
+    delete_aws_igw_and_sg    ${vpc_id_t}    ${sg_id_t}    ${igw_t}    ${lan_nic_id_t}    ${wan_sub_id_t}    ${lan_sub_id_t}
+    delete_pubIp    ${vcpe_pub_id_t}
+    delete_pubIp    ${pubId_t}

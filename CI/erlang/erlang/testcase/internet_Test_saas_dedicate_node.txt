@@ -1,0 +1,169 @@
+*** Settings ***
+Suite Setup       dedicate_node_saas_setup
+Suite Teardown    dedicate_node_saas_teardown
+Library           ../libs/uranus/UranusKeyword.py
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+Library           ../libs/manager/ManagerKeyword.py
+Library           ../libs/prism/PrismKeyword.py
+Resource          resource/ManagerKeyword.txt
+Resource          resource/PingKeyword.txt
+Library           ../libs/configCenter/ConsulKeyword.py
+Resource          resource/SaltKeyword.txt
+
+*** Test Cases ***
+From auto to dedicate saas Test
+    [Tags]    SDWANDEV-4656
+    ${check_cpes}=    create list    local    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]    ${5}
+    \    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    \    ${bond}=    get_e2e_dest_site_bond    ${ne_id}    &{Saas_Service2}[ne_id]
+    \    check_saas_cache_bond_info    ${cpe}    &{dns_server}[ip]    ${False}    ${True}    ${6}
+    \    ...    ${bond[0]['portNumber']}
+
+From dedicate saas2 to saas1 Test
+    [Tags]    SDWANDEV-4652
+    ${saas_list}=    create list    &{Saas_Service1}[ne_id]
+    ${port_list}=    create list    20
+    ${check_cpes}=    create list    chongqing    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]    ${5}
+    \    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    \    ${bond}=    get_e2e_dest_site_bond    ${ne_id}    &{Saas_Service2}[ne_id]
+    \    check_saas_cache_bond_info    ${cpe}    &{dns_server}[ip]    ${False}    ${True}    ${6}
+    \    ...    ${bond[0]['portNumber']}
+    \    dedicate_saas_config    ${cpe}    ${saas_list}    ${port_list}    Service1
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]    ${5}
+    \    ${bond}=    get_e2e_dest_site_bond    ${ne_id}    &{Saas_Service1}[ne_id]
+    \    check_saas_cache_bond_info    ${cpe}    &{dns_server}[ip]    ${False}    ${True}    ${6}
+    \    ...    ${bond[0]['portNumber']}
+    [Teardown]
+
+From dedicate saas1 port1 to saas1 port2 test
+    [Tags]    SDWANDEV-4655
+    ${saas_list}=    create list    &{Saas_Service1}[ne_id]
+    ${port_list}=    create list    11
+    ${port2_list}=    create list    20
+    ${check_cpes}=    create list    local    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    dedicate_saas_config    ${cpe}    ${saas_list}    ${port_list}    Service1
+    \    check_saas_tcpdump    ${cpe}    &{remote_pop}[ip]
+    \    dedicate_saas_config    ${cpe}    ${saas_list}    ${port2_list}    Service1
+    \    check_saas_tcpdump    ${cpe}    &{remote_pop}[ip2]
+    [Teardown]
+
+From dedicate one saas to 2 saas test
+    [Tags]    SDWANDEV-4653
+    ${saas_list}=    create list    &{Saas_Service1}[ne_id]    &{Saas_Service2}[ne_id]
+    ${port_list}=    create list    20    12
+    ${check_cpes}=    create list    local    guangzhou
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    dedicate_saas_config    ${cpe}    ${saas_list}    ${port_list}    Service2    ${2}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]    ${5}
+    \    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    \    ${bonds}=    get_cpe_internet_table_2_spi_flows_bond_id    ${ne_id}    ${suite_saas_tag_id}
+    \    check_saas_cache_bond_info    ${cpe}    &{dns_server}[ip]    ${False}    ${True}    ${6}
+    \    ...    ${bonds[0]}
+    [Teardown]
+
+dedicate to 2 saas one saas down test
+    [Tags]    SDWANDEV-4654
+    ${saas_list}=    create list    &{Saas_Service1}[ne_id]    &{Saas_Service2}[ne_id]
+    ${port_list}=    create list    20    12
+    ${check_cpes}=    create list    local    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    dedicate_saas_config    ${cpe}    ${saas_list}    ${port_list}    Service2    ${2}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]    ${5}
+    \    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    \    ${bond1}=    get_e2e_dest_site_bond    ${ne_id}    &{Saas_Service1}[ne_id]
+    \    ${bonds}=    get_cpe_internet_table_2_spi_flows_bond_id    ${ne_id}    ${suite_saas_tag_id}
+    \    run keyword if    ${bond1[0]['portNumber']}==${bonds[0]}    stop_service_saas    Saas_Service1
+    \    ...    ELSE    stop_service_saas    Saas_Service2
+    \    run keyword if    ${bond1[0]['portNumber']}==${bonds[0]}    wait until keyword succeeds    8x    1s    saas_direct_link_bad
+    \    ...    ${cpe}    Service1
+    \    ...    ELSE    wait until keyword succeeds    8x    1s    saas_direct_link_bad
+    \    ...    ${cpe}    Service2
+    \    wait until keyword succeeds    8x    1s    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    \    ...    ${5}
+    \    wait until keyword succeeds    8x    1s    check_saas_cache_None    ${cpe}    &{dns_server}[ip]
+    \    ...    ${False}    ${True}    ${6}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]    ${5}
+    \    wait until keyword succeeds    2x    1s    check_saas_cache_bond_info    ${cpe}    &{dns_server}[ip]
+    \    ...    ${False}    ${True}    ${6}    ${bonds[1]}
+    [Teardown]    start_service_saas_teardown
+
+*** Keywords ***
+dedicate_node_saas_setup
+    ${saas_list}=    create list    &{Saas_Service2}[ne_id]
+    ${port_list}=    create list    12
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    dedicate_saas_config    ${cpe}    ${saas_list}    ${port_list}    Service2
+
+check_saas_mulit_port_flow
+    [Arguments]    ${cpe}    ${expect}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    ${bonds}=    get_cpe_internet_table_2_flows_bond_id    ${ne_id}    ${local_code}
+    length should be    ${bonds}    ${expect}
+
+check_saas_dedicate_port_flow
+    [Arguments]    ${cpe}    ${expect}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    ${bonds}=    get_cpe_internet_table_2_spi_flows_bond_id    ${ne_id}    ${suite_saas_tag_id}
+    length should be    ${bonds}    ${expect}
+
+dedicate_node_saas_teardown
+    ${empty_list}    create list
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    dedicate_saas_config    ${cpe}    ${empty_list}    ${empty_list}    Service1    ${0}
+
+start_service_saas_teardown
+    ${saas_list}=    create list    Service1    Service2
+    : FOR    ${saas}    IN    @{saas_list}
+    \    ssh_Services    Saas_${saas}
+    \    write sudo cmd    systemctl start aiwan-saas.service    &{remote_pop}[passwd]
+    \    close connection
+    sleep    3
+    ${check_cpes}=    create list    local    chongqing    guangzhou    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+
+check_saas_cache_bond_info
+    [Arguments]    ${cpe}    ${remote_ip}    ${pass}    ${saas}    ${proto}    ${bond}
+    ${dst_cache}    ${src_cache}    get_cpe_cache_info    ${cpe}    ${remote_ip}    ${pass}    ${saas}
+    ...    ${proto}
+    should be true    ${dst_cache[0]['out_port']}==${bond}
+    should be true    ${src_cache[0]['in_port']}==${bond}
+
+dedicate_saas_config
+    [Arguments]    ${cpe}    ${saas_list}    ${port_list}    ${service}    ${num}=${1}
+    update_appointment_to_site_saas_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_tag_id}    ${saas_list}    ${port_list}
+    Wait Until Keyword Succeeds    10s    1s    check_saas_dedicate_port_flow    ${cpe}    ${num}
+    Check CPE Saas Bond And Links    ${cpe}    ${service}
+
+check_saas_tcpdump
+    [Arguments]    ${cpe}    ${ip}
+    ssh_pc    ${cpe}
+    Write    dig &{internet_host}[saas_dns]
+    Write    sudo nping --tcp-connect -c 20 --delay 1s \ &{internet_host}[saas_dns2] \ -p 22 > nping_u_4655.log &
+    Write    sudo nping --tcp-connect -c 20 --delay 1s \ &{internet_host}[saas_dns] \ -p 22 > nping_u_4655.log &
+    Start_Tcpdump_With_From_Internet_Host    &{internet_host}[nat_phy_port]    tcpdump.log    tcp    ${ip}
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep win \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    close connection
+
+stop_service_saas
+    [Arguments]    ${saas}
+    ssh_Services    ${saas}
+    write sudo cmd    systemctl stop aiwan-saas.service    &{remote_pop}[passwd]
+    close connection
+
+check_saas_cache_None
+    [Arguments]    ${cpe}    ${remote_ip}    ${pass}    ${saas}    ${proto}
+    ${dst_cache}    ${src_cache}    get_cpe_cache_info    ${cpe}    ${remote_ip}    ${pass}    ${saas}
+    ...    ${proto}
+    length should be    ${dst_cache}    ${0}
+    length should be    ${src_cache}    ${0}

@@ -1,0 +1,4 @@
+*** Settings ***
+Suite Setup       Update Fragement Strategy    2
+Resource          ../../resource/UranusKeyword.txt
+Resource          ../../resource/PingKeyword.txt

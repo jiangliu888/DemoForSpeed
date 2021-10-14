@@ -1,0 +1,1391 @@
+*** Settings ***
+Library           ../../libs/common/SetHttp.py
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/uranus/GaeaKeyword.py
+Library           ../../libs/uranus/PontusKeyword.py
+Library           ../../libs/configCenter/ConsulKeyword.py
+Resource          SshKeyword.txt
+Resource          SwitchKeyword.txt
+Resource          ManagerKeyword.txt
+Resource          InsightKeyword.txt
+Library           ../../libs/insight/InsightKeyword.py
+
+*** Variables ***
+${union_timer}    60s
+
+*** Keywords ***
+Uranus_Login
+    Set_Uranus_IP_Header
+    Set_Onos_IP_Header
+    set_cli_ip_port    &{uranus_host}[ip]    &{uranus_host}[cli_port]
+    set_pontus_ip_port    &{pontus_host}[ip]    &{pontus_host}[port]
+    set_gaea_ip_port    &{gaea_host}[ip]    &{gaea_host}[port]
+    set_ssh_user_password    &{uranus_host}[user]    &{uranus_host}[passwd]
+    set_es_ip_port    &{uranus_host}[es_ip]    &{uranus_host}[es_port]
+    set_manager_ip_port    &{manager_server}[ip]    &{manager_server}[port]
+    set_alert_ip_port    &{alert_server}[ip]    &{alert_server}[port]
+    set_influxdb_ip_port    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    set_consul_ip_port_token    &{consul_server}[ip]    &{consul_server}[port]    &{consul_server}[token]
+
+All_Of_Devices_Avaiable
+    ${num}    @{devices} =    get_available_devices    OF_13
+    Should Be Equal As Numbers    ${num}    ${of_devices_num }
+
+All_Netconf_Devices_Avaiable
+    ${num}    @{devices} =    get_available_devices    NETCONF
+    Should Be Equal As Numbers    ${num}    ${netconf_devices_num }
+
+Wait All netconf and of avaiable
+    wait until keyword succeeds    60    3s    All_Netconf_Devices_Avaiable
+    wait until keyword succeeds    120    2s    All_Of_Devices_Avaiable
+
+Suite_SetUp
+    Uranus_Login
+    Portal_GUI_Login_Admin
+    ${code}=    evaluate    ${CM_code}+${local_code_g}
+    Set global Variable    ${CM_local_code}    ${code}
+    Set global Variable    ${local_code}    ${local_code_g}
+    set_measure_polling_freq_to_controller    30
+    Stop_All_Slave_CPE
+    Stop Mwan Service
+    Reset All CPE CAC EAC    ${cpe_list}
+    restart_all_cpe
+    Restart_All_Slave_CPE
+    Get_Office_Network_Setup
+    Trigger_CPE_Learn_IP
+    Get_CPE_Prefer_CAC_EAC
+    Wait All netconf and of avaiable
+    :FOR    ${cpe}    IN    @{master_cpe_list}
+    \    enshare_cpe_master    ${cpe}
+    Delete Saas SPI Dispatches On All Sites Company1
+    delete_all_company_spi_tags    ${suite_company_id}
+    Setup_Saas_SPI_ON_ALL_CPE
+    Ensure_CPE_Get_Key
+    set_es_ip_to_controller
+    ${pops_ports_num}=    get_pops_total_port_num
+    wait until keyword succeeds    300s    5s    All_CPE_Learn_CAC_EAC
+    Ensure_All_CPE_Learn_Right_CAC_EAC
+    wait until keyword succeeds    5s    500ms    check_all_CPE_tunnels    ${pops_ports_num}    ${True}
+    wait until keyword succeeds    62s    3s    check_all_POP_tunnels
+    check_pop_cpe_perfer_port
+    put_cpe_wan_bandwidth    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if]    0    1024000    100    10
+    ...    0
+    wait until keyword succeeds    5s    500ms    Check_ALL_CPE_Wan_Bandwidth
+    ${len}=    get length    ${nat_cpe_list}
+    Check_Union_Flows
+    ${series}=    evaluate    'series_group' in ${Network_Quality_Test_Group}
+    Set global Variable    ${suite_test_series_group}    ${series}
+    ${parallel}=    evaluate    'parallel_group' in ${Network_Quality_Test_Group}
+    Set global Variable    ${suite_test_parallel_group}    ${parallel}
+
+Set_POP_CAC_EAC
+    ${er_list}=    create list    &{local_pop}[ne_id]    &{remote_pop}[ne_id]
+    ${cac_lists}=    create list    &{local_pop}[cac]    &{remote_pop}[cac]
+    ${eac_lists}=    create list    &{local_pop}[eac]    &{remote_pop}[eac]
+    put_er_cac_eac    ${er_list}    ${cac_lists}    ${eac_lists}
+
+Enable_Dest_Ip_Speed_Up
+    ${l_chassis_id}=    get_chassis_id_from_cnf_by_ip    &{local_pc}[cpe_ip]
+    ${r_chassis_id}=    get_chassis_id_from_cnf_by_ip    &{remote_pc}[cpe_ip]
+    set_device_flow_spec    ${l_chassis_id}    &{local_pc}[internet_port]    ${r_chassis_id}    &{remote_pc}[internet_port]    &{remote_pc}[cpe_ip]    &{local_pop}[cac]
+    ...    &{local_pop}[eac]
+    set_device_flow_spec    ${r_chassis_id}    &{remote_pc}[internet_port]    ${l_chassis_id}    &{local_pc}[internet_port]    &{local_pc}[cpe_ip]    &{local_pop}[cac]
+    ...    &{local_pop}[eac]
+
+All_CPE_Learn_CAC_EAC
+    ${ret}=    all_cpe_get_cac_eac
+    should be true    ${ret}
+
+Create_Company_Relation
+    ${company2_id}=    create_company    &{company2}[name]    &{company2}[remark]    &{company2}[location]
+    Set Suite Variable    ${suite_company2_id}    ${company2_id}
+    run keyword if    ${suite_test_series_group}    Add_Private_Company_Relation_To_Series_Group
+
+Delete_Company_Relation
+    run keyword if    ${suite_test_series_group}    Delete_Private_Company_Relation_To_Series_Group
+    delete_company    ${suite_company2_id}
+
+Update_Company_Key_Successful
+    [Arguments]    ${company_id}    ${company_key}    ${format}=128
+    put_company_key    ${company_id}    DES    ${format}    ${company_key}
+    wait until keyword succeeds    2s    200ms    Update_Company_Key_Successful_gaea    ${company_id}    ${company_key}    ${format}
+
+Calculate Dev_id
+    [Arguments]    ${chass_id}
+    ${id}=    Evaluate    str(hex(int(${chass_id}))).zfill(16).replace('x','0')
+    return from keyword    of:${id}
+
+Get_Local_CPE_Key
+    ${ret_key}=    get_device_key_netcnf    &{local_cpe}[ip]    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    [Return]    ${ret_key}
+
+Get_Remote_CPE_Key
+    ${ret_key}=    get_device_key_netcnf    &{remote_cpe}[ip]    &{remote_cpe}[ssh_port]    &{remote_cpe}[user]    &{remote_cpe}[passwd]
+    [Return]    ${ret_key}
+
+Get Device Chass ID
+    [Arguments]    ${ip}    ${ne_type}
+    ${dev_id}    ${chass_id}=    get_device_id_by_ip    ${ip}    ${ne_type}
+    Should not be equal    ${dev_id}    ${None}    "Find the device id according to the ip."
+    Should not be equal    ${chass_id}    ${None}    "Find the device chass id according to the ip."
+    Return_From_Keyword    ${dev_id}    ${chass_id}
+
+Get_Device_ID_From_NetCfg
+    [Arguments]    ${NE_Type}
+    ${er_list}=    get_device_id_from_cnf_with_type    ${NE_Type}
+    ${lenth}=    get length    ${er_list}
+    ${num}=    Convert To Number    0
+    should not be equal as numbers    ${lenth}    ${num}
+    [Return]    ${er_list}
+
+Check_Local_POP_Measure_task_None
+    ${task}=    get_device_net_measure_tasks    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]    &{local_pop}[passwd]
+    should not be True    ${task}
+    [Return]    ${task}
+
+Get_Node_Tunnel
+    [Arguments]    ${node}
+    ${tunnel_from_ne}    Run Keyword If    '${node}' == 'local_pop'    get_device_tunnel_netcnf    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]
+    ...    &{local_pop}[passwd]
+    ...    ELSE IF    '${node}' == 'remote_pop'    get_device_tunnel_netcnf    &{remote_pop}[ctrl_ip]    &{remote_pop}[ssh_port]    &{remote_pop}[user]
+    ...    &{remote_pop}[passwd]
+    ...    ELSE    get_device_tunnel_netcnf    &{${node}_cpe}[ip]    &{${node}_cpe}[ssh_port]    &{${node}_cpe}[user]    &{${node}_cpe}[passwd]
+    ${tunnel_from_controller}    Run Keyword If    '${node}' == 'local_pop'    get_ne_tunnels_from_controller    &{local_pop}[ne_id]
+    ...    ELSE IF    '${node}' == 'remote_pop'    get_ne_tunnels_from_controller    &{remote_pop}[ne_id]
+    ...    ELSE    get_ne_tunnels_from_controller    &{${node}_cpe}[chassis_id]
+    [Teardown]
+    [Return]    ${tunnel_from_ne}    ${tunnel_from_controller}
+
+Check_Node_Measure_Task
+    [Arguments]    ${node}    ${task_num}
+    ${task}=    Run Keyword If    '${node}' == 'local_pop'    get_device_net_measure_tasks    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]
+    ...    &{local_pop}[passwd]
+    ...    ELSE IF    '${node}' == 'remote_pop'    get_device_net_measure_tasks    &{remote_pop}[ctrl_ip]    &{remote_pop}[ssh_port]    &{remote_pop}[user]
+    ...    &{remote_pop}[passwd]
+    ...    ELSE    get_device_net_measure_tasks    &{${node}_cpe}[ip]    &{${node}_cpe}[ssh_port]    &{${node}_cpe}[user]    &{${node}_cpe}[passwd]
+    Comment    ${net_link} =    Run Keyword If    '${node}' == 'local_cpe'    get_ne_netlinks_from_controller    &{local_cpe}[chassis_id]
+    ...    ELSE IF    '${node}' == 'remote_cpe'    get_ne_netlinks_from_controller    &{remote_cpe}[chassis_id]
+    ...    ELSE IF    '${node}' == 'local_pop'    get_ne_netlinks_from_controller    &{local_pop}[ne_id]
+    ...    ELSE IF    '${node}' == 'guangzhou_cpe'    get_ne_netlinks_from_controller    &{guangzhou_cpe}[chassis_id]
+    ...    ELSE IF    '${node}' == 'remote_pop'    get_ne_netlinks_from_controller    &{remote_pop}[ne_id]
+    ${length} =    Evaluate    len(${task})
+    Should Be Equal As Integers    ${length}    ${task_num}
+    [Return]    ${task}
+
+Check End2End Tunnels
+    [Arguments]    ${node}    ${peer_ip_pattern}    ${controller_tunnels_num}    ${cpe_tunnels_num}
+    ${cpe_tunnels}=    get_cpe_end2end_measure_tunnels    &{${node}}[ip]    ${peer_ip_pattern}    &{${node}}[ssh_port]    &{${node}}[user]    &{${node}}[passwd]
+    ${site_tunnels} =    get_site_tunnels_from_controller_for_destip    &{${node}}[chassis_id]    ${peer_ip_pattern}
+    ${length} =    Evaluate    len(${cpe_tunnels})
+    Should Be Equal As Integers    ${length}    ${cpe_tunnels_num}    There should be ${cpe_tunnels_num} tunnels to ${peer_ip_pattern} on cpe.
+    ${length} =    Evaluate    len(${site_tunnels})
+    Comment    Should Be Equal As Integers    ${length}    ${controller_tunnels_num}    There should be ${controller_tunnels_num} tunnels to ${peer_ip_pattern} on controller.
+    ${tunnel_ids}=    evaluate    map(lambda x:x['number'],${cpe_tunnels} )
+    [Return]    ${tunnel_ids}
+
+Check_CPE_Key
+    [Arguments]    ${node}    ${key}    ${val}=True
+    ${ret_key}=    get_device_key_netcnf    &{${node}_cpe}[ip]    &{${node}_cpe}[ssh_port]    &{${node}_cpe}[user]    &{${node}_cpe}[passwd]
+    run keyword if    '${val}' == 'True'    should be equal    ${ret_key}    ${key}
+    ...    ELSE IF    '${val}' == 'False'    should not be equal    ${ret_key}    ${key}
+    [Return]    ${ret_key}
+
+Update Fragement Strategy
+    [Arguments]    ${strategy}    ${mtu}=1480
+    # default is 1, enable split message is 2
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${ne_id}=    Get_CPE_Chassis_Id    ${cpe}
+    \    set_device_tunnel_netcnf    ${ne_id}    ${strategy}    ${mtu}
+    \    Wait Until Keyword Succeeds    20X    500ms    Check Fragement Strategy    ${strategy}    ${cpe}
+
+Check Fragement Strategy
+    [Arguments]    ${strategy}    ${cpe}
+    ${val_strategy}    Evaluate    int(${strategy})
+    ${ne_id}=    Get_CPE_Chassis_Id    ${cpe}
+    ${ssh_ip}    ${ssh_port}    ${ssh_user}    ${ssh_passwd}=    Get_CPE_SSH_INFO    ${cpe}
+    ${tunnels}=    get_ne_tunnels_from_controller    ${ne_id}
+    ${local_res}    get_device_tunnel_fragment_strategy    ${ssh_ip}    ${ssh_port}    ${ssh_user}    ${ssh_passwd}    ${tunnels}
+    : FOR    ${var}    IN    @{local_res}
+    \    should be equal    ${val_strategy}    ${var}
+
+Office_Network_Teardown
+    delete_company_all_unions    ${suite_company_id}
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${sitename}=    get_site_name    ${cpe}
+    \    delete_company_sites    ${suite_company_id}    ${sitename}
+    delete_company    ${suite_company_id}
+
+Unregister_all_ne_from_controller
+    [Arguments]    ${ne_type}
+    ${ne_list}=    get_device_id_from_cnf_with_type    ${ne_type}
+    ${is_pop}=    evaluate    '${ne_type}' in ['CR', 'ER']
+    : FOR    ${ne}    IN    @{ne_list}
+    \    run keyword if    ${is_pop}    Set_POP_Status    ${ne}    MAINTENANCE
+    \    unregister_ne    ${ne}
+    \    delete_ne    ${ne}    ${ne_type}
+    [Return]    ${ne_list}
+
+Suit_TearDown
+    Delete Saas SPI Dispatches On All Sites Company1
+    delete_all_company_spi_tags    ${suite_company_id}
+    set_flow_poll_frequency    60
+    ${ne_list}=    get_device_id_from_cnf_with_type    CPE
+    :FOR    ${cpe}    IN    @{cpe_list}
+    \    run keyword if    &{${cpe}_cpe}[chassis_id] not in ${ne_list}    Restart_Cpe    ${cpe}
+    Check_Controller_Log
+    Start Mwan Service
+
+Restore All CPE
+    restart_all_cpe
+    Restart_All_Slave_CPE
+
+Check_VPort_Bandwidth_From_Ne
+    [Arguments]    ${node}    ${interface}    ${index}    ${bandwidth}    ${burst}    ${latency}
+    ...    ${ratio}
+    ${vports}=    get_device_vport_from_ne    &{${node}_cpe}[ip]    &{${node}_cpe}[ssh_port]    &{${node}_cpe}[user]    &{${node}_cpe}[passwd]
+    ${port}=    evaluate    filter(lambda x:x['interface']=='${interface}' and \ x['index']==${index}, ${vports})[0]
+    should be true    '${port["bandwidth"]}' =='${bandwidth}'
+    should be true    '${port["burst"]}' =='${burst}'
+    should be true    '${port["latency"]}' =='${latency}'
+    should be true    '${port["ratio"]}' =='${ratio}'
+
+Check_CPE_Pass_Through_Flows_From_Controller
+    [Arguments]    ${nes}
+    : FOR    ${switch}    IN    @{nes}
+    \    ${ret}=    check_cpe_pass_through_flow    ${switch}
+    \    should be True    ${ret}
+
+Check_Pop_To_CPE_Route_Flows
+    [Arguments]    ${sne_id}    ${cpe}    ${next_pop}
+    ${tunnels_list}=    get_x_low_weight_tunnels    ${sne_id}    ${next_pop}    2
+    ${tunnel_ids}    evaluate    map(lambda x: x["tunnelId"], ${tunnels_list})
+    ${tunnel_id}=    Get From List    ${tunnel_ids}    0
+    ${route_code_list}=    get_cpe_home_code    ${cpe}
+    ${route_code}=    Get From List    ${route_code_list}    0
+    ${ret}=    run keyword if    '${cpe}' == '${next_pop}'    check_pop_2_cpe_flows    ${sne_id}    ${cpe}    ${route_code['cac']}
+    ...    ${route_code['eac']}    ${tunnel_id}
+    ...    ELSE    check_pop_2_cpe_next_pop_flows_with_tunnel_list    ${sne_id}    ${route_code['cac']}    ${route_code['eac']}    ${tunnel_ids}
+    should be True    ${ret}
+
+Check_CPE_2CPE_Office_flows
+    [Arguments]    ${s_ne_id}    ${d_ne_id}    ${d_ip}    ${s_ip}=${None}    ${header}=${72}
+    ${route_code_list}=    get_cpe_home_code    ${d_ne_id}
+    ${d_route_code}=    Get From List    ${route_code_list}    0
+    ${cpe_type}=    get_cpe_type_from_ne_id    ${d_ne_id}
+    ${ret}=    run keyword if    '${cpe_type}'=='SERIES'    check_cpe_office_speed_up_flow    ${s_ne_id}    ${d_ne_id}    ${d_route_code['cac']}
+    ...    ${d_route_code['eac']}    ${d_ip}    ${header}    ${8}
+    ...    ELSE    check_not_series_cpe_office_speed_up_flow    ${s_ne_id}    ${d_ne_id}    ${d_route_code['cac']}    ${d_route_code['eac']}
+    ...    ${d_ip}    ${header}    ${8}    ${s_ip}
+    should be true    ${ret}
+    [Return]    ${ret}
+
+check_all_CPE_tunnels
+    [Arguments]    ${cpe_tunnel_num}=${5}    ${after_homecode_select}=${False}
+    ${saas_ports}=    get saas cpe port num
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${wan_num}=    Get_CPE_Wan_Num    ${cpe}
+    \    ${e2e_tunnels_num}=    Get_CPE_E2E_Tunnels_Num    ${cpe}
+    \    ${tunnel_from_ne}    ${tunnel_from_controller}=    Get_Node_Tunnel    ${cpe}
+    \    ${length_from_controller}    Evaluate    len(${tunnel_from_controller})
+    \    ${length} =    Evaluate    len(${tunnel_from_ne})
+    \    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    \    ${is_saas}=    evaluate    int('${cpe}' in ${saas_cpe_list})
+    \    ${expect_c}=    run keyword if    ${after_homecode_select} and ${openwrt} and ${wan_num} != ${1}    Evaluate    (${wan_num}-1)*${cpe_tunnel_num}+${e2e_tunnels_num}+&{${cpe}_cpe}[4g_wan_p2p_tunnels_num]+${saas_ports}*${wan_num}*${is_saas}
+    \    ...    ELSE IF    ${after_homecode_select} and ${openwrt} and ${wan_num} == ${1}    Evaluate    ${wan_num}*${cpe_tunnel_num}+${e2e_tunnels_num}+&{${cpe}_cpe}[4g_wan_p2p_tunnels_num]+${saas_ports}*${wan_num}*${is_saas}
+    \    ...    ELSE    Evaluate    ${wan_num}*${cpe_tunnel_num}+${e2e_tunnels_num}+${saas_ports}*${wan_num}*${is_saas}
+    \    ${expect_t}=    run keyword if    ${after_homecode_select} and ${openwrt} and ${wan_num} != ${1}    Evaluate    (${wan_num}-1)*${cpe_tunnel_num}+${e2e_tunnels_num}+&{${cpe}_cpe}[4g_wan_p2p_tunnels_num]+${saas_ports}*${wan_num}*${is_saas}
+    \    ...    ELSE IF    ${after_homecode_select} and ${openwrt} and ${wan_num} == ${1}    Evaluate    ${wan_num}*${cpe_tunnel_num}+${e2e_tunnels_num}+&{${cpe}_cpe}[4g_wan_p2p_tunnels_num]+${saas_ports}*${wan_num}*${is_saas}
+    \    ...    ELSE    Evaluate    ${wan_num}*${cpe_tunnel_num}+${e2e_tunnels_num}+${saas_ports}*${wan_num}*${is_saas}
+    \    should be true    ${length} == ${expect_t}
+    \    should be true    ${length_from_controller}==${expect_c}
+
+Trigger_CPE_Learn_IP
+    [Timeout]    2 minutes
+    : FOR    ${cpe}    IN    @{learn_ip_cpe_list}
+    \    wait until keyword succeeds    2x    3ms    SCP_File_From_H1_To_H2    ${cpe}    &{uranus_host}[office_ip]
+    \    ...    DontDelete.o    target.o
+    \    wait until keyword succeeds    2x    3ms    SCP_File_From_H1_To_H2    ${cpe}    &{uranus_host}[office_ip]
+    \    ...    DontDelete.o    target.o
+    \    wait until keyword succeeds    6x    1s    Check_CPE_Status    ${cpe}
+    ${cpes}=    evaluate    filter(lambda x:x not in ${learn_ip_cpe_list},${cpe_list})
+    : FOR    ${cpe}    IN    @{cpes}
+    \    wait until keyword succeeds    50s    20ms    Check_CPE_Status    ${cpe}
+
+Check_POP_Measure_config
+    [Arguments]    ${pop}    ${expect_num}
+    ${configs}=    run keyword if    '${pop}' == 'local'    get_device_net_measure_config    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]
+    ...    &{local_pop}[passwd]
+    ...    ELSE    get_device_net_measure_config    &{remote_pop}[ctrl_ip]    &{remote_pop}[ssh_port]    &{remote_pop}[user]    &{remote_pop}[passwd]
+    Length Should Be    ${configs}    ${expect_num}
+
+Check_POP_CAC_EAC
+    [Arguments]    ${ne_id}    ${cac}    ${eac}
+    ${route}=    get_ne_cac_eac    ${ne_id}
+    should be equal    ${route['routeCode']["cac"]}    ${cac}
+    should be equal    ${route['routeCode']["eac"]}    ${eac}
+
+Set_Uranus_IP_Header
+    set_host_ip_port    &{uranus_host}[ip]    &{uranus_host}[port]
+    ${headers}=    get_http_uranus_headers    &{uranus_host}[user]    &{uranus_host}[passwd]
+    set_http_headers    ${headers}
+
+Ensure_CPE_Select_Right_EAC
+    [Arguments]    ${cpe_id}    ${cac}    ${eac}
+    ${selected}=    cpe_selected_right_cac_eac    ${cpe_id}    ${cac}    ${eac}
+    should be true    ${selected}
+
+Trigger_One_CPE_Learn_Ip
+    [Arguments]    ${cpe}
+    Nping_From_PC    ${cpe}
+    Check_CPE_Status    ${cpe}
+
+Check_Pop_To_Pop_Route_Flows
+    [Arguments]    ${sne_id}    ${dne_id}    ${next_id}
+    ${tunnels_list}=    get_pop_to_pop_running_tunnels    ${sne_id}    ${next_id}
+    ${tunnel_ids}    evaluate    map(lambda x: x["tunnelId"], ${tunnels_list})
+    ${route_code}=    get_ne_cac_eac    ${dne_id}
+    ${flow_t}=    create list
+    : FOR    ${tunnel_id}    IN    @{tunnel_ids}
+    \    ${ret}=    check_pop_2_pop_next_pop_routes    ${sne_id}    ${route_code['routeCode']['cac']}    ${route_code['routeCode']['eac']}    ${tunnel_id}
+    \    run keyword if    ${ret}    append to list    ${flow_t}    ${tunnel_id}
+    length should be    ${flow_t}    2
+
+Ensure_All_CPE_Learn_Right_CAC_EAC
+    ${ne_list}=    get_device_id_from_cnf_with_type    CPE
+    : FOR    ${ne}    IN    @{ne_list}
+    \    ${eac_4}=    evaluate    ${ne} in &{local_pop}[cpes]
+    \    ${eac_5}=    evaluate    ${ne} in &{remote_pop}[cpes]
+    \    run keyword if    '${eac_4}'=='True'    Ensure_CPE_Select_Right_EAC    ${ne}    &{local_pop}[cac]    &{local_pop}[eac]
+    \    ...    ELSE IF    '${eac_5}'=='True'    Ensure_CPE_Select_Right_EAC    ${ne}    &{remote_pop}[cac]
+    \    ...    &{remote_pop}[eac]
+    \    ${eac_wan_4}=    evaluate    filter(lambda x:x['id']==${ne}, &{local_pop}[cpe_wans])
+    \    ${len}=    get length    ${eac_wan_4}
+    \    run keyword if    '${len}' == '1'    Ensure_CPE_Wan_Select_Right_EAC    ${ne}    ${eac_wan_4[0]['iface']}    ${eac_wan_4[0]['index']}
+    \    ...    &{local_pop}[cac]    &{local_pop}[eac]
+    \    ${eac_wan_5}=    evaluate    filter(lambda x:x['id']==${ne}, &{remote_pop}[cpe_wans])
+    \    ${len}=    get length    ${eac_wan_5}
+    \    run keyword if    '${len}' == '1'    Ensure_CPE_Wan_Select_Right_EAC    ${ne}    ${eac_wan_5[0]['iface']}    ${eac_wan_5[0]['index']}
+    \    ...    &{remote_pop}[cac]    &{remote_pop}[eac]
+
+Unreg_All_CPE
+    ${ne_list}=    get_device_id_from_cnf_with_type    CPE
+    ${l_items}=    create list    tunnel    link    bond    controller    manager
+    : FOR    ${ne}    IN    @{ne_list}
+    \    unregister_ne    ${ne}
+    \    ${cpe}    Get CPE Name by Neid    ${ne}
+    \    run keyword and ignore error    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    ${cpe}
+    \    run keyword and ignore error    Confirm No Data in Sysrepo Startup    ${cpe}    ${l_items}
+    [Return]    ${ne_list}
+
+Reset All CPE CAC EAC
+    [Arguments]    ${list}
+    ${ne_list}=    get_device_id_from_cnf_with_type    CPE
+    : FOR    ${cpe}    IN    @{list}
+    \    Continue For Loop If    &{${cpe}_cpe}[chassis_id] not in ${ne_list}
+    \    ${body}=    set_wrong_cpe_home_code_prefer    &{${cpe}_cpe}[chassis_id]
+    \    wait until keyword succeeds    1s    100ms    Check Wrong CPE Home Code Prefer    ${cpe}
+    \    retore_cpe_home_code_prefer    &{${cpe}_cpe}[chassis_id]    ${body}
+
+Set_Onos_IP_Header
+    set_onos_ip_port    &{uranus_host}[ip]    &{uranus_host}[onos_port]
+    ${headers}=    get_http_onos_headers    &{uranus_host}[user]    &{uranus_host}[passwd]
+    set_http_onos_headers    ${headers}
+
+CPE_Select_Prefer_Area
+    [Arguments]    ${ne_id}    ${phy_port}    ${cac}    ${eac}    ${p_ip}=${None}    ${index_list}=${None}
+    put_cpe_home_code_prefer    ${ne_id}    ${phy_port}    ${cac}    ${eac}    ${p_ip}    ${index_list}
+    : FOR    ${p_if}    IN    @{phy_port}
+    \    ${i}=    Get Index From List    ${phy_port}    ${p_if}
+    \    ${index_i}=    run keyword if    ${index_list}    get from list    ${index_list}    ${i}
+    \    ${index}=    set variable if    ${index_list}    ${index_i}    ${i}
+    \    wait until keyword succeeds    4s    200ms    Get_HomeCode_prefer    ${ne_id}    ${p_if}
+    \    ...    ${index}    ${cac}    ${eac}    ${i}
+
+Get_HomeCode_prefer
+    [Arguments]    ${ne_id}    ${p_if}    ${index}    ${cac}    ${eac}    ${i}
+    ${area}=    get_cpe_home_code_prefer    ${ne_id}    ${p_if}    ${index}
+    ${cac_p}=    get from list    ${cac}    ${i}
+    ${eac_p}=    get from list    ${eac}    ${i}
+    should be equal as integers    ${area['cac']}    ${cac_p}
+    should be equal as integers    ${area['eac']}    ${eac_p}
+
+Set_POP_Status
+    [Arguments]    ${ne_id}    ${status}
+    put_ne_status    ${ne_id}    ${status}
+    wait until keyword succeeds    20s    200ms    Get_POP_Status    ${ne_id}    ${status}
+
+check_e2e_match_route
+    [Arguments]    ${ne_id}    ${site_a}    ${site_b}    ${d_ne_id}    ${exp_num}=1    ${exp_onos_num}=1
+    ...    ${exp_onos_num_p}=0    ${nets}=${None}
+    ${c_flows}=    get_ne_route    ${ne_id}
+    ${site_b_body}=    get_company_sites_with_id    ${suite_company_id}    ${site_b}
+    ${flow_onos}=    run keyword if    '${site_b_body["name"]}'=='chongqing'    get_dst_chongqing_nat_cpe_e2e_match_route    ${ne_id}    ${d_ne_id}
+    ...    ELSE    get_cpe_table0_dest_ip_flows    ${ne_id}    ${d_ne_id}    ${nets}
+    ${len}=    evaluate    len(${flow_onos})
+    should be equal as numbers    ${len}    ${exp_onos_num}
+    ${p_flow_onos}=    get_cpe_table0_private_ip_flows    ${ne_id}    ${suite_company_id}    ${site_b}
+    ${len}=    evaluate    len(${p_flow_onos})
+    should be equal as numbers    ${len}    ${exp_onos_num_p}
+
+Get_POP_Status
+    [Arguments]    ${ne_id}    ${status}
+    ${ret_status}=    get_ne_status    ${ne_id}
+    should be equal    ${status}    ${ret_status}
+
+Change_Cpe_Address_Group
+    [Arguments]    ${ne_id}    ${port}    ${group}    ${index}=${0}
+    put_cpe_address_group    ${ne_id}    ${port}    ${index}    ${group}
+    wait until keyword succeeds    5s    200ms    Get_CPE_Addr_Group    ${ne_id}    ${port}    ${index}
+    ...    ${group}
+
+Get_CPE_Addr_Group
+    [Arguments]    ${ne_id}    ${port}    ${index}    ${group}
+    ${ret_group}=    get_cpe_address_group    ${ne_id}    ${port}    ${index}
+    lists should be equal    ${ret_group}    ${group}
+
+Get_CPE_Prefer_CAC_EAC
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${c_id}=    Get_CPE_Chassis_Id    ${cpe}
+    \    ${cac}    ${eac}    ${port}=    Get_CPE_Perfer_CAC_EAC    ${cpe}
+    \    ${if_list}=    Get_CPE_If    ${cpe}
+    \    ${i_l}=    create list    ${0}    ${0}
+    \    ${index_list}=    set variable if    '${cpe}' == 'guangzhou' and &{guangzhou_cpe}[internet_wan_num] == 2    ${i_l}    ${None}
+    \    Check_CPE_Select_Prefer_Area_Info    ${c_id}    ${if_list}    ${cac}    ${eac}    ${port}
+    \    ...    ${index_list}
+
+Ensure_CPE_Wan_Select_Right_EAC
+    [Arguments]    ${cpe_id}    ${iface}    ${index}    ${cac}    ${eac}
+    ${selected}=    cpe_selected_right_cac_eac    ${cpe_id}    ${cac}    ${eac}    ${iface}    ${index}
+    should be true    ${selected}
+
+Set_CPE_Interface_Bandwith
+    [Arguments]    ${cpe}    ${bandwidth}    ${burst}    ${latency}    ${ratio}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    ${inface_name}=    set variable    &{${cpe}_cpe}[internet_if]
+    put_cpe_wan_bandwidth    ${ne_id}    ${inface_name}    0    ${bandwidth}    ${burst}    ${latency}
+    ...    ${ratio}
+    run keyword if    '${cpe}' == 'nanjing' or '${cpe}' == 'wuhan'    put_cpe_wan_bandwidth    ${ne_id}    ${inface_name}    1    ${bandwidth}
+    ...    ${burst}    ${latency}    ${ratio}
+    run keyword if    '${cpe}' == 'guangzhou' or '${cpe}' == 'changsha'    put_cpe_wan_bandwidth    ${ne_id}    &{${cpe}_cpe}[internet_if2]    0    ${bandwidth}
+    ...    ${burst}    ${latency}    ${ratio}
+    wait until keyword succeeds  3x   100ms   Check_CPE_Interface_Bandwith    ${cpe}    ${bandwidth}    ${burst}    ${latency}    ${ratio}
+
+Set_CPE_Wan_Bandwidth
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    Set_CPE_Interface_Bandwith    ${cpe}    1024000    100    10    0
+
+get_dst_chongqing_nat_cpe_e2e_match_route
+    [Arguments]    ${of_id}    ${d_ne_id}
+    ${nets}=    evaluate    '&{remote_pop}[ip]'+'/32'
+    ${flow_onos1}=    get_cpe_table0_dest_ip_flows    ${of_id}    ${d_ne_id}    ${nets}
+    ${nets}=    evaluate    '&{remote_pop}[ip2]'+'/32'
+    ${flow_onos2}=    get_cpe_table0_dest_ip_flows    ${of_id}    ${d_ne_id}    ${nets}
+    ${flows}=    evaluate    ${flow_onos1}+${flow_onos2}
+    [Return]    ${flows}
+
+Check End2End Links
+    [Arguments]    ${node}    ${remote_id}    ${links_num}
+    ${links}=    get_cpe_end2end_links    &{${node}_cpe}[ip]    ${remote_id}    &{${node}_cpe}[ssh_port]    &{${node}_cpe}[user]    &{${node}_cpe}[passwd]
+    ${id}=    Get_CPE_Chassis_Id    ${node}
+    ${links_c} =    get_e2e_links_from_controller    ${id}    ${remote_id}
+    ${length} =    Evaluate    len(${links})
+    Should Be Equal As Integers    ${length}    ${links_num}    There should be ${links_num} end2end links on cpe.
+    ${length} =    Evaluate    len(${links_c})
+    Should Be Equal As Integers    ${length}    ${links_num}    There should be ${links_num} inband end2end links on controller.
+    ${link_ids}=    EVALUATE    map(lambda x: x['number'], ${links})
+    [Return]    ${link_ids}    ${links}
+
+Check End2End Bond
+    [Arguments]    ${node}    ${ne_id}    ${remote_id}
+    ${bonds}=    get_e2e_dest_site_bond    ${ne_id}    ${remote_id}
+    length should be    ${bonds}    ${1}
+    ${bonds_c}    get_End2End_Bond    ${node}    ${remote_id}
+    length should be    ${bonds_c}    ${1}
+
+Check End2End Bond Deleted
+    [Arguments]    ${node}    ${ne_id}    ${remote_id}
+    ${bonds}=    get_e2e_dest_site_bond    ${ne_id}    ${remote_id}
+    length should be    ${bonds}    ${0}
+    ${bonds_c}    Run Keyword If    '${node}' == 'local'    get_cpe_end2end_bond    &{local_cpe}[ip]    ${remote_id}    &{local_cpe}[ssh_port]
+    ...    &{local_cpe}[user]    &{local_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'remote'    get_cpe_end2end_bond    &{remote_cpe}[ip]    ${remote_id}    &{remote_cpe}[ssh_port]
+    ...    &{remote_cpe}[user]    &{remote_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'nanjing'    get_cpe_end2end_bond    &{nanjing_cpe}[ip]    ${remote_id}    &{nanjing_cpe}[ssh_port]
+    ...    &{nanjing_cpe}[user]    &{nanjing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'guangzhou'    get_cpe_end2end_bond    &{guangzhou_cpe}[ip]    ${remote_id}    &{guangzhou_cpe}[ssh_port]
+    ...    &{guangzhou_cpe}[user]    &{guangzhou_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'chongqing'    get_cpe_end2end_bond    &{chongqing_cpe}[ip]    ${remote_id}    &{chongqing_cpe}[ssh_port]
+    ...    &{chongqing_cpe}[user]    &{chongqing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'wuhan'    get_cpe_end2end_bond    &{wuhan_cpe}[ip]    ${remote_id}    &{wuhan_cpe}[ssh_port]
+    ...    &{wuhan_cpe}[user]    &{wuhan_cpe}[passwd]
+    length should be    ${bonds_c}    ${0}
+
+get_dst_chongqing_nat_pop_ip
+    [Arguments]    ${of_id}    ${d_ne_id}
+    ${nets}=    evaluate    '&{remote_pop}[ip]'+'/32'
+    ${flow_onos1}=    get_cpe_table0_dest_ip_flows    ${of_id}    ${d_ne_id}    ${nets}
+    ${len}=    get length    ${flow_onos1}
+    ${nat_pop_ip}=    set variable if    ${len}==0    &{remote_pop}[ip2]    &{remote_pop}[ip]
+    [Return]    ${nat_pop_ip}
+
+Set_CPE_Bond_Bandwidth
+    [Arguments]    ${cpe}    ${remote_id}    ${site_a}    ${site_b}    ${bandwidth}    ${burst}
+    ...    ${latency}
+    ${c_name}=    evaluate    '${site_a}-${site_b}'
+    create_company_union_bandwidth    ${suite_company_id}    ${suite_${c_name}_union_id}    ${bandwidth}    ${burst}    ${latency}
+    Wait Until Keyword Succeeds    4s    200ms    Set_CPE_Bond_Bandwidth_From_gaea    ${site_a}    ${site_b}    ${bandwidth}
+    ...    ${burst}    ${latency}
+    Wait Until Keyword Succeeds    11s    200ms    Check_Bond_Bandwidth_From_Ne    ${cpe}    ${remote_id}    ${bandwidth}
+    ...    ${burst}    ${latency}
+
+Check_Bond_Bandwidth_From_Ne
+    [Arguments]    ${node}    ${remote_id}    ${bandwidth}    ${burst}    ${latency}
+    ${bonds}=    get_cpe_end2end_bond    &{${node}_cpe}[ip]    ${remote_id}    &{${node}_cpe}[ssh_port]    &{${node}_cpe}[user]    &{${node}_cpe}[passwd]
+    should be true    '${bonds[0]["bandwidth"]}' =='${bandwidth}'
+    should be true    '${bonds[0]["burst"]}' =='${burst}'
+    should be true    '${bonds[0]["latency"]}' =='${latency}'
+
+check_all_POP_tunnels
+    [Arguments]    ${pop_tunnel_num}=${0}
+    ${p_tunnels_num}=    get_pop_tunnels_num    remote    local
+    : FOR    ${POP}    IN    @{pop_list}
+    \    ${saas_ports}=    Get Saas Port Num    ${POP}
+    \    ${anyc_ports}=    get anyc port num    ${POP}
+    \    ${pop_tunnel_n}=    run keyword if    '${pop_tunnel_num}'=='0'    evaluate    (len(${pop_list})-1)*${p_tunnels_num}+${saas_ports}+${anyc_ports}
+    \    ...    ELSE    set variable    ${pop_tunnel_num}
+    \    ${tunnel_from_ne}    ${tunnel_from_controller}=    Get_Node_Tunnel    ${POP}_pop
+    \    ${length_from_controller}    Evaluate    len(${tunnel_from_controller})
+    \    ${length} =    Evaluate    len(${tunnel_from_ne})
+    \    Should Be Equal As Integers    ${length}    ${pop_tunnel_n}
+    \    Should Be Equal As Integers    ${length_from_controller}    ${pop_tunnel_n}
+
+Set_CPE_Measure_Algo
+    [Arguments]    ${cpe}    ${delay}    ${loss}    ${stdev}    ${m0}    ${m1}
+    ...    ${m2}    ${m3}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    put_ne_measure_algo    ${ne_id}    ${delay}    ${loss}    ${stdev}    ${m0}    ${m1}
+    ...    ${m2}    ${m3}
+    Wait Until Keyword Succeeds    10s    200ms    check_Measure_Algo_From_Ne    ${cpe}    ${delay}    ${loss}
+    ...    ${stdev}    ${m0}    ${m1}    ${m2}    ${m3}
+
+Check_Measure_Algo_From_Ne
+    [Arguments]    ${node}    ${delay}    ${loss}    ${stdev}    ${m0}    ${m1}
+    ...    ${m2}    ${m3}
+    ${algo}=    Run Keyword If    '${node}' == 'local'    get_cpe_measure_algo    &{local_cpe}[ip]    &{local_cpe}[ssh_port]    &{local_cpe}[user]
+    ...    &{local_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'remote'    get_cpe_measure_algo    &{remote_cpe}[ip]    &{remote_cpe}[ssh_port]    &{remote_cpe}[user]
+    ...    &{remote_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'nanjing'    get_cpe_measure_algo    &{nanjing_cpe}[ip]    &{nanjing_cpe}[ssh_port]    &{nanjing_cpe}[user]
+    ...    &{nanjing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'wuhan'    get_cpe_measure_algo    &{wuhan_cpe}[ip]    &{wuhan_cpe}[ssh_port]    &{wuhan_cpe}[user]
+    ...    &{wuhan_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'chongqing'    get_cpe_measure_algo    &{chongqing_cpe}[ip]    &{chongqing_cpe}[ssh_port]    &{chongqing_cpe}[user]
+    ...    &{chongqing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'guangzhou'    get_cpe_measure_algo    &{guangzhou_cpe}[ip]    &{guangzhou_cpe}[ssh_port]    &{guangzhou_cpe}[user]
+    ...    &{guangzhou_cpe}[passwd]
+    should be true    '${algo["delay"]}' =='${delay}'
+    should be true    '${algo["loss"]}' =='${loss}'
+    should be true    '${algo["stdev"]}' =='${stdev}'
+    should be true    '${algo["m0"]}' =='${m0}'
+    should be true    '${algo["m1"]}' =='${m1}'
+    should be true    '${algo["m2"]}' =='${m2}'
+    should be true    '${algo["m3"]}' =='${m3}'
+
+Set_Site_Bandwidth
+    [Arguments]    ${cpe}    ${site}    ${bandwidth}    ${burst}    ${latency}
+    create_company_site_bandwidth    ${suite_company_id}    ${site}    ${bandwidth}    ${burst}    ${latency}
+    Wait Until Keyword Succeeds    2s    200ms    Check_Site_Bandwidth_From_gaea    ${site}    ${bandwidth}    ${burst}
+    ...    ${latency}
+    Wait Until Keyword Succeeds    2s    200ms    Check_Site_Bandwidth_From_Ne    ${cpe}    ${bandwidth}    ${burst}
+    ...    ${latency}
+
+Check_Site_Bandwidth_From_Ne
+    [Arguments]    ${cpe}    ${bandwidth}    ${burst}    ${latency}
+    ${band}=    get_ne_global_rate_limit    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    should be true    '${band["bandwidth"]}' =='${bandwidth}'
+    should be true    '${band["burst"]}' =='${burst}'
+    should be true    '${band["latency"]}' =='${latency}'
+
+check_pop_cpe_perfer_port
+    ${cpes}=    set variable    &{local_pop}[cpes]
+    : FOR    ${cpe}    IN    @{cpes}
+    \    ${len}    ${id}    get_dst_ne_tunnel_info_with_sip    &{local_pop}[ne_id]    ${cpe}    &{local_pop}[ip]
+    \    should be true    ${len}==0
+    ${cpes}=    set variable    &{remote_pop}[cpes]
+    : FOR    ${cpe}    IN    @{cpes}
+    \    ${len}    ${id}    get_dst_ne_tunnel_info_with_sip    &{remote_pop}[ne_id]    ${cpe}    &{remote_pop}[ip2]
+    \    should be true    ${len}==0
+
+Get_Better_Wan
+    [Arguments]    ${links}    ${i_p}    ${e_p}
+    ${b_pkg}    set variable    ${0}
+    ${b_wan}    set variable    ${0}
+    ${b_direct}    set variable    ${0}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}=    get index from list    ${links}    ${link}
+    \    ${pkg}=    evaluate    ${e_p[${i}]}-${i_p[${i}]}
+    \    ${b_direct}    set variable if    ${pkg} > ${b_pkg}    ${link['direct']}    ${b_direct}
+    \    ${b_wan}    set variable if    ${pkg} > ${b_pkg}    ${link['local-wan-id']}    ${b_wan}
+    \    ${b_pkg}    set variable if    ${pkg} > ${b_pkg}    ${pkg}    ${b_pkg}
+    [Return]    ${b_wan}    ${b_direct}
+
+Get_Better_Tunnel
+    [Arguments]    ${links}    ${i_p}    ${e_p}
+    ${b_pkg}    set variable    ${0}
+    ${b_tunnel}    set variable    ${0}
+    ${b_direct}    set variable    ${0}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}=    get index from list    ${links}    ${link}
+    \    ${pkg}=    evaluate    ${e_p[${i}]}-${i_p[${i}]}
+    \    ${b_direct}    set variable if    ${pkg} > ${b_pkg}    ${link['direct']}    ${b_direct}
+    \    ${b_tunnel}    set variable if    ${pkg} > ${b_pkg}    ${link['tunnel-number']}    ${b_tunnel}
+    \    ${b_pkg}    set variable if    ${pkg} > ${b_pkg}    ${pkg}    ${b_pkg}
+    [Return]    ${b_tunnel}    ${b_direct}
+
+Ensure_CPE_Get_Key
+    [Arguments]    ${expected_key}=&{company1}[key]
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    wait until keyword succeeds    60s    500ms    Check_CPE_Key    ${cpe}    ${expected_key}
+
+Get End2End undirect Links
+    [Arguments]    ${cpe}    ${remote_id}    ${direct}=False
+    ${links}=    get_cpe_end2end_links    &{${cpe}_cpe}[ip]    ${remote_id}    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ${undirect_links}=    EVALUATE    filter(lambda x: x['direct']==${direct}, ${links})
+    ${link_ids}=    EVALUATE    map(lambda x: x['number'], ${undirect_links})
+    [Return]    ${link_ids}
+
+Get End2End undirect Links With WanId
+    [Arguments]    ${cpe}    ${remote_id}    ${wan_id}
+    ${links}=    get_cpe_end2end_links    &{${cpe}_cpe}[ip]    ${remote_id}    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ${undirect_links}=    EVALUATE    filter(lambda x: (x['direct']==False) and (x['local-wan-id']==${wan_id}), ${links})
+    ${link_ids}=    EVALUATE    map(lambda x: x['number'], ${undirect_links})
+    [Return]    ${link_ids}
+
+Get End2End Links With tunnel
+    [Arguments]    ${cpe}    ${remote_id}    ${tunnel_id}
+    ${links}=    get_cpe_end2end_links    &{${cpe}_cpe}[ip]    ${remote_id}    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]
+    ${undirect_links}=    EVALUATE    filter(lambda x: x['tunnel_port']==${tunnel_id}, ${links})
+    ${link_ids}=    EVALUATE    map(lambda x: x['number'], ${undirect_links})
+    [Return]    ${link_ids}
+
+Check_Union_Flows
+    [Arguments]    ${private}=${False}
+    ${exp}=    set variable if    ${private}==${True}    2    1
+    ${exp_onos_p}=    set variable if    ${private}==${True}    1    0
+    : FOR    ${union}    IN    @{union_check_list}
+    \    ${l_id}=    Get_CPE_Chassis_Id    ${union[0]}
+    \    ${r_id}=    Get_CPE_Chassis_Id    ${union[1]}
+    \    ${l_name}=    Get_Site_Name    ${union[0]}
+    \    ${r_name}    Get_Site_Name    ${union[1]}
+    \    ${l_nets}    run keyword if    '${union[2]}'=='parallel'    Get_CPE_Nets    ${union[0]}
+    \    ${r_nets}    run keyword if    '${union[2]}'=='parallel'    Get_CPE_Nets    ${union[1]}
+    \    run keyword if    '${union[2]}'=='series'    wait until keyword succeeds    ${union_timer}    2s    check_e2e_match_route
+    \    ...    ${l_id}    ${suite_${l_name}_site_id}    ${suite_${r_name}_site_id}    ${r_id}    ${exp}
+    \    ...    1    ${exp_onos_p}
+    \    ...    ELSE IF    '${union[2]}'=='parallel'    wait until keyword succeeds    ${union_timer}    500ms
+    \    ...    check_e2e_match_route    ${l_id}    ${suite_${l_name}_site_id}    ${suite_${r_name}_site_id}    ${r_id}
+    \    ...    1    1    0    ${r_nets}
+    \    ...    ELSE    wait until keyword succeeds    ${union_timer}    500ms    check_e2e_match_route
+    \    ...    ${l_id}    ${suite_${l_name}_site_id}    ${suite_${r_name}_site_id}    ${r_id}
+    \    run keyword if    '${union[2]}'=='series'    wait until keyword succeeds    2s    500ms    check_e2e_match_route
+    \    ...    ${r_id}    ${suite_${r_name}_site_id}    ${suite_${l_name}_site_id}    ${l_id}    ${exp}
+    \    ...    1    ${exp_onos_p}
+    \    ...    ELSE IF    '${union[2]}'=='parallel'    wait until keyword succeeds    ${union_timer}    500ms
+    \    ...    check_e2e_match_route    ${r_id}    ${suite_${r_name}_site_id}    ${suite_${l_name}_site_id}    ${l_id}
+    \    ...    1    1    0    ${l_nets}
+    \    ...    ELSE    wait until keyword succeeds    ${union_timer}    500ms    check_e2e_match_route
+    \    ...    ${r_id}    ${suite_${r_name}_site_id}    ${suite_${l_name}_site_id}    ${l_id}    1
+    \    ...    2    0
+
+Add_Private_Company_Relation_To_Series_Group
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{remote_pc}[site_name]'
+    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${True}
+    ${target_cpe}    set variable    'chongqing'
+    ${c_name}=    run keyword if    ${target_cpe} in @{cpe_list}    evaluate    '&{local_pc}[site_name]-&{chongqing_pc}[site_name]'
+    run keyword if    ${target_cpe} in @{cpe_list}    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${True}
+    ${r_p_len}=    evaluate    len(&{remote_pc}[intranet_range])
+    ${l_p_len}=    evaluate    len(&{local_pc}[intranet_range])
+    ${c_p_len}=    run keyword if    ${target_cpe} in @{cpe_list}    evaluate    len(&{chongqing_pc}[intranet_range])
+    wait until keyword succeeds    ${union_timer}    1s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ...    &{remote_cpe}[chassis_id]    2    1    ${r_p_len}
+    wait until keyword succeeds    3s    200ms    check_e2e_match_route    &{remote_cpe}[chassis_id]    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    2    1    ${l_p_len}
+    run keyword if    ${target_cpe} in @{cpe_list}    wait until keyword succeeds    ${union_timer}    2s    check_e2e_match_route    &{local_cpe}[chassis_id]
+    ...    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{chongqing_pc}[site_name]_site_id}    &{chongqing_cpe}[chassis_id]    2    1    ${c_p_len}
+    run keyword if    ${target_cpe} in @{cpe_list}    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{chongqing_cpe}[chassis_id]
+    ...    ${suite_&{chongqing_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}    &{local_cpe}[chassis_id]    2    2    ${l_p_len}
+
+Delete_Private_Company_Relation_To_Series_Group
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{remote_pc}[site_name]'
+    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${False}
+    ${target_cpe}    set variable    'chongqing'
+    ${c_name}=    run keyword if    ${target_cpe} in @{cpe_list}    evaluate    '&{local_pc}[site_name]-&{chongqing_pc}[site_name]'
+    run keyword if    ${target_cpe} in @{cpe_list}    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${False}
+    wait until keyword succeeds    10s    2s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ...    &{remote_cpe}[chassis_id]
+    wait until keyword succeeds    3s    200ms    check_e2e_match_route    &{remote_cpe}[chassis_id]    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]
+    run keyword if    ${target_cpe} in @{cpe_list}    wait until keyword succeeds    10s    2s    check_e2e_match_route    &{local_cpe}[chassis_id]
+    ...    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{chongqing_pc}[site_name]_site_id}    &{chongqing_cpe}[chassis_id]
+    run keyword if    ${target_cpe} in @{cpe_list}    wait until keyword succeeds    11s    200ms    check_e2e_match_route    &{chongqing_cpe}[chassis_id]
+    ...    ${suite_&{chongqing_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}    &{local_cpe}[chassis_id]    1    2    0
+
+Get_POP_Port_Num
+    [Arguments]    ${pop}    ${group}='default'
+    ${ret_num}=    Run Keyword If    '${pop}' == 'local'    evaluate    len(filter(lambda x: (x in ${group}) or (x==${group}) or (${group} in x) or (x=='default') or (${group}=='default'),&{local_pop}[logic_ports_isp]))
+    ...    ELSE    evaluate    len(filter(lambda x: (x in ${group}) or (x==${group}) or (${group} in x) or (x=='default') or (${group}=='default'),&{remote_pop}[logic_ports_isp]))
+    [Return]    ${ret_num}
+
+Get_POPs_Total_Port_Num
+    ${num}=    set variable    ${0}
+    : FOR    ${pop}    IN    @{pop_list}
+    \    ${n}=    get_pop_port_num    ${pop}
+    \    ${num}=    evaluate    ${num}+${n}
+    [Return]    ${num}
+
+Get_POP_Tunnels_Num
+    [Arguments]    ${local}    ${remote}
+    ${local_ports}=    set variable if    '${local}' == 'local'    &{local_pop}[logic_ports_isp]    &{remote_pop}[logic_ports_isp]
+    ${num}=    set variable    ${0}
+    : FOR    ${port_group}    IN    @{local_ports}
+    \    ${n}=    get_pop_port_num    ${remote}    '${port_group}'
+    \    ${num}=    evaluate    ${num}+${n}
+    [Return]    ${num}
+
+Check_Office_Flow_Delete
+    ${res}=    check_cpe_office_speed_up_flow_deleted    &{remote_cpe}[chassis_id]    10.194.16.2
+    should be true    ${res}
+    ${ip}=    get_ip_from_cnf_by_id_port    &{remote_cpe}[chassis_id]    &{remote_cpe}[internet_if]
+    ${res}=    check_cpe_office_speed_up_flow_deleted    &{local_cpe}[chassis_id]    ${ip}
+    should be true    ${res}
+
+get_End2End_Bond
+    [Arguments]    ${node}    ${remote_id}
+    ${bonds_c}    Run Keyword If    '${node}' == 'local'    get_cpe_end2end_bond    &{local_cpe}[ip]    ${remote_id}    &{local_cpe}[ssh_port]
+    ...    &{local_cpe}[user]    &{local_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'remote'    get_cpe_end2end_bond    &{remote_cpe}[ip]    ${remote_id}    &{remote_cpe}[ssh_port]
+    ...    &{remote_cpe}[user]    &{remote_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'nanjing'    get_cpe_end2end_bond    &{nanjing_cpe}[ip]    ${remote_id}    &{nanjing_cpe}[ssh_port]
+    ...    &{nanjing_cpe}[user]    &{nanjing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'guangzhou'    get_cpe_end2end_bond    &{guangzhou_cpe}[ip]    ${remote_id}    &{guangzhou_cpe}[ssh_port]
+    ...    &{guangzhou_cpe}[user]    &{guangzhou_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'chongqing'    get_cpe_end2end_bond    &{chongqing_cpe}[ip]    ${remote_id}    &{chongqing_cpe}[ssh_port]
+    ...    &{chongqing_cpe}[user]    &{chongqing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'wuhan'    get_cpe_end2end_bond    &{wuhan_cpe}[ip]    ${remote_id}    &{wuhan_cpe}[ssh_port]
+    ...    &{wuhan_cpe}[user]    &{wuhan_cpe}[passwd]
+    [Return]    ${bonds_c}
+
+Check_End2End_Bond_Mode
+    [Arguments]    ${node}    ${remote_id}    ${mode}
+    ${bonds_c_list}    get_end2End_Bond    ${node}    ${remote_id}
+    ${bond_c}    get from list    ${bonds_c_list}    0
+    ${ret}=    evaluate    int(${bond_c['mode']}) == int(${mode})
+    should be true    ${ret}
+
+append_all_manager_port
+    ${port_list}=    set variable    &{manager_server}[port_list]
+    : FOR    ${port}    IN    @{port_list}
+    \    append_managers    &{manager_server}[ip]    ${port}
+    ${port_list}=    set variable    &{fake_oss_server}[port_list]
+    : FOR    ${port}    IN    @{port_list}
+    \    append_managers    &{fake_oss_server}[ip]    ${port}
+    ${port_list}=    set variable    &{collector_server}[port_list]
+    : FOR    ${port}    IN    @{port_list}
+    \    append_managers    &{collector_server}[ip]    ${port}
+    ${port_list}=    set variable    &{salt-master}[port_list]
+    : FOR    ${port}    IN    @{port_list}
+    \    append_managers    &{salt-master}[ip]    ${port}
+
+Transport_mode_flow_SetUP
+    : FOR    ${union}    IN    @{union_check_list}
+    \    ${c_name}=    evaluate    '&{${union[0]}_pc}[site_name]-&{${union[1]}_pc}[site_name]'
+    \    put_company_unions_flow_value    ${suite_company_id}    ${suite_${c_name}_union_id}    2
+    \    wait until keyword succeeds    2s    500ms    Check_End2End_Bond_Mode    ${union[0]}    &{${union[1]}_cpe}[chassis_id]
+    \    ...    2
+
+Transport_mode_flow_teardown
+    : FOR    ${union}    IN    @{union_check_list}
+    \    ${c_name}=    evaluate    '&{${union[0]}_pc}[site_name]-&{${union[1]}_pc}[site_name]'
+    \    put_company_unions_flow_value    ${suite_company_id}    ${suite_${c_name}_union_id}    1
+    \    wait until keyword succeeds    2s    500ms    Check_End2End_Bond_Mode    ${union[0]}    &{${union[1]}_cpe}[chassis_id]
+    \    ...    1
+
+check_CPE_tunnels_local_port
+    [Arguments]    ${cpe}    ${port}
+    ${tunnel_from_ne}    ${tunnel_from_controller}=    Get_Node_Tunnel    ${cpe}
+    : FOR    ${t_c}    IN    @{tunnel_from_controller}
+    \    should be equal as strings    ${t_c['srcPort'][0]}    ${port}
+    : FOR    ${t_ne}    IN    @{tunnel_from_ne}
+    \    should be equal as strings    ${t_ne['local-ipv4-ports']}    ${port}
+
+check_CPE_tunnels_remote_port
+    [Arguments]    ${cpe}    ${remote_cpe}    ${port}
+    ${remote_id}=    get_cpe_chassis_id    ${remote_cpe}
+    ${tunnel_from_ne}    ${tunnel_from_controller}=    Get_Node_Tunnel    ${cpe}
+    : FOR    ${t_ne}    IN    @{tunnel_from_ne}
+    \    run keyword if    '${t_ne["remote-id"]}'=='${remote_id}'    should be equal as strings    ${t_ne['remote-ipv4-ports']}    ${port}
+
+Create_Pop_Agent_Search_Pattern
+    ${pop_list}=    create list    &{Saas_Service1}[ne_id]
+    create_code_agent_pattern    ${pop_list}    1    1
+    ${pop_list}=    create list    &{Saas_Service2}[ne_id]
+    create_code_agent_pattern    ${pop_list}    3    3
+
+Delete_Domain_Pattern_On_All_Sites_Company1
+    ${groups}=    create list
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    ${site_name}=    get site name    ${cpe}
+    \    create_company_site_saasGroups    ${suite_company_id}    ${suite_${site_name}_site_id}    ${groups}
+    \    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_none_saasTemp_in_site    ${suite_company_id}    ${suite_${site_name}_site_id}
+    delete_all_nat_groups
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_None_saasTemp
+    delete_all_nat_rules
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_None_saasRules
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    \    Wait Until Keyword Succeeds    10x    200ms    Check_CPE_NAT_Flow_Table0    ${local_code}    ${False}
+    \    ...    ${ne_id}
+    \    Wait Until Keyword Succeeds    10x    200ms    Check_CPE_NAT_Flow_Table0    ${local_code}    ${False}
+    \    ...    ${ne_id}
+
+Delete Saas SPI Dispatches On All Sites Company1
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    ${site_name}=    get site name    ${cpe}
+    \    delete_all_site_spi_dispatches    ${suite_company_id}    ${suite_${site_name}_site_id}
+
+POST_Domain_Pattern_ON_CPE
+    [Arguments]    ${site_id}    ${domain}    ${ttl}    ${pri}    ${agent}=${None}    ${nat_type}=DOMAIN
+    ${rule_id}=    create_etc_saasRules    ${domain}    ${ttl}    ${pri}    default_${domain}    ${agent}
+    ...    ${nat_type}
+    ${rule_id2}=    run keyword if    '${nat_type}'=='DOMAIN' and '${agent}' != '${None}'    create_etc_saasRules    ${agent}    ${ttl}    ${pri}
+    ...    default_${agent}    ${local_code}    IP
+    ${rules}=    run keyword if    '${nat_type}'=='DOMAIN' and '${agent}' != '${None}'    create list    ${rule_id}    ${rule_id2}
+    ...    ELSE    create list    ${rule_id}
+    ${group_id}=    create_etc_template_saas    ${rules}
+    ${groups}=    create list    ${group_id}
+    create_company_site_saasGroups    ${suite_company_id}    ${site_id}    ${groups}
+
+remote_pop_search_pattern_setup
+    [Arguments]    ${code}=999
+    ${pop_list}=    create list    &{remote_pop}[ne_id]
+    ${pop_name_list}    create list    remote
+    ${end_list}=    create list    11
+    ${fworld_list}=    evaluate    map(lambda x: x in ${world_pop_list}, ${pop_name_list})
+    create_code_agent_pattern    ${pop_list}    ${end_list}    ${code}    ${fworld_list}
+
+remote_pop_search_pattern_teardown
+    delete_all_agent_pattern
+    Create_Pop_Agent_Search_Pattern
+
+Check_CPE_NAT_Flow
+    [Arguments]    ${code}    ${result}    ${cpe}    ${pri_range}=${None}
+    ${tunnel_from_ne}    ${tunnel_from_controller}=    Get_Node_Tunnel    ${cpe}
+    ${l_range}=    create list    ${pri_range}
+    ${ret}=    run keyword if    '${pri_range}'=='${None}'    check_cpe_internet_table_2_flows    &{${cpe}_cpe}[chassis_id]    ${code}
+    ...    ELSE    check_cpe_internet_table_2_flows    &{${cpe}_cpe}[chassis_id]    ${code}    ${l_range}
+    should be equal    ${ret}    ${result}
+
+Delete_Domain_Pattern_On_Company1
+    [Arguments]    ${site_id}=${suite_&{local_pc}[site_name]_site_id}
+    ${groups}=    create list
+    create_company_site_saasGroups    ${suite_company_id}    ${site_id}    ${groups}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_none_saasTemp_in_site    ${suite_company_id}    ${site_id}
+    delete_all_nat_groups
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_None_saasTemp
+    delete_all_nat_rules
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_None_saasRules    ${suite_company_id}
+
+all_link_not_bad
+    [Arguments]    ${cpe}    ${link_ids}
+    ${b_score_list}    ${b_p_list}    ${b_b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    : FOR    ${qos}    IN    @{b_score_list}
+    \    should be true    ${qos} < 800
+
+set_gateway_wan_20M
+    [Arguments]    ${ratio}=100
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    51200    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    51200    100    10    ${ratio}
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    20480    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    20480    100    10    ${ratio}
+    put_cpe_wan_bandwidth    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if]    0    20480    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    guangzhou    &{guangzhou_cpe}[internet_if]    ${0}
+    ...    20480    100    10    ${ratio}
+    put_cpe_wan_bandwidth    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if2]    0    20480    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    guangzhou    &{guangzhou_cpe}[internet_if2]    ${0}
+    ...    20480    100    10    ${ratio}
+
+set_nanjing_wan_10M
+    [Arguments]    ${ratio}=100
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    10240    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    10240    100    10    ${ratio}
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    2048    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    2048    100    10    ${ratio}
+    put_cpe_wan_bandwidth    &{wuhan_cpe}[chassis_id]    &{wuhan_cpe}[internet_if]    0    204800    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    wuhan    &{wuhan_cpe}[internet_if]    ${0}
+    ...    204800    100    10    ${ratio}
+    put_cpe_wan_bandwidth    &{wuhan_cpe}[chassis_id]    &{wuhan_cpe}[internet_if]    1    10240    100    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    wuhan    &{wuhan_cpe}[internet_if]    ${1}
+    ...    10240    100    10    ${ratio}
+
+enshare_nanjing_cpe_master
+    Set_CPE_Standby_Status    nanjing_slave    touch
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    18s    1s    Check_CPE_Status    nanjing    ha
+    ...    master
+    Set_CPE_Standby_Status    nanjing_slave    rm -rf
+
+check_alarm_num
+    [Arguments]    ${status}    ${code}    ${alertName}    ${severity}    ${siteName}    ${deviceId}
+    ...    ${neId}    ${num}
+    ${alarm_list}=    get_alarm_by_code_and_deviceOrNeId    ${suite_company_id}    ${status}    ${code}    ${alertName}    ${severity}
+    ...    ${siteName}    ${deviceId}    ${neId}
+    ${alarm_len}=    evaluate    len(${alarm_list})
+    Should Be true    ${alarm_len} >= ${num}
+
+Get_Office_Network_Setup
+    ${company_id}=    get_company_id    &{company1}[name]
+    Set global Variable    ${suite_company_id}    ${company_id}
+    wait until keyword succeeds    5s    200ms    Update_Company_Key_Successful    ${suite_company_id}    &{company1}[key]
+    ${sites}=    get_company_site    ${company_id}
+    ${expect_l}=    get length    ${cpe_list}
+    length should be    ${sites}    ${expect_l}
+    : FOR    ${s}    IN    @{sites}
+    \    Set global Variable    ${suite_${s['name']}_site_id}    ${s['id']}
+    ${unions}    get_company_all_unions    ${company_id}
+    ${expect_u}=    get length    ${union_list}
+    length should be    ${unions}    ${expect_u}
+    : FOR    ${u}    IN    @{unions}
+    \    Set global Variable    ${suite_${u['name']}_union_id}    ${u['id']}
+    Update Guangzhou IP
+
+Check_CPE_Select_Prefer_Area_Info
+    [Arguments]    ${ne_id}    ${phy_port}    ${cac}    ${eac}    ${p_ip}=${None}    ${index_list}=${None}
+    : FOR    ${p_if}    IN    @{phy_port}
+    \    ${i}=    Get Index From List    ${phy_port}    ${p_if}
+    \    ${index_i}=    run keyword if    ${index_list}    get from list    ${index_list}    ${i}
+    \    ${index}=    set variable if    ${index_list}    ${index_i}    ${i}
+    \    wait until keyword succeeds    15s    200ms    Get_HomeCode_prefer    ${ne_id}    ${p_if}
+    \    ...    ${index}    ${cac}    ${eac}    ${i}
+
+Check_CPE_Interface_Bandwith
+    [Arguments]    ${cpe}    ${bandwidth}    ${burst}    ${latency}    ${ratio}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    ${inface_name}=    set variable    &{${cpe}_cpe}[internet_if]
+    ${band}=    get_cpe_wan_bandwidth    ${ne_id}    ${inface_name}    0
+    should be true    '${band["bandwidth"]}'== '${bandwidth}'
+    should be true    '${band["burst"]}'== '${burst}'
+    should be true    '${band["latency"]}'== '${latency}'
+    should be true    '${band["ratio"]}'== '${ratio}'
+    Wait Until Keyword Succeeds    12s    200ms    Check_VPort_Bandwidth_From_Ne    ${cpe}    ${inface_name}    ${0}
+    ...    ${bandwidth}    ${burst}    ${latency}    ${ratio}
+    run keyword if    ('${cpe}' == 'nanjing' or '${cpe}' == 'wuhan') and &{${cpe}_cpe}[wan_num] != ${1}    Check_VPort_Bandwidth_From_Ne    ${cpe}    ${inface_name}    ${1}    ${bandwidth}
+    ...    ${burst}    ${latency}    ${ratio}
+    run keyword if    '${cpe}' == 'guangzhou' and &{${cpe}_cpe}[wan_num] != ${1}    Wait Until Keyword Succeeds    2s    200ms    Check_VPort_Bandwidth_From_Ne    ${cpe}
+    ...    &{guangzhou_cpe}[internet_if2]    ${0}    ${bandwidth}    ${burst}    ${latency}    ${ratio}
+
+Check_ALL_CPE_Wan_Bandwidth
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    Check_CPE_Interface_Bandwith    ${cpe}    1024000    100    10    0
+
+create_company_union_set_suite_id
+    [Arguments]    ${c_id}    ${c_name}    ${private}    ${site_id_A}    ${site_id_B}
+    ${u_id}    create_company_unions    ${c_id}    ${c_name}    ${private}    ${site_id_A}    ${site_id_B}
+    Set Global Variable    ${suite_${c_name}_union_id}    ${u_id}
+
+Update_Company_Key_Successful_gaea
+    [Arguments]    ${company_id}    ${company_key}    ${expected_format}=128
+    ${key}=    get_company_key    ${company_id}
+    should be equal    ${key}    ${company_key}
+    ${format}=    get_company_key    ${company_id}    format
+    should be equal    ${format}    ${expected_format}
+
+Set_CPE_Bond_Bandwidth_From_gaea
+    [Arguments]    ${site_a}    ${site_b}    ${bandwidth}    ${burst}    ${latency}
+    ${c_name}=    evaluate    '${site_a}-${site_b}'
+    ${band}=    get_cpe_bond_bandwidth    ${suite_company_id}    ${suite_${c_name}_union_id}
+    should be true    '${band["bandwidth"]}'== '${bandwidth}'
+    should be true    '${band["burst"]}'== '${burst}'
+    should be true    '${band["latency"]}'== '${latency}'
+
+Check_Site_Bandwidth_From_gaea
+    [Arguments]    ${site}    ${bandwidth}    ${burst}    ${latency}
+    ${band}=    get_cpe_global_bandwidth    ${suite_company_id}    ${site}
+    should be true    '${band["bandwidth"]}'== '${bandwidth}'
+    should be true    '${band["burst"]}'== '${burst}'
+    should be true    '${band["latency"]}'== '${latency}'
+
+Get CPE Name by Neid
+    [Arguments]    ${neid}
+    ${found_cpe}=    set variable    earth
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${found_cpe}=    set variable if    '&{${cpe}_cpe}[chassis_id]' == '${neid}'    ${cpe}    ${found_cpe}
+    [Return]    ${found_cpe}
+
+Check_POP_CPES
+    [Arguments]    ${ne_id}    ${exp_cpes}
+    ${cpes}=    get_pop_cpes    ${ne_id}
+    ${res}=    evaluate    sorted(map(lambda x:x['neId'],${cpes}))==sorted(${exp_cpes})
+    should be true    ${res}
+
+Create_Domain_Pattern_ON_Company
+    ${rule_id}=    create_etc_saasRules    .*.sh.wsdashi.com    ${flow_ttl}    1000    sh_wsdashi.com    ${None}
+    ...    DOMAIN
+    ${rule_id2}=    create_etc_saasRules    samba.systemtest.com    ${flow_ttl}    1000    sysemtest.com    &{dns_server}[ip]
+    ...    DOMAIN
+    ${rule_id3}=    create_etc_saasRules    &{dns_server}[ip]    ${flow_ttl}    1000    dns_ip    ${CM_local_code}
+    ...    IP
+    ${rule_id4}=    create_etc_saasRules    .*.baidu.com    ${flow_ttl}    1000    baidu    ${None}
+    ...    DOMAIN
+    ${rule_id5}=    create_etc_saasRules    .*.log.aliyuncs.com    ${flow_ttl}    1000    aliyun    ${None}
+    ...    DOMAIN
+    ${rules}=    create list    ${rule_id}    ${rule_id2}    ${rule_id3}    ${rule_id4}    ${rule_id5}
+    ${group_id}=    create_etc_template_saas    ${rules}
+    ${groups}=    create list    ${group_id}
+    Set global Variable    ${suite_saas_rule}    ${rule_id2}
+    [Return]    ${groups}
+
+Append Rule To SPI
+    [Arguments]    ${domain_name_ip}    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    ${tag_name}    ${domain_name_ip}
+
+Setup_Saas_SPI_ON_ALL_CPE
+    ${tag_name}=    set variable    saas_tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    Set global Variable    ${suite_saas_tag_id}    ${tag_id}
+    append_company_spi_tag_rules    ${suite_company_id}    .*.sh.wsdashi.com    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    samba.systemtest.com    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    &{dns_server}[ip]/32    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    .*.baidu.com    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    .*.log.aliyuncs.com    ${tag_name}
+    run keyword if    '&{dns_server}[ip]' != '&{default_dns}[ip]'    append_company_spi_tag_rules    ${suite_company_id}    &{default_dns}[ip]/32    ${tag_name}
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Apply Default Saas SPI To CPEs    ${cpe}    ${suite_saas_tag_id}
+
+Apply Default Saas SPI To CPEs
+    [Arguments]    ${cpe}    ${tag_id}
+    ${agent_codes}=    run keyword if    '&{dns_server}[ip]' == '&{default_dns}[ip]'    create list    &{default_dns}[ip]    &{dns_server}[ip]    ${CM_local_code}
+    ...    &{default_dns}[ip]    &{default_dns}[ip]
+    ...    ELSE    create list    &{default_dns}[ip]    &{dns_server}[ip]    ${CM_local_code}    &{default_dns}[ip]
+    ...    &{default_dns}[ip]    ${CM_local_code}
+    ${indexes}=    run keyword if    '&{dns_server}[ip]' == '&{default_dns}[ip]'    create list    0    1    2
+    ...    3    4
+    ...    ELSE    create list    0    1    2    3
+    ...    4    5
+    ${ttls}=    run keyword if    '&{dns_server}[ip]' == '&{default_dns}[ip]'    create list    ${flow_ttl}    ${flow_ttl}    ${flow_ttl}
+    ...    ${flow_ttl}    ${flow_ttl}
+    ...    ELSE    create list    ${flow_ttl}    ${flow_ttl}    ${flow_ttl}    ${flow_ttl}
+    ...    ${flow_ttl}    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    1000    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    # Updated wait time: controller should fix the bug SDWANDEV-4271
+    Wait Until Keyword Succeeds    30s    200ms    Check_Saas_Rule_Dispatch_From_Cpe    ${cpe}    .*.sh.wsdashi.com    @{agent_codes}[0]
+    ...    @{indexes}[0]
+
+Setup_Domain_Pattern_ON_ALL_CPE
+    ${groups}=    Create_Domain_Pattern_ON_Company
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    create_company_site_saasGroups    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${groups}
+    \    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Domain_Info_From_Cpe    ${cpe}    .*.sh.wsdashi.com
+    Set global Variable    ${suite_saas_group}    ${groups}
+
+Check_CPE_NAT_Flow_Table0
+    [Arguments]    ${code}    ${result}    ${chassis_id}    ${pri_range}=${None}
+    ${ret}=    run keyword if    '${pri_range}'=='${None}'    check_cpe_internet_table_2_flows    ${chassis_id}    ${code}
+    ...    ELSE    check_cpe_internet_table_2_flows    ${chassis_id}    ${code}    ${pri_range}
+    should be equal    ${ret}    ${result}
+
+Get Saas Port Num
+    [Arguments]    ${pop}
+    ${saas_ports}=    set variable    ${0}
+    : FOR    ${saas}    IN    @{saas_service_list}
+    \    ${is_local}    evaluate    &{${saas}}[logic_ports_isp]==['lo']
+    \    ${port_num}=    run keyword if    ${is_local}    set variable    1
+    \    ...    ELSE    Get_Service_Pop_Tunnels_Num    ${pop}    &{${saas}}[logic_ports_isp]
+    \    ${saas_ports}=    run keyword if    '${pop}'=='&{${saas}}[preferPop]'    evaluate    ${saas_ports} + ${port_num}
+    \    ...    ELSE    set variable    ${saas_ports}
+    [Return]    ${saas_ports}
+
+Setup_Nat_Open_ON_ALL_CPE
+    ${groups}=    create_SPI_ON_Company
+    ${saas_group}    Create_SPI_SAAS_ON_Company
+    ${saas_g}=    evaluate    ${suite_saas_group}+${saas_group}
+    : FOR    ${cpe}    IN    @{opwrt_list}
+    \    create_company_site_SaasGroups    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${saas_g}
+    \    create_company_site_SpiGroups    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${groups}
+    \    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Spi_Info_From_Cpe    ${cpe}    assets2.xboxlive.test.com
+    \    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Domain_Info_From_Cpe    ${cpe}    assets2.xboxlive.test.com
+    \    Salt download and reload ip2pop    &{${cpe}_cpe}[minion_id]
+
+Create_SPI_ON_Company
+    ${rule_id}=    create_etc_spiRules    100    1    any    10.194.20.222/32    17
+    ...    any    33334-33335
+    ${rule_id2}=    create_etc_spiRules    100    2    any    10.194.20.224/32    17
+    ...    any    10025
+    ${rule_id3}=    create_etc_domain_spiRules    100    3    17    atum.hac.lp1.d4c.nintendo.test.net
+    ${rule_id4}=    create_etc_domain_spiRules    100    4    17    assets2.xboxlive.test.com
+    ${rule_id5}=    create_etc_domain_spiRules    1000    127    17    assets1.xboxlive.test.com
+    ${saas_rule1}    create_etc_saasRules    atum.hac.lp1.d4c.nintendo.test.net    ${flow_ttl}    1000    spi_saas_1    ${None}
+    ...    DOMAIN
+    ${saas_rule2}    create_etc_saasRules    assets2.xboxlive.test.com    ${flow_ttl}    1000    spi_saas_2    ${None}
+    ...    DOMAIN
+    ${saas_rule3}    create_etc_saasRules    assets1.xboxlive.test.com    ${flow_ttl}    1000    spi_saas_3    ${None}
+    ...    DOMAIN
+    ${rules1}=    create list    ${rule_id}    ${rule_id2}    ${rule_id3}
+    ${rules2}=    create list    ${rule_id4}    ${rule_id5}
+    ${saas_rules}=    create list    ${saas_rule1}    ${saas_rule2}    ${saas_rule3}
+    ${group_id1}=    create_etc_template_spi    ${rules1}
+    ${group_id2}=    create_etc_template_spi    ${rules2}
+    ${groups}=    create list    ${group_id1}    ${group_id2}
+    [Return]    ${groups}
+
+Delete_Nat_Open_On_All_Sites_Company1
+    ${groups}=    create list
+    ${port_range}=    evaluate    range(597,601)
+    : FOR    ${cpe}    IN    @{opwrt_list}
+    \    ${site_name}=    get site name    ${cpe}
+    \    create_company_site_spiGroups    ${suite_company_id}    ${suite_${site_name}_site_id}    ${groups}
+    \    Wait Until Keyword Succeeds    ${domain_wait}    500ms    check_none_spiTemp_in_site    ${suite_company_id}    ${suite_${site_name}_site_id}
+    delete_all_spi_groups
+    delete_all_spi_rules
+    : FOR    ${cpe}    IN    @{opwrt_list}
+    \    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    \    Wait Until Keyword Succeeds    10x    500ms    Check_CPE_NAT_Flow_Table0    ${local_code}    ${False}
+    \    ...    ${ne_id}    ${port_range}
+
+Create_SPI_SAAS_ON_Company
+    ${saas_rule1}    create_etc_saasRules    atum.hac.lp1.d4c.nintendo.test.net    ${flow_ttl}    1000    spi_saas_1    ${None}
+    ...    DOMAIN
+    ${saas_rule2}    create_etc_saasRules    assets2.xboxlive.test.com    ${flow_ttl}    1000    spi_saas_2    ${None}
+    ...    DOMAIN
+    ${saas_rule3}    create_etc_saasRules    assets1.xboxlive.test.com    ${flow_ttl}    1000    spi_saas_3    ${None}
+    ...    DOMAIN
+    ${saas_rules}=    create list    ${saas_rule1}    ${saas_rule2}    ${saas_rule3}
+    ${group_id1}=    create_etc_template_saas    ${saas_rules}
+    ${groups}=    create list    ${group_id1}
+    [Return]    ${groups}
+
+Get Anyc Port Num
+    [Arguments]    ${pop}
+    ${anyc_ports}=    set variable    ${0}
+    : FOR    ${anyc}    IN    @{anyc_service_list}
+    \    ${port_num}=    Get_Service_Pop_Tunnels_Num    ${pop}    &{${anyc}}[logic_ports_isp]
+    \    ${anyc_ports}=    run keyword if    '${pop}'=='&{${anyc}}[preferPop]'    evaluate    ${anyc_ports} + ${port_num}
+    \    ...    ELSE    set variable    ${anyc_ports}
+    [Return]    ${anyc_ports}
+
+Get_Service_Pop_Tunnels_Num
+    [Arguments]    ${POP}    ${group}
+    ${num}=    set variable    ${0}
+    : FOR    ${port_group}    IN    @{group}
+    \    ${n}=    get_pop_port_num    ${pop}    '${port_group}'
+    \    ${num}=    evaluate    ${num}+${n}
+    [Return]    ${num}
+
+Get Saas CPE Port Num
+    ${saas_ports}=    set variable    ${0}
+    : FOR    ${saas}    IN    @{saas_service_list}
+    \    ${saas_ports}=    evaluate    ${saas_ports} + &{${saas}}[port_num]
+    [Return]    ${saas_ports}
+
+Check_Pop_To_Service_Route_Flows
+    [Arguments]    ${sne_id}    ${dne_id}    ${next_id}
+    ${tunnels_list}=    get_ne_tunnels_from_controller_with_dst_ne_id    ${sne_id}    ${dne_id}
+    ${tunnel_ids}    evaluate    map(lambda x: x["tunnelId"], ${tunnels_list})
+    ${route_code}=    get_ne_cac_eac    ${sne_id}
+    ${flow_t}=    create list
+    : FOR    ${tunnel_id}    IN    @{tunnel_ids}
+    \    ${ret}=    check_pop_2_service_next_service_routes    ${sne_id}    ${route_code['routeCode']['cac']}    ${route_code['routeCode']['eac']}    ${tunnel_id}
+    \    run keyword if    ${ret}    append to list    ${flow_t}    ${tunnel_id}
+    length should be    ${flow_t}    2
+
+Block_Saas_Direct_Link
+    [Arguments]    ${saas}    ${cpe}    ${wan}=1
+    ${wan_ip}=    set variable if    '${wan}'=='1'    &{${cpe}_switch}[ip]
+    ...    ELSE    &{${cpe}_switch}[ip2]
+    Block_Saas_Cpe_Direct_link    Saas_${saas}    ${wan_ip}    block
+    wait until keyword succeeds    5s    200ms    saas_direct_link_bad    ${cpe}    ${saas}
+
+saas_direct_link_bad
+    [Arguments]    ${cpe}    ${saas}
+    Run Keyword And Expect Error    *9999' should be true.    get_cpe_saas_bond_link_score_and_packets    ${cpe}    ${saas}
+
+UnBlock_Saas_Direct_Link
+    [Arguments]    ${saas}    ${cpe}    ${wan}=1
+    ${wan_ip}=    set variable if    '${wan}'=='1'    &{${cpe}_switch}[ip]
+    ...    ELSE    &{${cpe}_switch}[ip2]
+    Block_Saas_Cpe_Direct_link    Saas_${saas}    ${wan_ip}    unblock
+    wait until keyword succeeds    11s    1s    saas_direct_link_good    ${cpe}    ${saas}
+
+saas_direct_link_good
+    [Arguments]    ${cpe}    ${saas}
+    ${score}    ${pkt}    get_cpe_saas_bond_link_score_and_packets    ${cpe}    ${saas}
+    should be true    ${score} <= 80
+
+Delete_Company_Union_And_Routes
+    [Arguments]    ${company_id}    ${union_id}    ${site_a}    ${site_b}
+    delete_company_unions    ${company_id}    ${union_id}
+    delete_company_route    ${company_id}    ${site_a}-${site_b}
+    delete_company_route    ${company_id}    ${site_b}-${site_a}
+
+Create_Company_Routes
+    [Arguments]    ${company_id}    ${site_a}    ${site_b}
+    add_company_route    ${company_id}    ${site_a}-${site_b}    ${500}    ${suite_${site_b}_site_id}    &{${site_a}_cpe}[nets]    &{${site_b}_cpe}[nets]   siteIds=${suite_${site_a}_site_id}
+    add_company_route    ${company_id}    ${site_b}-${site_a}    ${500}    ${suite_${site_a}_site_id}    &{${site_b}_cpe}[nets]    &{${site_a}_cpe}[nets]   siteIds=${suite_${site_b}_site_id}
+
+Create_route_with_dstCIDR
+    [Arguments]    ${routeName}    ${site_id}    ${priority}    ${nextHop}    ${dstCIDR}
+    add_company_route    ${suite_company_id}    ${routeName}    ${priority}    ${nextHop}    ${dstCIDR}    ${None}
+    ...    ${None}    ${None}    ${None}    ${None}    ${site_id}
+
+check_guangzhou_to_changsha_acl_deny
+    ssh_pc    guangzhou
+    ssh_write_command_and_check_string    ping &{changsha_pc}[inner_ip] -c 3 -i 0.3    Destination Host Prohibited
+    close connection
+
+Delete_acl
+    [Arguments]    ${aclName_List}
+    : FOR    ${aclName}    IN    @{aclName_List}
+    \    delete_company_acl    ${suite_company_id}    ${aclName}
+
+Delete_route
+    [Arguments]    ${routeName_List}
+    : FOR    ${routeName}    IN    @{routeName_List}
+    \    delete_company_route    ${suite_company_id}    ${routeName}
+
+Get_CPE_Prefer_IP
+    [Arguments]    ${cpe}    ${wan}    ${index}=${0}
+    ${n_id}=    get cpe chassis_id    ${cpe}
+    ${if_name}=    run keyword if    '${wan}'=='1'    set variable    &{${cpe}_cpe}[internet_if]
+    ...    ELSE    set variable    &{${cpe}_cpe}[internet_if2]
+    ${perfer}    get_cpe_home_code_prefer    ${n_id}    ${if_name}    ${index}
+    [Return]    ${perfer["preferIp"]}
+
+Check Wrong CPE Home Code Prefer
+    [Arguments]    ${cpe}
+    ${area}=    get_cpe_home_code_prefer    &{${cpe}_cpe}[chassis_id]    &{${cpe}_cpe}[internet_if]    ${0}
+    should be equal as integers    ${area['cac']}    15
+    should be equal as integers    ${area['eac']}    63
+    # opwrt_list    learn_ip_cpe_list
+    run keyword if    '${cpe}' in @{opwrt_list}    Check Wrong CPE 2nd Interface Home Code Prefer    &{${cpe}_cpe}[chassis_id]    &{${cpe}_cpe}[internet_if2]    ${0}
+    ...    ELSE    run keyword if    '${cpe}' in @{sideway_cpe_list}    Check Wrong CPE 2nd Interface Home Code Prefer    &{${cpe}_cpe}[chassis_id]    &{${cpe}_cpe}[internet_if]
+    ...    ${1}
+
+Check Wrong CPE 2nd Interface Home Code Prefer
+    [Arguments]    ${ne_id}    ${interface}    ${index}
+    ${area}=    get_cpe_home_code_prefer    ${ne_id}    ${interface}    ${index}
+    should be equal as integers    ${area['cac']}    15
+    should be equal as integers    ${area['eac']}    63
+
+Append_Qos_SPI_Default_TAG
+    ${tag_name}=    set variable    QOS_Default_Tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    append_company_spi_Qos_tag_rules    ${suite_company_id}    1    *    *    *    *
+    ...    ${tag_name}
+    append_company_spi_Qos_tag_rules    ${suite_company_id}    6,17,1    *    *    *    *
+    ...    ${tag_name}
+
+Append_Qos_SPI_CPE_TAG
+    [Arguments]    ${cpe}    ${pri}
+    ${tag_name}=    set variable    QOS_${cpe}_Pri_${pri}_Tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    ${proto}=    Get From List    &{${cpe}_cpe}[qos_spi_rule${pri}]    0
+    ${s_ip}=    Get From List    &{${cpe}_cpe}[qos_spi_rule${pri}]    1
+    ${s_port}=    Get From List    &{${cpe}_cpe}[qos_spi_rule${pri}]    2
+    ${d_ip}=    Get From List    &{${cpe}_cpe}[qos_spi_rule${pri}]    3
+    ${d_port}=    Get From List    &{${cpe}_cpe}[qos_spi_rule${pri}]    4
+    append_company_spi_Qos_tag_rules    ${suite_company_id}    ${proto}    ${s_ip}    ${s_port}    ${d_ip}    ${d_port}
+    ...    ${tag_name}
+
+Setup_Qos_SPI_ON_CPES
+    append_qos_spi_default_tag
+    : FOR    ${cpe}    IN    @{qos_cpe_list}
+    \    append_qos_spi_cpe_tag    ${cpe}    medium
+    \    append_qos_spi_cpe_tag    ${cpe}    high
+    \    apply_qos_default_spi_to_cpe    ${cpe}
+    \    apply_qos_spi_to_cpe    ${cpe}    medium
+    \    apply_qos_spi_to_cpe    ${cpe}    high
+
+Apply_Qos_Default_SPI_To_CPE
+    [Arguments]    ${cpe}
+    ${tag_id}=    get_company_spi_tag_id_by_name    ${suite_company_id}    QOS_Default_Tag
+    config_pri_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    1020    low
+    config_transport_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    1020    unreliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_pri_dispatch_from_cpe    ${cpe}    ${tag_id}    1020
+    ...    low
+
+Apply_Qos_SPI_To_CPE
+    [Arguments]    ${cpe}    ${pri}
+    ${tag_id}=    get_company_spi_tag_id_by_name    ${suite_company_id}    QOS_${cpe}_Pri_${pri}_Tag
+    ${level}=    set variable if    '${pri}'=='medium'    1010    1001
+    ${policy}=    set variable if    '${pri}'=='medium'    partialReliable    reliable
+    ${assign_policy}=    set variable if    '${pri}'=='medium'    prefer    assign
+    config_pri_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    ${level}    ${pri}
+    config_transport_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    1020    ${policy}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_pri_dispatch_from_cpe    ${cpe}    ${tag_id}    ${level}
+    ...    ${pri}
+    run keyword if    '${cpe}'=='wuhan'    config_wan_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    ${level}
+    ...    ${assign_policy}    &{${cpe}_cpe}[qos_spi_${assign_policy}_wan${pri}]
+    run keyword if    '${cpe}'=='wuhan'    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_prefer_dispatch_from_cpe    ${cpe}
+    ...    ${tag_id}    ${level}    ${assign_policy}    &{${cpe}_cpe}[qos_spi_${assign_policy}_wan${pri}]
+
+TearDown_Qos_SPI_ON_CPES
+    ${tag_id_d}=    get_company_spi_tag_id_by_name    ${suite_company_id}    QOS_Default_Tag
+    : FOR    ${cpe}    IN    @{qos_cpe_list}
+    \    ${tag_id_m}=    get_company_spi_tag_id_by_name    ${suite_company_id}    QOS_${cpe}_Pri_medium_Tag
+    \    ${tag_id_h}=    get_company_spi_tag_id_by_name    ${suite_company_id}    QOS_${cpe}_Pri_high_Tag
+    \    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id_d}
+    \    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id_m}
+    \    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id_h}
+    \    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_Dispatch_Tag_Delete_from_Cpe    ${cpe}    ${tag_id_h}
+
+unions_setup
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{remote_pc}[site_name]'
+    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${True}
+    ${c_name}=    evaluate    '&{guangzhou_pc}[site_name]-&{remote_pc}[site_name]'
+    create_company_union_set_suite_id    ${suite_company_id}    ${c_name}    ${True}    ${suite_&{guangzhou_pc}[site_name]_site_id}    &{remote_pc}[site_name]
+
+unions_teardown
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{remote_pc}[site_name]'
+    put_company_unions_private_value    ${suite_company_id}    ${suite_${c_name}_union_id}    ${False}
+    ${c_name}=    evaluate    '&{guangzhou_pc}[site_name]-&{remote_pc}[site_name]'
+    delete_company_unions    ${suite_company_id}    ${suite_${c_name}_union_id}
+
+Apply Fec To CPEs Tags
+    [Arguments]    ${cpe}    ${tag_id}
+    config_fec_params_to_site_fec_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    1000
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Spi_fec_Dispatch_From_Cpe    ${cpe}    ${suite_tag_id}
+
+Delete Fec To CPEs Tags
+    [Arguments]    ${cpe}    ${tag_id}
+    delete_fec_params_to_site_fec_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Spi_fec_Dispatch_From_Cpe    ${cpe}    ${suite_tag_id}
+
+enshare_cpe_master
+    [Arguments]    ${cpe}
+    Set_CPE_Standby_Status    ${cpe}_slave    touch
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    18s    1s    Check_CPE_Status    ${cpe}    ha
+    ...    master
+    Set_CPE_Standby_Status    ${cpe}_slave    rm -rf
+
+Set_CPE_Site_Bandwidth
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    \    run keyword if    ${openwrt}    set_site_bandwidth    ${cpe}    ${suite_&{${cpe}_pc}[site_name]_site_id}    1024000
+    \    ...    50    10
+    \    ...    ELSE    set_site_bandwidth    ${cpe}    ${suite_&{${cpe}_pc}[site_name]_site_id}    1024000
+    \    ...    500    10
+
+teardown_cpe_wan
+    [Arguments]    ${cpe}
+    Set_CPE_Interface_Bandwith    ${cpe}    1024000    100    10    0

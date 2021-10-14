@@ -1,0 +1,226 @@
+#!groovy
+
+pipeline {
+    agent {
+        label 'portal-API'
+    }
+    environment {
+        GITREPO = '192.168.0.100:8011'
+        USER = "dev"
+        CREDENTIALSID = "aac47fba-17c9-4426-9f2d-868eaebdc92c"
+        VER = '21.04.0-RC1'
+        verdate = sh(script: "echo `date +%Y.%m.%d`", returnStdout: true).trim()
+    }
+    stages {
+        stage ('Build') {
+            parallel {
+                stage('build metis') {
+                    agent { label 'Controller15.2' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'metis'
+                    }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/metis
+                        '''
+                        dir('src/metis') {
+                            git(url: "ssh://${USER}@${GITREPO}/metis", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+
+                        sh '''
+                        #verdate=`date +%Y.%m.%d`
+                        verpath="metis_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis*
+                        sudo rm -rf ${WORKSPACE}/src/metis/metis*.tar.gz
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis_*/metis*.tar.gz
+                        sudo rm -rf ${WORKSPACE}/src/pkg/metis_*/metis*.tar.gz.md5
+                        sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        echo "Start to build metis"
+                        sudo chown -R jenkins:jenkins ${WORKSPACE}/src
+                        cd ${WORKSPACE}/src/metis
+                        sudo rm -rf web/node_modules/.cache
+                        sudo rm -rf server/node_modules/.cache
+                        sed -i 's/runTests$/#runTests/g' build.sh
+                        bash build.sh ${VER}-${verdate} >/tmp/webbuild.log 2>&1
+                        if [ $? -ne 0 ];then
+                            echo "build metis failed"
+                            exit 1
+                        fi
+                        error=`grep 'export .* was not found in' /tmp/webbuild.log | wc -l`
+                        if [ $error -gt 0 ]; then
+                             echo 'build error rebuild'
+                             sudo rm -rf web/node_modules/.cache
+                             bash build.sh ${VER}-${verdate}
+                        fi
+                        sudo mv ${WORKSPACE}/src/metis/metis*.tar.gz ${WORKSPACE}/src/pkg/${verpath}/
+                        for name in metis
+                           do
+                               d="${name}_${VER}-${verdate}"
+                               sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                               cd ${WORKSPACE}/src/pkg/${d}
+                               touch   RELEASENOTES
+                               n=`ls ${name}*.gz`
+                               sudo md5sum ${n} > ${n}.md5
+                           done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/metis*/*.gz*', fingerprint: true
+                    }
+                }
+
+                stage('build prism') {
+                    agent { label 'dpdk' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'prism'
+                    }
+
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/prism/*
+                        '''
+                        dir('src/prism') {
+                            git(url: "ssh://${USER}@${GITREPO}/prism", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash
+                        verdate=`date +%Y.%m.%d`
+                        for name in aiwan-prism
+                        do
+                           verpath="${name}_${VER}-${verdate}"
+                           sudo rm -rf ${WORKSPACE}/src/pkg/${name}_*
+                           sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        done
+
+                        sudo rm -rf ${WORKSPACE}/src/prism/build/*.deb
+                       ret=`sudo docker ps -a | grep prism_deb | wc -l`
+                       if [ $ret -eq 1 ];then
+                          sudo docker rm -vf prism_deb
+                       fi
+                       sudo docker run -itd --name prism_deb -v $WORKSPACE/src/prism:/root/prism prism_ci
+                       sudo docker exec -w /root/prism -i prism_deb /bin/bash -c "./build.sh ${VER}-${verdate}"
+
+                       for name in aiwan-prism
+                        do
+                           verpath="${name}_${VER}-${verdate}"
+                           sudo mv ${WORKSPACE}/src/prism/build/${name}*.deb ${WORKSPACE}/src/pkg/${verpath}/
+                        done
+                        for name in aiwan-prism
+                        do
+                           d="${name}_${VER}-${verdate}"
+                           sudo chmod 777 ${WORKSPACE}/src/pkg/${d} -R
+                           cd ${WORKSPACE}/src/pkg/${d}
+                           n=`ls ${name}*.deb`
+                           sudo md5sum ${n} > ${n}.md5
+                        done
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pkg/aiwan-prism*/*.deb*', fingerprint: true
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            parallel {
+                stage ('deploy metis') {
+                    agent {label 'portal-API'}
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'metis'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/gz/*.gz
+                        '''
+                        copyArtifacts filter: '**/*.gz, **/create_config', target: 'gz', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/gz
+                        sudo cp create_config /tmp/
+                        sudo chmod +x /tmp/create_config
+                        sudo rm -f /opt/aiwan/metis/*.gz
+                        sudo cp *.gz /opt/aiwan/metis/
+                        echo "Done the source loading."
+                        cd /opt/aiwan/metis/server
+                        echo "Call npm run stop"
+                        sudo npm run stop
+                        if [ $? -ne 0 ];then
+                            echo "stop metis failed"
+                            exit 1
+                        fi
+                        echo "Done the npm stop. Now extract the gz."
+                        cd ..
+                        pwd
+                        sudo tar zxf *.gz
+                        if [ $? -ne 0 ];then
+                            echo "extract metis failed"
+                            exit 1
+                        fi
+                        cd server
+                        echo "Now start the npm."
+                        cp -r ~/config ./
+                        sudo npm run start
+                        if [ $? -ne 0 ];then
+                            echo "start metis failed"
+                            exit 1
+                        fi
+                        '''
+                        echo "Done the npm run start."
+                    }
+                }
+      
+                stage ('deploy prism') {
+                    agent { label 'portal-API' }
+                    when {
+                        environment name: 'GERRIT_PROJECT', value: 'prism'
+                    }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/*.deb
+                        '''
+                        copyArtifacts filter: '**/aiwan-prism*.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -i aiwan-prism*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install prism failed."
+                            exit 1
+                        fi
+                        sleep 1
+                        sudo systemctl restart aiwan-prism
+                        if [ $? -ne 0 ];then
+                            echo "restart prism failed."
+                            exit 1
+                        fi
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage ('test') {
+                agent { label 'portal-API' }
+                steps {
+                    sh '''
+                    sudo rm -rf ${WORKSPACE}/src/erlang
+                    sudo rm -rf ${WORKSPACE}/output
+                    '''
+                dir('src/erlang') {
+                    git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master',credentialsId: "${CREDENTIALSID}")
+                }
+                sh '''#!/bin/bash
+                set -e
+                export PYTHONPATH=${WORKSPACE}/src/erlang
+                cd ${WORKSPACE}/src/erlang
+                pwd
+                export PATH=$PATH:/home/jenkins/.local/bin
+                robot -L trace --outputdir ${WORKSPACE}/output --variablefile erlang/config/portal_api.yaml erlang/Portal
+
+                '''
+            }
+        }
+    }
+    post {
+        always {
+            node ('portal-API') {
+                archiveArtifacts 'output/*'
+                }
+            }
+        }
+    
+}

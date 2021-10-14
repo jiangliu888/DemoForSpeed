@@ -1,0 +1,183 @@
+*** Settings ***
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/switch/SwitchKeyword.py
+
+*** Keywords ***
+get_register_routing_from_cpe
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}    evaluate    '${cpe}' in ${opwrt_list}
+    ${regs}=    Get_CPE_Register_Info    ${openwrt}    ${pwd}
+    close connection
+    [Return]    ${regs}
+
+get_dynamic_routing_from_cpe
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}    evaluate    '${cpe}' in ${opwrt_list}
+    ${dyns}=    Get_CPE_Dynamic_Info    ${openwrt}    ${pwd}
+    close connection
+    [Return]    ${dyns}
+
+check_register_routing_in_cpe
+    [Arguments]    ${cpe}    ${expt_regs}=&{${cpe}_cpe}[dyn_regs]
+    ${regs}=    get_register_routing_from_cpe    ${cpe}
+    ${check}=    evaluate    all(x in ${regs} for x in ${expt_regs})
+    should be true    ${check}
+
+check_dynamic_routing_not_in_cpe
+    [Arguments]    ${cpe}    ${nets}
+    ${dyns}=    get_dynamic_routing_from_cpe    ${cpe}
+    ${dyns_nets}=    evaluate    map(lambda x:x["dst_cidr"],${dyns})
+    ${check}=    evaluate    all(x in ${dyns_nets} for x in ${nets})
+    should not be true    ${check}
+    ${openwrt}    evaluate    '${cpe}' in ${opwrt_list}
+    ${iptables}=    run keyword if    ${openwrt}    check_iptables_mangle_aiwan_chain_from_cpe    ${cpe}    ${nets}    ${0}
+    check_dynamic_routing_match_route    &{${cpe}_cpe}[chassis_id]    &{${cpe}_cpe}[chassis_id]    ${nets}    ${0}
+
+check_dynamic_endpoint_not_in_cpe
+    [Arguments]    ${cpe}    ${net}    ${dst_id}
+    ${dyns}=    get_dynamic_routing_from_cpe    ${cpe}
+    ${dyn}    evaluate    filter(lambda x:x["dst_cidr"]=='${net}',${dyns})
+    ${check}=    evaluate    filter(lambda x:x["dst_id"]==${dst_id},${dyn[0]["endpoints"]})
+    length should be    ${check}    ${0}
+
+get_iptables_mangle_aiwan_chain_from_cpe
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}    evaluate    '${cpe}' in ${opwrt_list}
+    ${iptables}=    run keyword if    ${openwrt}    Write openwrt Cmd    iptables -t mangle -L aiwan_chain_route
+    close connection
+    [Return]    ${iptables}
+
+check_iptables_mangle_aiwan_chain_from_cpe
+    [Arguments]    ${cpe}    ${nets}    ${num}
+    ${iptables}=    get_iptables_mangle_aiwan_chain_from_cpe    ${cpe}
+    : FOR    ${n}    IN    @{nets}
+    \    ${lines}=    get lines containing string    ${iptables}    ${n}
+    \    ${line_num}=    get line count    ${lines}
+    \    should be true    ${line_num}==${num}
+
+check_dynamic_routing_in_cpe
+    [Arguments]    ${cpe}    ${nets}
+    ${dyns}=    get_dynamic_routing_from_cpe    ${cpe}
+    ${dyns_nets}=    evaluate    map(lambda x:x["dst_cidr"],${dyns})
+    ${check}=    evaluate    all(x in ${dyns_nets} for x in ${nets})
+    should be true    ${check}
+    ${openwrt}    evaluate    '${cpe}' in ${opwrt_list}
+    ${iptables}=    run keyword if    ${openwrt}    check_iptables_mangle_aiwan_chain_from_cpe    ${cpe}    ${nets}    ${2}
+    : FOR    ${net}    IN    @{nets}
+    \    check_dynamic_routing_match_route    &{${cpe}_cpe}[chassis_id]    &{${cpe}_cpe}[chassis_id]    ${net}
+
+check_dynamic_routing_endpoint_status_in_cpe
+    [Arguments]    ${cpe}    ${d_id}    ${status}
+    ${dyns}=    get_dynamic_routing_from_cpe    ${cpe}
+    ${path}=    create list
+    : FOR    ${dyn}    IN    @{dyns}
+    \    ${dst_endpoint}=    evaluate    filter(lambda x:x["dst_id"]==${d_id},${dyn["endpoints"]})
+    \    run keyword if    ${dst_endpoint}    append to list    ${path}    ${dst_endpoint}
+    \    ${check}=    evaluate    all(x["enabled"]==${status} for x in ${dst_endpoint})
+    \    should be true    ${check}
+    should not be empty    ${path}
+
+check_dynamic_routing_match_route
+    [Arguments]    ${ne_id}    ${d_ne_id}    ${nets}    ${exp_onos_num}=1
+    ${flow_onos}=    get_cpe_table0_dest_ip_flows    ${ne_id}    ${d_ne_id}    ${nets}
+    ${len}=    evaluate    len(${flow_onos})
+    should be equal as numbers    ${len}    ${exp_onos_num}
+
+shutdown_nanjing_ospf_port
+    ${port}=    set variable    &{nanjing_switch}[ospf_if]
+    shutdown_interface_telnet    ${s_c_l_id}    ${port}
+    Close_All_Net_Telnet_Connections
+
+unshutdown_nanjing_ospf_port
+    ${port}=    set variable    &{nanjing_switch}[ospf_if]
+    ${c_id}=    Create_Switch_telnet    nanjing_switch
+    no_shutdown_interface_telnet    ${c_id}    ${port}
+    set suite variable    ${s_c_l_id}    ${c_id}    children=true
+
+check_ospf_routing_from_pc
+    [Arguments]    ${pc}    ${nets}
+    ${pwd}=    ssh_pc    ${pc}
+    ${rets}=    write sudo cmd    vtysh -c 'show ip ospf route'
+    close connection
+    : FOR    ${net}    IN    @{nets}
+    \    ${r}=    get lines containing string    ${rets}    ${net}
+    \    should not be empty    ${r}
+    [Return]    ${rets}
+
+check_dynamic_endpoint_in_cpe_with_metric
+    [Arguments]    ${cpe}    ${net}    ${dst_id}    ${metric}
+    ${dyns}=    get_dynamic_routing_from_cpe    ${cpe}
+    ${dyn}    evaluate    filter(lambda x:x["dst_cidr"]=='${net}',${dyns})
+    ${check}=    evaluate    filter(lambda x:x["dst_id"]==${dst_id} and x["metric"]==${metric},${dyn[0]["endpoints"]})
+    length should be    ${check}    ${1}
+
+Check_CPE_Flow_Table0_IP_with_Mulit_Bonds
+    [Arguments]    ${ip}    ${chassis_id}    ${bonds}
+    ${ret}=    get_cpe_table0_dest_ip_flows    ${chassis_id}    ${chassis_id}    ${ip}
+    ${exts}=    evaluate    filter(lambda x:x['extension']['type']=='AIWAN_ACTION_EX_OUTPUT',${ret[0]['treatment']['instructions']})
+    ${bs}=    evaluate    map(lambda x:x['extension']['Port'],${exts})
+    should be equal    ${bs}    ${bonds}
+
+route_on_nanchang_pc
+    [Arguments]    ${action}
+    ${pwd}=    ssh_pc    nanchang
+    ${rets}=    write sudo cmd    ip route ${action} 172.19.88.89/32 via 10.192.10.1
+    close connection
+
+traceroute_on_pc
+    [Arguments]    ${cpe}    ${d_ip}    ${should_contain}    ${param}=${None}
+    ${res}=    traceroute from linux pc    ${cpe}    ${d_ip}    ${param}
+    Check TraceRoute Res With step    ${res}    ${should_contain}
+
+Check TraceRoute Res With step
+    [Arguments]    ${res}    ${contains}
+    : FOR    ${contain}    IN    @{contains}
+    \    ${i}=    get index from list    ${contains}    ${contain}
+    \    ${step}=    evaluate    ${i}+1
+    \    ${l}=    get lines matching regexp    ${res}    .*${step}(\\s|\\*)+${contain}.*
+    \    should not be empty    ${l}
+
+shutdown_nanjing_port
+    [Arguments]    ${port}
+    shutdown_interface_telnet    ${s_c_l_id}    ${port}
+
+shutdown_nanjing
+    shutdown_nanjing_port    &{nanjing_switch}[nanjing_wan_if]
+    shutdown_nanjing_port    &{nanjing_switch}[nanjing_lan_if]
+
+unshutdown_nanjing_port
+    [Arguments]    ${port}
+    no_shutdown_interface_telnet    ${s_c_l_id}    ${port}
+
+unshutdown_nanjing
+    unshutdown_nanjing_port    &{nanjing_switch}[nanjing_wan_if]
+    unshutdown_nanjing_port    &{nanjing_switch}[nanjing_lan_if]
+
+add_default_route_on_cpe
+    [Arguments]    ${cpe}    ${site_b}    ${site_c}
+    add_company_route    ${suite_company_id}    ${cpe}_default_route_${site_b}    ${100}    ${suite_${site_b}_site_id}    0.0.0.0/1    0.0.0.0/0
+    ...    ${None}    ${None}    ${None}    ${None}    ${suite_&{${cpe}_pc}[site_name]_site_id}
+    add_company_route    ${suite_company_id}    ${cpe}_default_route_${site_b}    ${100}    ${suite_${site_b}_site_id}    128.0.0.0/1    0.0.0.0/0
+    ...    ${None}    ${None}    ${None}    ${None}    ${suite_&{${cpe}_pc}[site_name]_site_id}
+    add_company_route    ${suite_company_id}    ${cpe}_default_route_${site_c}    ${200}    ${suite_${site_c}_site_id}    0.0.0.0/1    0.0.0.0/0
+    ...    ${None}    ${None}    ${None}    ${None}    ${suite_&{${cpe}_pc}[site_name]_site_id}
+    add_company_route    ${suite_company_id}    ${cpe}_default_route_${site_c}    ${200}    ${suite_${site_c}_site_id}    128.0.0.0/1    0.0.0.0/0
+    ...    ${None}    ${None}    ${None}    ${None}    ${suite_&{${cpe}_pc}[site_name]_site_id}
+
+delete_default_route_on_cpe
+    [Arguments]    ${cpe}    ${site_b}    ${site_c}
+    delete_company_route    ${suite_company_id}    ${cpe}_default_route_${site_b}
+    delete_company_route    ${suite_company_id}    ${cpe}_default_route_${site_c}
+
+shutdown_wuhan_wan_port
+    ${port}=    set variable    &{wuhan_switch}[wuhan_wan_if]
+    ${c_id}=    Create_Switch_telnet    wuhan_switch
+    shutdown_interface_telnet    ${c_id}    ${port}
+    set suite variable    ${s_c_l_id_wh}    ${c_id}
+
+unshutdown_wuhan_wan_port
+    ${port}=    set variable    &{wuhan_switch}[wuhan_wan_if]
+    no_shutdown_interface_telnet    ${s_c_l_id_wh}    ${port}

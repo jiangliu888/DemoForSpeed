@@ -1,0 +1,6 @@
+*** Settings ***
+Library           ../../libs/uranus/interface/EsInterface.py
+
+*** Keywords ***
+Clear_Es_Today_Result
+    bulk_delete_1day_measure_result

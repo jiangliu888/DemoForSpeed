@@ -1,0 +1,69 @@
+#!groovy
+
+pipeline {
+    agent { label 'master' }
+
+    stages {
+        stage ('Build') {
+            parallel {
+                stage('build satellite') {
+                    agent { label 'master' }
+                    steps {
+                        dir('src/maat') {
+                            git(url: 'ssh://dev@192.168.0.100:8011/maat', branch: 'master')
+                        }
+                        dir('src/satellite') {
+                            git(url: 'ssh://dev@192.168.0.100:8011/satellite', branch: 'master')
+                        }
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/src/satellite
+                        ./build.sh
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/satellite/build/*.deb, src/satellite/netconf_proxy/netconf_proxy, src/satellite/build/dpctl, src/satellite/build/pt_swarm, src/satellite/shell/*, src/satellite/deb/*.ko', fingerprint: true
+                    }
+                }
+            }
+        }
+
+        stage ('Deploy') {
+            parallel {
+                stage ('deploy cpe12.2') {
+                    agent {label 'cpe12.2' }
+                    steps {
+                        copyArtifacts filter: '**/aiwan-cpe*.deb, **/dpctl', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-cpe*.deb
+                        '''
+                    }
+                }
+
+                stage ('deploy cpe10.2') {
+                    agent {label 'cpe10.2' }
+                    steps {
+                        copyArtifacts filter: '**/aiwan-cpe*.deb, **/dpctl', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+                        sudo dpkg -r aiwan-cpe
+                        if [ $? -ne 0 ];then
+                            echo "rm cpe failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i aiwan-cpe*.deb
+                        '''
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -1,0 +1,17 @@
+*** Settings ***
+Suite Setup       Private_Net_Setup
+Suite Teardown    Private_Net_TearDown
+Test Setup
+Resource          ../resource/UranusKeyword.txt
+
+*** Keywords ***
+Private_Net_TearDown
+    Delete_Company_Relation
+
+Private_Net_Setup
+    Create_Company_Relation
+    run keyword if    ${suite_test_series_group}    Nping_From_PC    remote    &{local_pc}[inner_ip]
+    run keyword if    ${suite_test_series_group}    Nping_From_PC    remote    &{local_pc}[inner_ip]
+    ${target_cpe}    set variable    'chongqing'
+    run keyword if    ${suite_test_series_group} and ${target_cpe} in @{cpe_list}    Nping_From_PC    chongqing    &{local_pc}[inner_ip]
+    run keyword if    ${suite_test_series_group} and ${target_cpe} in @{cpe_list}    Nping_From_PC    chongqing    &{local_pc}[intranet_ip]

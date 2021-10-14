@@ -1,0 +1,95 @@
+*** Settings ***
+Suite Setup       Iperf Setup
+Suite Teardown    run keywords    Iperf Teardown
+...               AND    Sideway_stop_tcpdump
+Test Timeout      2 minutes
+Resource          ../../resource/UranusKeyword.txt
+Resource          ../../resource/SshKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+
+*** Variables ***
+${l_iperf_s_port}    5201
+${r_iperf_s_port}    5500
+
+*** Test Cases ***
+Office_Network_Iperf_Test Strategy2
+    [Tags]    SDWANDEV-332
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    10    local
+    [Teardown]
+
+Private_Network_Iperf_Test Strategy2
+    [Tags]    SDWANDEV-334    SDWANDEV-2339
+    [Setup]
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    350    remote
+    [Teardown]    Print Iperf Server Log    local    /tmp/listen_5201.txt
+
+Sideway_Office_Network_Iperf_Test Strategy2
+    [Tags]    SDWANDEV-826    Sideway
+    wait until keyword succeeds    22s    1s    check_iperf_band_result_in_pc    &{wuhan_pc}[iperf_tcp_bandwidth]    wuhan
+    [Teardown]    Print Iperf Server Log    nanjing
+
+Sideway_Gateway_Office_Network_Iperf_Test Strategy2
+    [Tags]    Sideway    SDWANDEV-1528
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${l_iperf_s_port}
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    &{guangzhou_pc}[toNJ_bandwidth]    guangzhou
+    [Teardown]    Print Iperf Server Log    nanjing
+
+Sideway_2Gateway_Network_Iperf_Test Strategy2
+    [Tags]    SDWANDEV-3310    SDWANDEV-1972    SanityCheck
+    wait until keyword succeeds    22s    1s    check_iperf_band_result_in_pc    &{changsha_pc}[iperf_tcp_bandwidth]    changsha
+    [Teardown]    Print Iperf Server Log    guangzhou
+
+*** Keywords ***
+Iperf Setup
+    Guangzhou Add TC Delay    &{guangzhou_cpe}[wan_if]
+    Guangzhou Add TC Delay    &{guangzhou_cpe}[wan2_if]
+    ${series_server_connect_list}    run keyword if    ${suite_test_series_group}    Series_Iperf Setup
+    ...    ELSE    create list
+    ${parallel_server_connect_list}    run keyword if    ${suite_test_parallel_group}    Parallel_Iperf Setup
+    ...    ELSE    create list
+    ${server_list}    combine Lists    ${series_server_connect_list}    ${parallel_server_connect_list}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+Iperf Teardown
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+    ssh_cpe    guangzhou
+    write openwrt cmd    tc qdisc del dev &{guangzhou_cpe}[wan_if] root
+    write openwrt cmd    tc qdisc del dev &{guangzhou_cpe}[wan2_if] root
+    ${res}=    write openwrt cmd    grep "tc qdisc" /etc/rc.local
+    ${status}    ${r}=    run keyword and ignore error    should contain    ${res}    qdisc
+    run keyword if    '${status}' == 'PASS'    write openwrt cmd    sh /etc/rc.local
+    close connection
+    restart_cpe    guangzhou
+    ${target_cpe}    set variable    'changsha'
+    run keyword if    ${target_cpe} in @{cpe_list}    Wait Until Keyword Succeeds    5s    200ms    Check End2End Links    guangzhou
+    ...    &{changsha_cpe}[chassis_id]    8
+    run keyword if  &{nanjing_cpe}[wan_num] == ${1} and &{guangzhou_cpe}[wan_num] == ${1}    Wait Until Keyword Succeeds    5s    200ms    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    2
+    ...   ELSE   Wait Until Keyword Succeeds    5s    200ms    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+
+Guangzhou Add TC Delay
+    [Arguments]    ${wan_if}    ${delay}=10ms
+    ssh_cpe    guangzhou
+    write openwrt cmd    tc qdisc del dev ${wan_if} root
+    write openwrt cmd    tc qdisc add dev ${wan_if} root netem delay ${delay}
+    close connection
+
+Series_Iperf Setup
+    ${office_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    remote    ${r_iperf_s_port}
+    ${private_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    local    ${l_iperf_s_port}
+    Iperf3_band_From_PC_With_Port    &{remote_pc}[inner_ip]    local    ${r_iperf_s_port}
+    Iperf3_band_From_PC_With_Port    &{local_pc}[intranet_ip]    remote    ${l_iperf_s_port}
+    ${s_list}    create list    ${office_server_connect}    ${private_server_connect}
+    [Return]    ${s_list}
+
+Parallel_Iperf Setup
+    ${nanjing_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    ${guangzhou_server_connect}=    Init_Iperfs_Server_In_PC_with_Port    guangzhou    ${l_iperf_s_port}
+    Start Tcpdump in Wuhan PC    wuhan_pc.pcap    wuhanWan.pcap    wuhanLan.pcap
+    Start Tcpdump in Nanjing PC    nanjing_pc.pcap    nanjingWan.pcap    nanjingLan.pcap
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    wuhan    ${l_iperf_s_port}    20
+    ${target_cpe}    set variable    'changsha'
+    run keyword if  ${target_cpe} in @{cpe_list}   Iperf3_band_From_PC_With_Port    &{guangzhou_pc}[inner_ip]    changsha    ${l_iperf_s_port}    20
+    ${s_list}    create list    ${nanjing_server_connect}    ${guangzhou_server_connect}
+    [Return]    ${s_list}

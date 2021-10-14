@@ -1,0 +1,66 @@
+*** Settings ***
+Suite Setup       run keywords    add_route_setup
+...               AND    Add_ICMP_SPI_ON_CPES
+Suite Teardown    run keywords    delete_route_teardown
+...               AND    TearDown_Icmp_SPI_ON_CPES
+...               AND    Wait All netconf and of avaiable
+Force Tags        abnormal
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/relay/RelayControlCli.py
+Resource          ../resource/SwitchKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${domain_wait}    10s
+
+*** Keywords ***
+Add_ICMP_SPI_ON_CPES
+    ${tag_name}=    set variable    icmp_spi_tag_reliable
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    append_company_spi_Qos_tag_rules    ${suite_company_id}    1    *    *    *    *
+    ...    ${tag_name}
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    Apply_ICMP_SPI_To_CPE    ${cpe}    ${tag_name}
+    \    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Icmp_Spi_From_Cpe    ${cpe}    ${tag_id}
+
+Apply_ICMP_SPI_To_CPE
+    [Arguments]    ${cpe}    ${tag_name}
+    ${tag_id}=    get_company_spi_tag_id_by_name    ${suite_company_id}    ${tag_name}
+    config_transport_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    1020    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Icmp_Spi_From_Cpe    ${cpe}    ${tag_id}
+
+Check_Icmp_Spi_From_Cpe
+    [Arguments]    ${cpe}    ${tag_id}    ${num}=${1}
+    ${ret}=    get_spi_dispatch_from_cpe    &{${cpe}_cpe}[ip]    &{${cpe}_cpe}[ssh_port]    &{${cpe}_cpe}[user]    &{${cpe}_cpe}[passwd]    ${tag_id}
+    ${trans_ret}=    evaluate    filter(lambda x:x['name']=='QOS', ${ret})
+    ${find}=    evaluate    filter(lambda x:x['qos']["policy"]=="reliable", ${trans_ret})
+    should be true    len(${find})==${num}
+
+TearDown_Icmp_SPI_ON_CPES
+    ${tag_id}=    get_company_spi_tag_id_by_name    ${suite_company_id}    icmp_spi_tag_reliable
+    enshare_nanjing_cpe_master
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}
+    \    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_Dispatch_Tag_Delete_from_Cpe    ${cpe}    ${tag_id}
+    delete_company_spi_tag    ${suite_company_id}    icmp_spi_tag_reliable
+
+add_route_setup
+    Create_route_with_dstCIDR    guangzhou_nanjing    ${suite_guangzhou_site_id}    ${500}    ${suite_nanjing_site_id}    &{nanjing_cpe}[nets]
+    Create_route_with_dstCIDR    changsha_nanjing    ${suite_guangzhou_site_id}    ${500}    ${suite_nanjing_site_id}    &{nanjing_cpe}[nets]
+    Create_route_with_dstCIDR    wuhan_nanjing    ${suite_guangzhou_site_id}    ${500}    ${suite_nanjing_site_id}    &{nanjing_cpe}[nets]
+    ${wh_nets}    split string    &{wuhan_cpe}[nets]    /
+    ${nj_nets}    split string    &{nanjing_cpe}[nets]    /
+    ${nj_c_l}=    add_route_static_on_switch    nanjing_switch    ${wh_nets[0]}    ${wh_nets[1]}    &{nanjing_switch}[nanjing_lan_if]    &{nanjing_cpe}[lan_ip]
+    ${wh_c_l}=    add_route_static_on_switch    wuhan_switch    ${nj_nets[0]}    ${nj_nets[1]}    &{wuhan_switch}[wuhan_lan_if]    &{wuhan_cpe}[lan_ip]
+    Close_All_Net_Telnet_Connections
+
+delete_route_teardown
+    ${routeName_list}=    create list    guangzhou_nanjing    changsha_nanjing    wuhan_nanjing
+    delete_route    ${routeName_list}
+    ${wh_nets}    split string    &{wuhan_cpe}[nets]    /
+    ${nj_nets}    split string    &{nanjing_cpe}[nets]    /
+    delete_route_static_on_switch    nanjing_switch    ${wh_nets[0]}    ${wh_nets[1]}    &{nanjing_switch}[nanjing_lan_if]    &{nanjing_cpe}[lan_ip]
+    delete_route_static_on_switch    wuhan_switch    ${nj_nets[0]}    ${nj_nets[1]}    &{wuhan_switch}[wuhan_lan_if]    &{wuhan_cpe}[lan_ip]
+    Close_ALL_Net_Connections

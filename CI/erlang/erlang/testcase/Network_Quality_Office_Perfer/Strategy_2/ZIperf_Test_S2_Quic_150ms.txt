@@ -1,0 +1,81 @@
+*** Settings ***
+Suite Setup       Iperf Setup
+Suite Teardown    Iperf Teardown
+Test Timeout      2 minutes
+Resource          ../../resource/UranusKeyword.txt
+Resource          ../../resource/SshKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+
+*** Variables ***
+${l_iperf_s_port}    5201
+${r_iperf_s_port}    5500
+
+*** Test Cases ***
+Sideway_Office_Network_Iperf_Test Strategy2_Quic_loss
+    [Tags]    SDWANDEV-2739
+    Iperf3_loss_From_PC_With_Parallel Sessions    &{nanjing_pc}[inner_ip]    5M    wuhan    ${l_iperf_s_port}    64    10
+    wait until keyword succeeds    6s    1s    check_paralled_sessions_iperf_loss_result_in_pc    0.05    wuhan
+    [Teardown]    Print Iperf Server Log    nanjing
+
+Office_Network_Iperf_Test Strategy2_Quic_loss
+    [Tags]    SDWANDEV-2650
+    Iperf3_loss_From_PC_With_Parallel Sessions    &{remote_pc}[inner_ip]    300K    local    ${r_iperf_s_port}    64    10
+    wait until keyword succeeds    10s    1s    check_paralled_sessions_iperf_loss_result_in_pc    10    local
+    [Teardown]
+
+Private_Network_Iperf_Test Strategy2_Quic_band
+    [Tags]    SDWANDEV-2738
+    [Setup]
+    ssh pc    remote
+    write sudo cmd    ip route change 10.193.0.0/24 dev enp3s0 proto kernel scope link src 10.193.0.101 initcwnd 700    &{remote_cpe}[passwd]
+    close connection
+    Iperf3_band_From_PC_With_Parallel Sessions    &{local_pc}[intranet_ip]    remote    ${l_iperf_s_port}    8
+    wait until keyword succeeds    13s    1s    check_iperf_band_re_trans_in_pc    80    remote    500
+    ...    ${False}    600
+    [Teardown]
+
+*** Keywords ***
+Iperf Setup
+    Add_Delay_Between_Sip_Dip_On_TC    10.0.0.0/8    10.0.0.0/8    150ms
+    ${series_server_connect_list} =    run keyword if    ${suite_test_series_group}    Series_Iperf Setup
+    ...    ELSE    create list
+    ${parallel_server_connect_list} =    run keyword if    ${suite_test_parallel_group}    Parallel_Iperf Setup
+    ...    ELSE    create list
+    ${server_list}    combine Lists    ${series_server_connect_list}    ${parallel_server_connect_list}
+    set suite variable    ${iperf_server_list}    ${server_list}
+    wait until keyword succeeds    21s    1s    check_undirect_score_greater_than    &{remote_cpe}[chassis_id]    100
+    Iperf3_loss_From_PC_With_Parallel Sessions    &{remote_pc}[inner_ip]    300K    local    ${r_iperf_s_port}    64    5
+    Iperf3_band_From_PC_With_Parallel Sessions    &{local_pc}[intranet_ip]    remote    ${l_iperf_s_port}    20
+    sleep    5
+
+Iperf Teardown
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    Teardown_TC_config
+    wait until keyword succeeds    21s    1s    check_undirect_score_less_than    &{remote_cpe}[chassis_id]    100
+    close all connections
+
+Series_Iperf Setup
+    ${office_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    remote    ${r_iperf_s_port}
+    ${private_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    local    ${l_iperf_s_port}
+    ${s_list}    create list    ${office_server_connect}    ${private_server_connect}
+    [Return]    ${s_list}
+
+Parallel_Iperf Setup
+    ${nanjing_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    ${s_list}    create list    ${nanjing_server_connect}
+    [Return]    ${s_list}
+
+check_undirect_score_less_than
+    [Arguments]    ${ne_id}    ${expect_s}
+    ${link_ids}    Get End2End undirect Links    local    ${ne_id}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} < ${expect_s}
+
+check_undirect_score_greater_than
+    [Arguments]    ${ne_id}    ${expect_s}
+    ${link_ids}    Get End2End undirect Links    local    ${ne_id}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} > ${expect_s}

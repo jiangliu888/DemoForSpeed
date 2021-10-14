@@ -1,0 +1,403 @@
+*** Settings ***
+Library           SSHLibrary
+Library           String
+Resource          UranusKeyword.txt
+Resource          SshKeyword.txt
+
+*** Keywords ***
+Check Too Long Ping
+    [Arguments]    ${local_nic}    ${payload}    ${dest_ip}
+    Write    ping -M do -s ${payload} &{remote_pc}[inner_ip] -c 5
+    ${res}=    read until prompt
+    Should Contain    ${res}    Message too long
+
+Check Ping Flowtables
+    [Arguments]    ${init_send_packets}    ${init_rcv_packets}    ${exec_time}    ${check_flow}    ${src_dev_port}    ${dest_dev_port}
+    ...    ${src_ip}=''    ${dest_ip}=''    ${send_flow_id}=''    ${rev_flow_id}=''
+    # Get the packets number after ping
+    ${cur_send_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ${dest_ip}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{local_cpe}[chassis_id]    ${send_flow_id}
+    ${cur_rcv_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table0_dest_dev_flow_packets    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]    ${src_dev_port}
+    ...    ${src_ip}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{local_cpe}[chassis_id]    ${rev_flow_id}
+    ${incr_send_packets}    Evaluate    ${cur_send_packets}-${init_send_packets}
+    ${incr_rcv_packets}    Evaluate    ${cur_rcv_packets}-${init_rcv_packets}
+    ${expected_packets}    Convert to integer    ${exec_time}
+    Should Be True    ${incr_send_packets} >= ${expected_packets}    The send increased packets should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${incr_rcv_packets} >= ${expected_packets}    The receive increased packets should not be less than the ping counts (execution time in seconds)
+
+Check Ping 4G Flowtables
+    [Arguments]    ${init_pop_send}    ${init_pop_rcv}    ${init_send_packets}    ${init_rcv_packets}    ${exec_time}    ${check_flow}
+    ...    ${src_dev_port}    ${dest_dev_port}    ${src_ip}=''    ${dest_ip}=''    ${send_flow_id}=''    ${rev_flow_id}=''
+    # Get the packets number after ping
+    ${cur_pop_send}    Run Keyword If    '${check_flow}'=='1'    get_device_dest_dev_flow_packets    &{local_pop}[ne_id]    &[shanghai_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ELSE    set variable    ${100}
+    ${cur_pop_rcv}    Run Keyword If    '${check_flow}'=='1'    get_device_dest_dev_flow_packets    &{local_pop}[ne_id]    &{guangzhou_cpe}[chassis_id]    ${src_dev_port}
+    ...    ELSE    set variable    ${100}
+    ${cur_send_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table0_dest_dev_flow_packets    &{guangzhou_cpe}[chassis_id]    &[shanghai_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ${dest_ip}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{guangzhou_cpe}[chassis_id]    ${send_flow_id}
+    ${cur_rcv_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table0_dest_dev_flow_packets    &[shanghai_cpe}[chassis_id]    &{guangzhou_cpe}[chassis_id]    ${src_dev_port}
+    ...    ${src_ip}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{guangzhou_cpe}[chassis_id]    ${rev_flow_id}
+    ${incr_pop_send}    Evaluate    ${cur_pop_send}-${init_pop_send}
+    ${incr_pop_rcv}    Evaluate    ${cur_pop_rcv}-${init_pop_rcv}
+    ${incr_send_packets}    Evaluate    ${cur_send_packets}-${init_send_packets}
+    ${incr_rcv_packets}    Evaluate    ${cur_rcv_packets}-${init_rcv_packets}
+    ${expected_packets}    Convert to integer    ${exec_time}
+    Should Be True    ${incr_send_packets} >= ${expected_packets}    The send increased packets should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${incr_rcv_packets} >= ${expected_packets}    The receive increased packets should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${incr_pop_send} >= ${expected_packets}    The send increased packets on pop should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${incr_pop_rcv} >= ${expected_packets}    The receive increased packets on pop should not be less than the ping counts (execution time in seconds)
+
+Check Packet Loss
+    [Arguments]    ${ping_log}
+    Check Message Too Long    ${ping_log}    ${false}
+    ${cmd}    Set Variable    grep 'loss' ${ping_log} | awk -F '%' '{print $1}' | awk '{print $NF}'
+    Write    ${cmd}
+    ${res}=    read until prompt
+    ${loss}    Get Line    ${res}    0
+    Should Be equal    ${loss}    0
+
+Check Ping File Size
+    [Arguments]    ${ping_log}
+    Write    ls -l ${ping_log} | awk '{print $5}'
+    ${res}=    read until prompt
+    ${size}    Get Line    ${res}    0
+    Should Be True    ${size} > 0
+
+Valid Ping Suite Setup
+    [Arguments]    ${office_tcpdump_file}=""    ${intranet_tcpdump_file}=""    ${cpe_wan_tcpdump_file}=""    ${cpe_lan_tcpdump_file}=""
+    SSH Login Local
+    Start Tcpdump    &{local_pc}[inner_nic]    ${office_tcpdump_file}    &{local_pc}[passwd]
+    Start Tcpdump    &{local_pc}[intranet_if]    ${intranet_tcpdump_file}    &{local_pc}[passwd]
+    Start Tcpdump    &{local_pc}[cpe_wan_mirror_if]    ${cpe_wan_tcpdump_file}    &{local_pc}[passwd]
+    Start Tcpdump    &{local_pc}[cpe_lan_mirror_if]    ${cpe_lan_tcpdump_file}    &{local_pc}[passwd]
+    #close connection
+
+Valid Ping Gateway Suite Setup
+    [Arguments]    ${office_tcpdump_file}=""    ${wan_tcpdump_file}=""    ${lan_tcpdump_file}=""
+    SSH Login Guangzhou
+    Start Tcpdump    &{guangzhou_pc}[inner_nic]    ${office_tcpdump_file}    &{guangzhou_pc}[passwd]
+    ssh_cpe    guangzhou
+    Start Tcpdump_openwrt    &{guangzhou_cpe}[internet_if2]    ${wan_tcpdump_file}
+    Start Tcpdump_openwrt    &{guangzhou_cpe}[intranet_if]    ${lan_tcpdump_file}
+    #close connection
+
+Valid Ping Sideway Suite Setup
+    [Arguments]    ${office_tcpdump_file}    ${cpe_wan_tcpdump_file}    ${cpe_lan_tcpdump_file}
+    SSH Login Wuhan
+    Start Tcpdump    &{wuhan_pc}[inner_nic]    ${office_tcpdump_file}    &{wuhan_pc}[passwd]
+    Start Tcpdump    &{wuhan_pc}[cpe_wan_mirror_if]    ${cpe_wan_tcpdump_file}    &{wuhan_pc}[passwd]
+    Start Tcpdump    &{wuhan_pc}[cpe_lan_mirror_if]    ${cpe_lan_tcpdump_file}    &{wuhan_pc}[passwd]
+    close connection
+
+Start Ping in Parallel
+    [Arguments]    ${payload}    ${dest_ip}    ${ping_log}
+    SSH Login Local
+    Write    ping -M do -s ${payload} ${dest_ip} -c ${exec_time} -i 0.2 > ${ping_log} 2>&1 &
+    #close connection
+
+Start Ping 4G in Parallel
+    [Arguments]    ${payload}    ${dest_ip}    ${ping_log}
+    SSH Login Guangzhou
+    Write    ping -M do -s ${payload} ${dest_ip} -c ${exec_time} -i 0.2 > ${ping_log} 2>&1 &
+    #close connection
+
+Start Ping Sideway in Parallel
+    [Arguments]    ${cpe}    ${payload}    ${dest_ip}    ${ping_log}
+    # TOBE removed this ssh session creation
+    SSH_PC    ${cpe}
+    Write    ping -M do -s ${payload} ${dest_ip} -c ${exec_time} -i 0.2 > ${ping_log} 2>&1 &
+
+Get Valid Ping Logs
+    [Arguments]    ${ping_log}    ${tcpdump_file}
+    Wait Until Keyword Succeeds    ${exec_time}x    0.2    Check Ping File Size    ${ping_log}
+    # print some of the log for review
+    Write    tail -n 10 ${ping_log}
+    ${res}=    read until prompt
+    should not contain    ${res}    Unreachable
+    # judgement for case
+    wait until keyword succeeds    ${exec_time}x    0.2    Check Packet Loss    ${ping_log}
+    ${cmd}    Set Variable    awk '{print $7}' ${ping_log} | grep time | awk -F '=' '{print $2}' | awk '{v[NR]=$1;sum+=$1}{if($1>max)max=$1;if(min>$1)min=$1}NR==1{max=min=$1}END{avg=sum/NR;for(n=1;n<=NR;n++)sd+=(v[n]-avg)**2;sd=sqrt(sd/NR);printf("%f\\n",avg)}'
+    Write    ${cmd}
+    ${res}=    read until prompt
+    ${avg}    Get Line    ${res}    0
+    wait until keyword succeeds    ${exec_time}x    0.2    Check Ping Process
+    #Write Sudo Cmd    killall tcpdump    &{local_pc}[passwd]
+    Comment    wait until keyword succeeds    5    0.1    Check Tcpdump log    ${tcpdump_file}    ${exec_time}
+    ${cmd}    Set Variable    grep 'icmp_seq=1 ' ${ping_log}|awk -F " |=" '{print $(NF-1)}'
+    Write    ${cmd}
+    ${res}=    read until prompt
+    ${first_delay}=    Get Line    ${res}    0
+    [Return]    ${avg}    ${first_delay}
+
+Check Tcpdump log
+    [Arguments]    ${tcpdump_file}    ${expected}    ${wan_ip}
+    # need to consume the first sudo password prompt
+    Write Sudo Cmd    ls    &{local_pc}[passwd]
+    # Check the tcpdump log file
+    ${res}=    Write Sudo Cmd    tcpdump -n -r ${tcpdump_file} 2>/dev/null | grep '${wan_ip}: ICMP echo request' | wc -l    &{local_pc}[passwd]
+    ${num_request}    Get Line    ${res}    0
+    ${res}=    Write Sudo Cmd    tcpdump -n -r ${tcpdump_file} 2>/dev/null | grep reply | wc -l    &{local_pc}[passwd]
+    ${num_reply}    Get Line    ${res}    0
+    Should Be Equal    ${num_request}    ${expected}
+    Should Be Equal    ${num_reply}    ${expected}
+
+Check Valid Ping Results
+    [Arguments]    ${avg}    ${first}
+    Should Be True    ${avg} < ${max_latency}    The avaerage ping latency should be less than ${max_latency}ms
+    Should Be True    ${first} < ${first_latency}    The first ping latency should be less than ${first_latency}ms
+
+Check Ping Process
+    write    ps -ef | grep ping | grep -v grep
+    ${res}=    read until prompt
+    should not contain    ${res}    ping -M do
+
+Start Ping Too Long
+    [Arguments]    ${payload}    ${dest_ip}    ${log_file}
+    SSH Login Local
+    Write    ping -M do -s ${payload} ${dest_ip} -c 20 > ${log_file} 2>&1 &
+    #close connection
+
+Start 4G Ping Too Long
+    [Arguments]    ${payload}    ${dest_ip}    ${log_file}
+    SSH Login Guangzhou
+    Write    ping -M do -s ${payload} ${dest_ip} -c 20 > ${log_file} 2>&1 &
+    #close connection
+
+Start Sideway Ping Too Long
+    [Arguments]    ${cpe}    ${payload}    ${dest_ip}    ${log_file}
+    Ssh_PC    ${cpe}
+    Write    ping -M do -s ${payload} ${dest_ip} -c 20 > ${log_file} 2>&1 &
+    #close connection
+
+Check Message Too Long
+    [Arguments]    ${log_file}    ${flag}=${true}    ${check_str}='Message too long'
+    Write    cat ${log_file}
+    ${res}=    read until prompt
+    run keyword if    '${flag}' == '${true}'    Should Contain    ${res}    ${check_str}
+    ...    ELSE    should not contain    ${res}    ${check_str}
+
+SSH Login Local
+    SSH Login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+
+SSH Login Guangzhou
+    SSH Login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+
+SSH Login Nanjing
+    SSH Login    &{nanjing_pc}[ctrl_ip]    &{nanjing_pc}[ctrl_port]    &{nanjing_pc}[user]    &{nanjing_pc}[passwd]
+
+SSH Login Wuhan
+    SSH Login    &{wuhan_pc}[ctrl_ip]    &{wuhan_pc}[ctrl_port]    &{wuhan_pc}[user]    &{wuhan_pc}[passwd]
+
+Check Ping Flowtables_Wan_MPLS
+    [Arguments]    ${init_send_packets}    ${init_rcv_packets}    ${table1_init_send_packets}    ${table1_init_rcv_packets}    ${exec_time}    ${check_flow}
+    ...    ${src_dev_port}    ${dest_dev_port}    ${src_ip}=''    ${dest_ip}=''    ${send_flow_id}=''    ${rev_flow_id}=''
+    # Get the packets number after ping
+    ${cur_send_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ${dest_ip}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{local_cpe}[chassis_id]    ${send_flow_id}
+    ${cur_rcv_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table0_dest_dev_flow_packets    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]    ${src_dev_port}
+    ...    ${src_ip}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{local_cpe}[chassis_id]    ${rev_flow_id}
+    ${cur_table1_send_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table_1_device_tunnel_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{local_cpe}[chassis_id]    ${send_flow_id}
+    ${cur_table1_rcv_packets}    Run Keyword If    '${check_flow}'=='1'    get_cpe_table_1_device_tunnel_packets    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]    ${src_dev_port}
+    ...    ELSE IF    '${check_flow}'=='0'    get_device_flow_packets_by_flow_id    &{local_cpe}[chassis_id]    ${rev_flow_id}
+    ${incr_send_packets}    Evaluate    ${cur_send_packets}-${init_send_packets}
+    ${table1_incr_rcv_packets}    Evaluate    ${cur_rcv_packets}-${init_rcv_packets}
+    ${table1_incr_send_packets}    Evaluate    ${cur_table1_send_packets}-${table1_init_send_packets}
+    ${incr_rcv_packets}    Evaluate    ${cur_table1_rcv_packets}-${table1_init_rcv_packets}
+    ${expected_packets}    Convert to integer    ${exec_time}
+    Should Be True    ${incr_send_packets} >= ${expected_packets}    The send increased packets should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${incr_rcv_packets} >= ${expected_packets}    The receive increased packets should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${table1_incr_send_packets} >= ${expected_packets}    The send increased packets should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${table1_incr_rcv_packets} >= ${expected_packets}    The receive increased packets should not be less than the ping counts (execution time in seconds)
+
+Valid Ping Start Tcpdump in Remote PC
+    [Arguments]    ${office_tcpdump_file}=""    ${intranet_tcpdump_file}=""    ${cpe_wan_tcpdump_file}=""    ${cpe_lan_tcpdump_file}=""
+    SSH Login Remote
+    Start Tcpdump    &{remote_pc}[inner_nic]    ${office_tcpdump_file}    &{remote_pc}[passwd]
+    Start Tcpdump    &{remote_pc}[intranet_if]    ${intranet_tcpdump_file}    &{remote_pc}[passwd]
+    Start Tcpdump    &{remote_pc}[cpe_wan_mirror_if]    ${cpe_wan_tcpdump_file}    &{remote_pc}[passwd]
+    Start Tcpdump    &{remote_pc}[cpe_lan_mirror_if]    ${cpe_lan_tcpdump_file}    &{remote_pc}[passwd]
+    close connection
+
+Start Tcpdump in Wuhan PC
+    [Arguments]    ${office_tcpdump_file}=""    ${cpe_wan_tcpdump_file}=""    ${cpe_lan_tcpdump_file}=""
+    SSH Login Wuhan
+    Start Tcpdump    &{wuhan_pc}[inner_nic]    ${office_tcpdump_file}    &{wuhan_pc}[passwd]
+    Start Tcpdump    &{wuhan_pc}[cpe_wan_mirror_if]    ${cpe_wan_tcpdump_file}    &{wuhan_pc}[passwd]
+    Start Tcpdump    &{wuhan_pc}[cpe_lan_mirror_if]    ${cpe_lan_tcpdump_file}    &{wuhan_pc}[passwd]
+    close connection
+
+Start Tcpdump in Nanjing PC
+    [Arguments]    ${office_tcpdump_file}=""    ${cpe_wan_tcpdump_file}=""    ${cpe_lan_tcpdump_file}=""
+    SSH Login Nanjing
+    Start Tcpdump    &{nanjing_pc}[inner_nic]    ${office_tcpdump_file}    &{nanjing_pc}[passwd]
+    Start Tcpdump    &{nanjing_pc}[cpe_wan_mirror_if]    ${cpe_wan_tcpdump_file}    &{nanjing_pc}[passwd]
+    Start Tcpdump    &{nanjing_pc}[cpe_lan_mirror_if]    ${cpe_lan_tcpdump_file}    &{nanjing_pc}[passwd]
+    close connection
+
+SSH Login Remote
+    SSH Login    &{remote_pc}[ctrl_ip]    &{remote_pc}[ctrl_port]    &{remote_pc}[user]    &{remote_pc}[passwd]
+
+Suite_Start_tcpdump
+    Valid Ping Start Tcpdump in Remote PC    ${tcpdump}    ${p_tcpdump}    ${wan_tcpdump}    ${lan_tcpdump}
+    Valid Ping Suite Setup    ${tcpdump}    ${p_tcpdump}    ${wan_tcpdump}    ${lan_tcpdump}
+
+Suite_stop_tcpdump
+    run keyword if    ${suite_test_series_group}    Suite_stop_tcpdump_serise
+    run keyword if    ${suite_test_parallel_group}    Suite_stop_tcpdump_parallele
+
+Sideway_stop_tcpdump
+    SSH Login Nanjing
+    Write Sudo Cmd    killall tcpdump    &{nanjing_pc}[passwd]
+    SSH Login Wuhan
+    Write Sudo Cmd    killall tcpdump    &{wuhan_pc}[passwd]
+    Close All Connections
+
+Get Valid Ping Logs_loss_less_than
+    [Arguments]    ${ping_log}    ${expect_loss}
+    Wait Until Keyword Succeeds    ${exec_time}x    0.2    Check Ping File Size    ${ping_log}
+    # print some of the log for review
+    Write    tail -n 10 ${ping_log}
+    ${res}=    read until prompt
+    should not contain    ${res}    Unreachable
+    # judgement for case
+    wait until keyword succeeds    ${exec_time}x    0.2    Check Ping Process
+    # print some of the log for review
+    Write    tail -n 10 ${ping_log}
+    ${res}=    read until prompt
+    ${cmd}    Set Variable    grep 'loss' ${ping_log} | awk -F '%' '{print $1}' | awk '{print $NF}'
+    Write    ${cmd}
+    ${res}=    read until prompt
+    ${loss}    Get Line    ${res}    0
+    ${real_loss}=    Convert to integer    ${loss}
+    Should Be true    ${real_loss} <= ${expect_loss}
+
+Check POP Ping Flowtables
+    [Arguments]    ${init_pop_send}    ${init_pop_rcv}    ${init_pop_nat_send}    ${exec_time}    ${check_flow}    ${src_dev_port}
+    ...    ${dest_dev_port}    ${src_ip}=''    ${dest_ip}=''    ${send_flow_id}=''    ${rev_flow_id}=''
+    # Get the packets number after ping
+    ${cur_pop_send}    Run Keyword If    '${check_flow}'=='1'    Get_CPE_Flow_Info_From_POP    remote    &{remote_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ELSE    set variable    ${100}
+    ${cur_pop_nat_send}    Run Keyword If    '${check_flow}'=='1'    Get_CPE_Flow_Info_From_POP    remote    &{chongqing_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ELSE    set variable    ${100}
+    ${cur_pop_rcv}    Run Keyword If    '${check_flow}'=='1'    Get_CPE_Flow_Info_From_POP    local    &{local_cpe}[chassis_id]    ${src_dev_port}
+    ...    ELSE    set variable    ${200}
+    ${incr_pop_send}    Evaluate    ${cur_pop_send}-${init_pop_send}
+    ${incr_pop_nat_send}    Evaluate    ${cur_pop_nat_send}-${init_pop_nat_send}
+    ${incr_pop_rcv}    Evaluate    ${cur_pop_rcv}-${init_pop_rcv}
+    ${expected_packets}    evaluate    ${exec_time}*2
+    ${rcv_expected_packets}    evaluate    ${exec_time}*2
+    Should Be True    ${incr_pop_send} >= ${expected_packets}    The send increased packets on pop should not be less than the ping counts (execution time in seconds)
+    Comment    Should Be True    ${incr_pop__nat_send} >= ${expected_packets}    The send increased packets on pop should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${incr_pop_rcv} >= ${rcv_expected_packets}    The receive increased packets on pop should not be less than the ping counts (execution time in seconds)
+
+Valid Ping Start Tcpdump in Chongqing PC
+    [Arguments]    ${office_tcpdump_file}=""    ${intranet_tcpdump_file}=""    ${cpe_wan_tcpdump_file}=""    ${cpe_lan_tcpdump_file}=""
+    ssh_PC    chongqing
+    Start Tcpdump    &{chongqing_pc}[inner_nic]    ${office_tcpdump_file}    &{chongqing_pc}[passwd]
+    Start Tcpdump    &{chongqing_pc}[intranet_if]    ${intranet_tcpdump_file}    &{chongqing_pc}[passwd]
+    Start Tcpdump    &{chongqing_pc}[cpe_wan_mirror_if]    ${cpe_wan_tcpdump_file}    &{chongqing_pc}[passwd]
+    Start Tcpdump    &{chongqing_pc}[cpe_lan_mirror_if]    ${cpe_lan_tcpdump_file}    &{chongqing_pc}[passwd]
+    close connection
+
+Check Ping Nat Flowtables
+    [Arguments]    ${init_send_packets}    ${init_rcv_packets}    ${exec_time}    ${check_flow}    ${src_dev_port}    ${dest_dev_port}
+    ...    ${src_ip}=''    ${dest_ip}=''    ${send_flow_id}=''    ${rev_flow_id}=''
+    # Get the packets number after ping
+    ${nat_pop}=    get_dst_chongqing_nat_pop_ip    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]
+    ${cur_send_packets}    Run Keyword If    '${dest_dev_port}'=='1'    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ${dest_ip}    nat_ip=${nat_pop}
+    ...    ELSE IF    '${dest_dev_port}'=='2'    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]    ${dest_dev_port}
+    ...    ${dest_ip}
+    ${cur_rcv_packets}    get_cpe_table0_dest_dev_flow_packets    &{chongqing_cpe}[chassis_id]    &{local_cpe}[chassis_id]    ${src_dev_port}    ${src_ip}
+    ${incr_send_packets}    Evaluate    ${cur_send_packets}-${init_send_packets}
+    ${incr_rcv_packets}    Evaluate    ${cur_rcv_packets}-${init_rcv_packets}
+    ${expected_packets}    Convert to integer    ${exec_time}
+    Should Be True    ${incr_send_packets} >= ${expected_packets}    The send increased packets should not be less than the ping counts (execution time in seconds)
+    Should Be True    ${incr_rcv_packets} >= ${expected_packets}    The receive increased packets should not be less than the ping counts (execution time in seconds)
+
+Start Ping Sideway in Parallel Allow Fragments
+    [Arguments]    ${payload}    ${dest_ip}    ${ping_log}
+    Write    ping \ -s ${payload} ${dest_ip} -c ${exec_time} -i 0.2 > ${ping_log} 2>&1 &
+
+Suite_stop_tcpdump_serise
+    SSH Login Local
+    Write Sudo Cmd    killall tcpdump    &{local_pc}[passwd]
+    SSH Login Remote
+    Write Sudo Cmd    killall tcpdump    &{remote_pc}[passwd]
+    ssh pc    chongqing
+    Write Sudo Cmd    killall tcpdump    &{chongqing_pc}[passwd]
+    Close All Connections
+
+Suite_stop_tcpdump_parallele
+    Ssh_CPE    guangzhou
+    Write OpenWrt Cmd    killall tcpdump    &{guangzhou_cpe}[passwd]
+    SSH Login Guangzhou
+    Write Sudo Cmd    killall tcpdump    &{guangzhou_pc}[passwd]
+    SSH Login Wuhan
+    Write Sudo Cmd    killall tcpdump    &{wuhan_pc}[passwd]
+    Close All Connections
+
+Multi_Ping_And_Check_Result
+    [Arguments]    ${ip_list}
+    ${num}=    evaluate    len(${ip_list})
+    ${ip}=    evaluate    ' '.join(${ip_list})
+    write    nmap -T5 -sP ${ip}
+    ${res}=    read until prompt
+    should contain    ${res}    ${num} hosts up
+
+Start windows Ping in Parallel
+    [Arguments]    ${src_ip}    ${dest_ip}    ${ping_log}    ${len}    ${pwd}
+    ${res}    write sudo cmd    hping3 ${dest_ip} --icmp -W -N 5 -c ${exec_time} -i u2000 -a ${src_ip}    ${pwd}
+    should not contain    ${res}    DUP
+    should not contain    ${res}    Unreachable
+    should contain    ${res}    0% packet loss
+    ${res}    write sudo cmd    nping --icmp --delay 200ms ${dest_ip} --icmp-id 1 --data-length ${len} -S ${src_ip}    ${pwd}
+    should contain    ${res}    Lost: 0 (0.00%)
+
+Ping_from_windows_pc
+    [Arguments]    ${pc}    ${r_ip}    ${c}
+    ssh login    &{${pc}_w_pc}[ctrl_ip]    &{${pc}_w_pc}[ctrl_port]    &{${pc}_w_pc}[user]    &{${pc}_w_pc}[passwd]    >
+    ${rc}    ${stderr}=    execute command    ping ${r_ip} -n ${c}    return_stderr=True
+    should be empty    ${stderr}
+    should not contain    ${rc}    unreachable
+    ${rcs}=    split string    ${rc}    \r\n
+    ${ret}=    split string    ${rcs[-1]}
+    ${loss_ret}=    split string    ${rcs[-3]}
+    ${avg}=    set variable    ${ret[-1]}
+    ${max}=    set variable    ${ret[-4]}
+    ${loss}=    set variable    ${loss_ret[-3]}
+    close connection
+    [Return]    ${avg}    ${max}    ${loss}
+
+traceroute from windows pc
+    [Arguments]    ${pc}    ${r_ip}   ${hops}=${None}
+    ssh login    &{${pc}_w_pc}[ctrl_ip]    &{${pc}_w_pc}[ctrl_port]    &{${pc}_w_pc}[user]    &{${pc}_w_pc}[passwd]    >
+    ${rc}    ${stderr}=    run keyword if  '${hops}' == '${None}'    execute command    tracert ${r_ip}    return_stderr=True
+    ...  ELSE   execute command    tracert -h ${hops} ${r_ip}    return_stderr=True
+    should be empty    ${stderr}
+    should contain    ${rc}    complete
+    close connection
+    [Return]  ${rc}
+
+traceroute from linux pc
+    [Arguments]    ${cpe}    ${r_ip}   ${params}=${None}
+    ${pwd}=    ssh_pc  ${cpe}
+    ${rc}=    run keyword if  '${params}' == '${None}'    write sudo cmd    traceroute ${r_ip} -n    ${pwd}
+    ...  ELSE   write sudo cmd    traceroute ${r_ip} ${params} -n    ${pwd}
+    close connection
+    [Return]  ${rc}
+
+mtr from linux pc
+    [Arguments]    ${cpe}    ${r_ip}   ${params}=${None}
+    ssh_pc  ${cpe}
+    ${rc}    ${stderr}=    execute command    mtr -n -r -c 10 ${r_ip}    return_stderr=True
+    should be empty    ${stderr}
+    close connection
+    [Return]  ${rc}

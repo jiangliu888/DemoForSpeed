@@ -1,0 +1,17 @@
+{
+  "326": [{
+    "neId": 65521,
+    "ports": [{"iface": "wan1", "index": 0}, {"iface": "wan1", "index": 1}]
+},{
+    "neId": 65523,
+    "ports": [{"iface": "wan1", "index": 0}]
+}],
+  "342": [{
+    "neId": 65522,
+    "ports": [{"iface": "wan1", "index": 0}, {"iface": "wan1", "index": 1}]
+},{
+    "neId": 65521,
+    "ports": [{"iface": "wan1", "index": 0}]
+}],
+  "358": []
+}

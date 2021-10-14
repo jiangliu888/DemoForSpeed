@@ -1,0 +1,227 @@
+*** Settings ***
+Suite Setup       handover_setup
+Suite Teardown
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/relay/RelayControlCli.py
+Resource          ../resource/SwitchKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${exec_time}      100
+${ping_num}       60
+${check_num}      5
+${Pop_Maintain_512_ping}    Pop_Maintain_512_ping.log
+${handover_series_log}    handover_series.log
+${m_wait}         61
+${local_code}     888
+${flow_ttl}       10
+${domain_wait}    5s
+
+*** Test Cases ***
+Set_POP_Maintain_No_Loss
+    [Tags]    SDWANDEV-1676    SDWANDEV-1675    abnormal
+    [Setup]
+    ${home_codes}=    get_cpe_home_code    &{local_cpe}[chassis_id]
+    ${home_code}=    set variable    ${home_codes[0]}
+    ${pop_id}=    Set Variable If    '${home_code["eac"]}' == '&{local_pop}[eac]'    &{local_pop}[ne_id]    '${home_code["eac"]}' == '&{remote_pop}[eac]'    &{remote_pop}[ne_id]
+    Start Ping in Parallel    512    &{remote_pc}[inner_ip]    ${Pop_Maintain_512_ping}
+    Set_POP_Status    ${pop_id}    MAINTENANCE
+    ${link_ids}    ${links}=    Check End2End Links    local    &{remote_cpe}[chassis_id]    2
+    Wait Until Keyword Succeeds    ${m_wait}    1s    check_undirect_link_mnt    local    ${link_ids}    ${links}
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Get Valid Ping Logs_loss_less_than    ${Pop_Maintain_512_ping}    0
+    set Test variable    ${exec_time}    50
+    ${e_direct}=    ping_get_better_link    local    remote    2
+    should be true    ${e_direct}
+    [Teardown]    POP_Maintain_Teardown    ${pop_id}
+
+Handover_CPE_Undirect_Link_To_Director_Link_Packet_Loss
+    [Tags]    SDWANDEV-1249    abmormal
+    [Setup]
+    ${e_direct}=    ping_get_better_link    local    remote    2
+    should not be true    ${e_direct}
+    ssh_pc    remote
+    Write    rm -rf ${handover_series_log}
+    Write    ping -M do -s 512 &{local_pc}[inner_ip] -c ${exec_time} -i 0.2 -w21> ${handover_series_log} 2>&1 &
+    Add_Loss_Between_Sip_Dip_On_TC    &{local_pc}[cpe_ip]    &{local_pop}[ip2]    100%
+    ssh_pc    remote
+    Get Valid Ping Logs_loss_less_than    ${handover_series_log}    25
+    ${e_direct}=    ping_get_better_link    local    remote    2
+    should be true    ${e_direct}
+    close all connections
+    [Teardown]    run keywords    Teardown_TC_config
+    ...    AND    handover_case_teardown
+
+Set_POP_Maintain_Reset_CPE
+    [Tags]    long    SDWANDEV-1680    abnormal
+    [Setup]
+    ${home_codes}=    get_cpe_home_code    &{guangzhou_cpe}[chassis_id]
+    ${home_code}=    set variable    ${home_codes[0]}
+    ${pop_id}=    Set Variable If    '${home_code["eac"]}' == '&{local_pop}[eac]'    &{local_pop}[ne_id]    '${home_code["eac"]}' == '&{remote_pop}[eac]'    &{remote_pop}[ne_id]
+    Set_POP_Status    ${pop_id}    MAINTENANCE
+    ${link_ids}    ${links}=    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    Wait Until Keyword Succeeds    ${m_wait}    1    check_undirect_link_mnt    guangzhou    ${link_ids}    ${links}
+    restart_cpe    guangzhou
+    sleep    5s
+    ${link_ids}    ${links}=    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    Wait Until Keyword Succeeds    ${m_wait}    1    check_link_score    guangzhou    ${link_ids}    ${links}
+    Wait Until Keyword Succeeds    ${m_wait}    1    check_undirect_link_mnt    guangzhou    ${link_ids}    ${links}
+    Start Ping Sideway in Parallel    guangzhou    512    &{nanjing_pc}[inner_ip]    ${Pop_Maintain_512_ping}
+    ssh_pc    guangzhou
+    Get Valid Ping Logs_loss_less_than    ${Pop_Maintain_512_ping}    0
+    set Test variable    ${exec_time}    50
+    ${e_direct}=    ping_get_better_link    guangzhou    nanjing    8
+    should be true    ${e_direct}
+    [Teardown]    POP_Maintain_Teardown    ${pop_id}
+
+Down_POP_PORT_CPE_Flow_Change
+    [Tags]    SDWANDEV-1248    abnormal
+    [Setup]
+    ${e_direct}=    ping_get_better_link    local    remote    2
+    should not be true    ${e_direct}
+    ssh_pc    remote
+    Write    rm -rf ${handover_series_log}
+    Write    ping -M do -s 512 &{local_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${handover_series_log} 2>&1 &
+    ${c_id}=    shutdown_switch_port    m_240    &{mirror_switch_240}[local_pop_if2]
+    ssh_pc    remote
+    Get Valid Ping Logs_loss_less_than    ${handover_series_log}    20
+    ${e_direct}=    ping_get_better_link    local    remote    2
+    should be true    ${e_direct}
+    close all connections
+    [Teardown]    run keywords    unshutdown_switch_port    ${c_id}    &{mirror_switch_240}[local_pop_if2]
+    ...    AND    handover_case_teardown
+
+Handover_CPE_Undirect_Link_To_Director_Link_Delay
+    [Tags]    abmormal    SDWANDEV-1251
+    [Setup]
+    ${e_direct}=    ping_get_better_link    local    remote    2
+    should not be true    ${e_direct}
+    set Test variable    ${exec_time}    350
+    ssh_pc    remote
+    Write    rm -rf ${handover_series_log}
+    Write    ping -M do -s 512 &{local_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${handover_series_log} 2>&1 &
+    Add_Delay_Between_Sip_Dip_On_TC    &{local_pc}[cpe_ip]    &{local_pop}[ip2]    300ms
+    ssh_pc    remote
+    Get Valid Ping Logs_loss_less_than    ${handover_series_log}    0
+    check_undirect_score_bigger_than    &{remote_cpe}[chassis_id]    100
+    ${e_direct}=    ping_get_better_link    local    remote    2
+    should be true    ${e_direct}
+    close all connections
+    [Teardown]    run keywords    Teardown_TC_config
+    ...    AND    handover_case_teardown
+
+POP_Abormal_Delete_Code_On_Cpe
+    [Tags]    SDWANDEV-1679    abnormal    debug
+    [Setup]
+    POST_Domain_Pattern_ON_CPE    ${suite_&{local_pc}[site_name]_site_id}    .*.sh.wsdashi.com    ${flow_ttl}    1000
+    remote_pop_search_pattern_setup
+    Wait Until Keyword Succeeds    1s    200ms    Check_CPE_NAT_Flow    999    ${True}    local
+    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+    Set_POP_Status    &{remote_pop}[ne_id]    MAINTENANCE
+    Wait Until Keyword Succeeds    1s    200ms    Check_CPE_NAT_Flow    999    ${False}    local
+    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+    [Teardown]    POP_Maintain_SAAS_Teardown    &{remote_pop}[ne_id]    999
+
+POP_Tunnel_Loss_Change_to_Low_Weight_Tunnel
+    [Tags]    SDWANDEV-454
+    ${tunnels}=    get_pop_to_pop_running_tunnels    &{local_pop}[ne_id]    &{remote_pop}[ne_id]
+    ${init_packet}    ${priority}=    get_pop_table_1_device_tunnel_packets    &{local_pop}[ne_id]    ${tunnels[1]["tunnelId"]}
+    ${ts}=    get_ne_tunnels_from_controller_with_dst_ne_id    &{local_pop}[ne_id]    &{remote_pop}[ne_id]
+    ${t}=    evaluate    filter(lambda x:x['tunnelId']==int(${tunnels[0]["tunnelId"]}),${ts})[0]
+    block_pop_tunnel    remote    ${t["srcIp"]}    ${t["dstIp"]}    block
+    ssh_pc    local
+    Write    rm -rf ${handover_series_log}
+    ${res}=    read until prompt
+    Write    ping -M do -s 512 &{remote_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${handover_series_log} 2>&1 &
+    ${res}=    read until prompt
+    run keyword and continue on Failure    Get Valid Ping Logs_loss_less_than    ${handover_series_log}    0
+    close connection
+    ${new_tunnels}=    get_pop_to_pop_running_tunnels    &{local_pop}[ne_id]    &{remote_pop}[ne_id]
+    ${not_change}=    evaluate    ${tunnels}==${new_tunnels}
+    ${end_packet}    ${priority}=    run keyword if    ${not_change}    get_pop_table_1_device_tunnel_packets    &{local_pop}[ne_id]    ${tunnels[1]["tunnelId"]}
+    run keyword if    ${not_change}    should be true    ${end_packet}>${init_packet}
+    [Teardown]    block_pop_tunnel    remote    ${t["srcIp"]}    ${t["dstIp"]}    unblock
+
+*** Keywords ***
+handover_setup
+    wait until keyword succeeds    5x    20ms    Ensure_CPE_Flow_Work    remote    office
+
+ping_get_better_link
+    [Arguments]    ${cpe}    ${target_cpe}    ${link_num}
+    ${link_ids}    ${links}=    Check End2End Links    ${cpe}    &{${target_cpe}_cpe}[chassis_id]    ${link_num}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    ssh_pc    ${cpe}
+    Write    rm -rf ${handover_series_log}
+    Write    ping -M do -s 512 &{${target_cpe}_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${handover_series_log}
+    sleep    3
+    close connection
+    ${e_score_list}    ${e_p_list}    ${e_b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    ${b_wan}    ${b_direct}=    Get_Better_Wan    ${links}    ${p_list}    ${e_p_list}
+    [Return]    ${b_direct}
+
+Select_undirect_link
+    [Arguments]    ${cpe}    ${target_cpe}    ${link_num}
+    set Test variable    ${exec_time}    50
+    ${e_direct}=    ping_get_better_link    ${cpe}    ${target_cpe}    ${link_num}
+    should not be true    ${e_direct}
+
+check_undirect_link_mnt
+    [Arguments]    ${cpe}    ${link_ids}    ${links}    ${res_mnt}=${True}
+    ${mnt_list}=    Get_CPE_Link_mnt    ${cpe}    ${link_ids}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}    get index from list    ${links}    ${link}
+    \    ${mnt}    get from list    ${mnt_list}    ${i}
+    \    run keyword if    '${link["direct"]}'=='False' and '${link["local-wan-id"]}' =='1'    should be equal    ${mnt}    ${res_mnt}
+    \    ...    ELSE IF    '${link["direct"]}'=='True' and '${link["local-wan-id"]}' =='1'    should be equal    ${mnt}    ${False}
+
+POP_Maintain_Teardown
+    [Arguments]    ${pop_id}
+    Set_POP_Status    ${pop_id}    NORMAL
+    POP_Maintain_Links_Teardown    guangzhou    nanjing    8    ${False}
+    POP_Maintain_Links_Teardown    local    remote    2    ${False}
+
+check_link_score
+    [Arguments]    ${cpe}    ${link_ids}    ${links}
+    ${e_score_list}    ${e_p_list}    ${e_b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}    get index from list    ${links}    ${link}
+    \    ${score}    get from list    ${e_score_list}    ${i}
+    \    should be true    ${score} < 70
+
+POP_Maintain_Links_Teardown
+    [Arguments]    ${cpe}    ${target_cpe}    ${link_num}    ${check}=${True}
+    ${link_ids}    ${links}=    Check End2End Links    ${cpe}    &{${target_cpe}_cpe}[chassis_id]    ${link_num}
+    Wait Until Keyword Succeeds    ${m_wait}    1s    check_undirect_link_mnt    ${cpe}    ${link_ids}    ${links}
+    ...    ${False}
+    run keyword if    ${check}    Select_undirect_link    ${cpe}    ${target_cpe}    ${link_num}
+
+POP_Maintain_SAAS_Teardown
+    [Arguments]    ${pop_id}    ${code}    ${site_name}=${suite_&{local_pc}[site_name]_site_id}
+    POP_Maintain_Teardown    ${pop_id}
+
+check_undirect_score_less_than
+    [Arguments]    ${ne_id}    ${expect_s}
+    ${link_ids}    Get End2End undirect Links    local    ${ne_id}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} < ${expect_s}
+
+handover_case_teardown
+    wait until keyword succeeds    130s    1s    check_undirect_score_less_than    &{remote_cpe}[chassis_id]    2
+    wait until keyword succeeds    130s    1s    check_direct_score_bigger_than    &{remote_cpe}[chassis_id]    100
+
+check_undirect_score_bigger_than
+    [Arguments]    ${ne_id}    ${expect_s}
+    ${link_ids}    Get End2End undirect Links    local    ${ne_id}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} > ${expect_s}
+
+check_direct_score_bigger_than
+    [Arguments]    ${ne_id}    ${expect_s}
+    ${link_ids}    Get End2End undirect Links    local    ${ne_id}    True
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} > ${expect_s}

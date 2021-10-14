@@ -1,0 +1,528 @@
+*** Settings ***
+Suite Setup
+Suite Teardown
+Library           ../../libs/common/SetHttp.py
+Library           ../../libs/uranus/UranusKeyword.py
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${r_iperf_s_port}    5201
+${l_iperf_s_port}    5202
+${vport_check}    10s
+${loss}           0.1
+
+*** Test Cases ***
+Config_Wan_Bandwidth_Burst_Jitter
+    [Tags]    SDWANDEV-1038    SDWANDEV-1148
+    [Setup]
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    10240    5    5
+    ...    70
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    10240    5    5    70
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    0    0    0
+    ...    0
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    0    0    0    0
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    0    0    0
+    ...    0
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    0    0    0    0
+    All_Netconf_Devices_Avaiable
+    All_Of_Devices_Avaiable
+    [Teardown]    teardown_cpe_wan    nanjing
+
+Wan_PassThrough_Traffic_Controller
+    [Tags]    SDWANDEV-1039    long
+    [Setup]
+    put_cpe_wan_bandwidth    &{local_cpe}[chassis_id]    &{local_cpe}[internet_if]    0    10240    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    local    &{local_cpe}[internet_if]    ${0}
+    ...    10240    10    10    100
+    Iperf3_band_From_PC_With_Port    &{dns_server}[ip]    local    ${r_iperf_s_port}    9
+    Comment    Iperf3_band_From_PC_With_Port    &{salt-master}[ip]    local    ${r_iperf_s_port}    10
+    Wait Until Keyword Succeeds    12s    1s    check_iperf_band_result_in_pc    7.8    local    10.7
+    ...    ${False}
+    ssh login    &{dns_server}[ip]    &{dns_server}[ssh_port]    &{dns_server}[user]    &{dns_server}[passwd]
+    Wait Until Keyword Succeeds    5s    1s    check_remote_iperf_server_receiver_band_result    8.5    9.9
+    close connection
+    [Teardown]    teardown_cpe_wan    local
+
+Change_Wan_Traffic_Controller_to_disable_link
+    [Tags]    SDWANDEV-1081    long
+    [Setup]    set_nanjing_wan_10M
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    11    nanjing    12.6
+    ...    ${False}
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    -1    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    -1    10    10    100
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    9.0    nanjing    10.3
+    ...    ${False}
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    2048    100    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    2048    100    10    100
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    -1    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    -1    10    10    100
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    1.8    nanjing    2.3
+    ...    ${False}
+    [Teardown]    Print Iperf Server Log    wuhan
+
+Change_Wan_Traffic_Controller_No_Packet_Loss
+    [Tags]    SDWANDEV-1083
+    [Setup]    set_nanjing_wan_10M
+    Iperf3_loss_From_PC_With_Port    &{wuhan_pc}[inner_ip]    4M    nanjing    ${r_iperf_s_port}    15
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    3072    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    3072    10    10    100
+    sleep    5s
+    set_nanjing_wan_10M
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    1024    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    1
+    ...    1024    10    10    100
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    nanjing
+    [Teardown]    Print Iperf Server Log    wuhan
+
+Wan_Traffic_Controller_Flow_Packet_Static
+    [Tags]    SDWANDEV-1091
+    [Setup]    set_nanjing_wan_10M
+    ${link_ids}    ${links}=    Check End2End Links    nanjing    &{wuhan_cpe}[chassis_id]    8
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids}
+    Iperf3_loss_From_PC_With_Port    &{wuhan_pc}[inner_ip]    1M    nanjing    ${r_iperf_s_port}
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    nanjing
+    ${e_score_list}    ${e_p_list}    ${e_b_list}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids}
+    ${b_wan}    ${b_direct}=    Get_Better_Wan    ${links}    ${p_list}    ${e_p_list}
+    Iperf3_loss_From_PC_With_Port    &{wuhan_pc}[inner_ip]    1M    nanjing    ${r_iperf_s_port}
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    nanjing
+    ${f_score_list}    ${f_p_list}    ${f_b_list}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids}
+    ${b_wan2}    ${b_direct2}=    Get_Better_Wan    ${links}    ${e_p_list}    ${f_p_list}
+    should be equal    ${b_wan}    ${b_wan2}
+    [Teardown]    Print Iperf Server Log    wuhan
+
+Change_Wan_Traffic_Controller_to_disable_link_big_site
+    [Tags]    SDWANDEV-1137    long
+    [Setup]    set_nanjing_wan_50M
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    63    nanjing    70
+    ...    ${False}
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    -1    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    -1    10    10    100
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    45.0    nanjing    50
+    ...    ${False}
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    20480    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    20480    10    10    100
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    -1    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    -1    10    10    100
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    18.3    nanjing    20
+    ...    ${False}
+    [Teardown]    Print Iperf Server Log    wuhan
+
+Wan_PassThrough_Traffic_Controller_with_ratio_limited
+    [Tags]    SDWANDEV-1146    long
+    [Setup]
+    put_cpe_wan_bandwidth    &{local_cpe}[chassis_id]    &{local_cpe}[internet_if]    0    10240    50    10
+    ...    80
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    local    &{local_cpe}[internet_if]    ${0}
+    ...    10240    50    10    80
+    Comment    Iperf3_loss_From_PC_With_Port    &{salt-master}[ip]    2M    local    ${r_iperf_s_port}    10s
+    Iperf3_loss_From_PC_With_Port    &{dns_server}[ip]    2M    local    ${r_iperf_s_port}    9s
+    Iperf3_band_From_PC_With_Port    &{remote_pc}[inner_ip]    local    ${r_iperf_s_port}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    3.5    local
+    ...    7.5    ${False}
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    local
+    [Teardown]    teardown_cpe_wan    local
+
+Wan_Traffic_Reach_Uplink_with_ratio_limited
+    [Tags]    long    SDWANDEV-1151
+    [Setup]    set_nanjing_wan_10M    80
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    10.5    nanjing    12.2
+    ...    ${False}
+    [Teardown]    Print Iperf Server Log    wuhan
+
+Wan_Traffic_One_Port_Reach_Limited_rate
+    [Tags]    SDWANDEV-1147    long
+    [Setup]    set_nanjing_wan_10M    70
+    ${link_ids}    ${links}=    Check End2End Links    nanjing    &{wuhan_cpe}[chassis_id]    8
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids}
+    Iperf3_loss_From_PC_With_Port    &{wuhan_pc}[inner_ip]    8M    nanjing    ${r_iperf_s_port}    5s
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    nanjing
+    ${e_score_list}    ${e_p_list}    ${e_b_list}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids}
+    ${band_list}=    create list
+    : FOR    ${e_b}    IN    @{e_b_list}
+    \    ${i}=    get index from list    ${e_b_list}    ${e_b}
+    \    ${band}=    evaluate    (${e_b}-${b_list[${i}]})*8.0/(1024*1024*5)
+    \    append to list    ${band_list}    ${band}
+    ${ret}=    evaluate    sorted(${band_list})
+    should be true    ${ret[7]} <= 7.5
+    should be true    ${ret[7]} >= 5.5
+    should be true    ${ret[6]} >= 1
+    should be true    ${ret[6]} <= 2.1
+    [Teardown]    Print Iperf Server Log    wuhan
+
+Wan_Traffic_One_Port_Reach_vport_limit_rate
+    [Tags]    SDWANDEV-1149    long
+    [Setup]    set_nanjing_wan_50M    80
+    ${link_ids}    ${links}=    Check End2End Links    nanjing    &{wuhan_cpe}[chassis_id]    8
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids}
+    iperf3_loss_from_pc_with_parallel sessions    &{wuhan_pc}[inner_ip]    30M    nanjing    ${r_iperf_s_port}    512    2
+    wait until keyword succeeds    6s    1s    check_paralled_sessions_iperf_loss_result_in_pc    6    nanjing
+    ${e_score_list}    ${e_p_list}    ${e_b_list}=    Get_CPE_Link_Packets_Bytes_Score    nanjing    ${link_ids}
+    ${wan1_band_list}=    create list
+    ${wan2_band_list}=    create list
+    : FOR    ${e_b}    IN    @{e_b_list}
+    \    ${i}=    get index from list    ${e_b_list}    ${e_b}
+    \    ${band}=    evaluate    (${e_b}-${b_list[${i}]})*8.0/(1024*1024*5)
+    \    run keyword if    '${links[${i}]["local-wan-id"]}'=='1'    append to list    ${wan1_band_list}    ${band}
+    \    ...    ELSE    append to list    ${wan2_band_list}    ${band}
+    ${wan_bandwise_list}=    evaluate    sorted([sum(${wan1_band_list}),sum(${wan2_band_list})])
+    should be true    ${wan_bandwise_list[1]} <= 53
+    should be true    ${wan_bandwise_list[1]} >= 41
+    should be true    ${wan_bandwise_list[0]} \ >= 11
+    should be true    ${wan_bandwise_list[0]} \ <= 21
+    [Teardown]    Print Iperf Server Log    wuhan
+
+Small_site_bond_10M_limit
+    [Tags]    SDWANDEV-1140    long
+    [Setup]    set_nanjing_wan_10M
+    Set_CPE_Bond_Bandwidth    nanjing    &{wuhan_cpe}[chassis_id]    nanjing    wuhan    8192    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    wuhan    &{nanjing_cpe}[chassis_id]    nanjing    wuhan    8192    5
+    ...    10
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}    9
+    Wait Until Keyword Succeeds    16s    1s    check_iperf_band_result_in_pc    7.4    nanjing    8
+    ...    ${False}
+    [Teardown]    run keywords    Teardown_Bond
+    ...    AND    Print Iperf Server Log    wuhan
+
+Big_site_bond_50M_limit
+    [Tags]    SDWANDEV-1141    long
+    [Setup]    set_nanjing_wan_50M
+    Set_CPE_Bond_Bandwidth    nanjing    &{wuhan_cpe}[chassis_id]    nanjing    wuhan    53248    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    wuhan    &{nanjing_cpe}[chassis_id]    nanjing    wuhan    53248    5
+    ...    10
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}    10
+    Wait Until Keyword Succeeds    16s    1s    check_iperf_band_result_in_pc    49    nanjing    52
+    ...    ${False}
+    [Teardown]    run keywords    Teardown_Bond
+    ...    AND    Print Iperf Server Log    wuhan
+
+Small_site_global_15M_limit
+    [Tags]    long    SDWANDEV-1142
+    [Setup]    set_3_site_wan_limit    80
+    Set_Site_Bandwidth    local    ${suite_&{local_pc}[site_name]_site_id}    15360    5    10
+    Iperf3_loss_From_PC_With_Port    &{salt-master}[ip]    40M    chongqing    ${r_iperf_s_port}    10
+    Iperf3_loss_From_PC_With_Port    &{dns_server}[ip]    10M    local    ${r_iperf_s_port}    10
+    Iperf3_band_From_PC_With_Port    &{local_pc}[intranet_ip]    chongqing    ${l_iperf_s_port}    5    ${True}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    10s    1s    check_iperf_band_result_in_pc    4.2    chongqing
+    ...    15    ${False}
+    wait until keyword succeeds    7s    1s    check_iperf_loss_result_in_pc    ${loss}    chongqing
+    wait until keyword succeeds    3s    200ms    check_iperf_loss_result_in_pc    40    local
+    Iperf3_band_From_PC_With_Port    &{dns_server}[ip]    local    ${r_iperf_s_port}    5    ${True}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    14.2    local
+    ...    15.4    ${False}
+    [Teardown]    run keywords    Teardown_Bond
+    ...    AND    Teardown_Site
+    ...    AND    Print Iperf Server Log    local
+
+Site_Global_0M_Only_PassThrough
+    [Tags]    long    SDWANDEV-1143
+    [Setup]
+    put_cpe_wan_bandwidth    &{local_cpe}[chassis_id]    &{local_cpe}[internet_if]    0    10240    50    10
+    ...    80
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    local    &{local_cpe}[internet_if]    ${0}
+    ...    10240    50    10    80
+    Set_CPE_Bond_Bandwidth    local    &{remote_cpe}[chassis_id]    beijing    shanghai    10240    50
+    ...    10
+    Set_CPE_Bond_Bandwidth    remote    &{local_cpe}[chassis_id]    beijing    shanghai    10240    50
+    ...    10
+    Set_Site_Bandwidth    local    ${suite_&{local_pc}[site_name]_site_id}    -1    5    10
+    Iperf3_loss_From_PC_With_Port    &{salt-master}[ip]    4M    local    ${r_iperf_s_port}    5
+    wait until keyword succeeds    4x    20ms    Check_Ping_Packet_All_Loss    &{remote_pc}[inner_ip]
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    0.1    local
+    [Teardown]    run keywords    Teardown_Site
+    ...    AND    teardown_cpe_wan    local
+
+change_bandwidth_site_global_15M_limit
+    [Tags]    long    SDWANDEV-1144
+    [Setup]    set_3_site_wan_limit_gateway    80
+    Set_Site_Bandwidth    nanjing    ${suite_&{nanjing_pc}[site_name]_site_id}    15360    5    10
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}    6    ${False}
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    5    ${True}
+    ${band_guangzhou}=    run keyword and continue on failure    Wait Until Keyword Succeeds    10s    1s    check_iperf_band_result_in_pc    1
+    ...    guangzhou    16    ${False}
+    ${band_nanjing}=    check_iperf_band_result_in_pc    1    nanjing    16    ${False}
+    ${ret}=    evaluate    14<(${band_guangzhou}+${band_nanjing})<=19
+    should be true    ${ret}
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    5    ${True}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    14.8    guangzhou
+    ...    15.3    ${False}
+    [Teardown]    run keywords    Teardown_Bond
+    ...    AND    Teardown_Site_Gateway
+    ...    AND    Print Iperf Server Log    wuhan
+    ...    AND    Print Iperf Server Log    nanjing
+
+Wan_Traffic_Reach_Uplink_with_phy_port_limited
+    [Tags]    long    SDWANDEV-1139
+    [Setup]    set_nanjing_wan_10M    80
+    ${ip}=    get from list    &{nanjing_cpe}[wan_ips]    0
+    ${cid}=    speed_limit_switch_port    nanjing_switch    &{nanjing_switch}[nanjing_wan_if]    ${ip}    4096
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    17    nanjing    23
+    ...    ${False}
+    [Teardown]    run keywords    undo_speed_limit_switch_port    ${cid}    &{nanjing_switch}[nanjing_wan_if]    ${ip}
+    ...    AND    Print Iperf Server Log    wuhan
+
+Gateway_site_bond_15M_limit_vport_20M
+    [Tags]    long    SDWANDEV-1533
+    [Setup]    set_gateway_wan_20M
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    10
+    Wait Until Keyword Succeeds    14s    1s    check_iperf_band_result_in_pc    15.0    guangzhou    20
+    ...    ${False}
+    Set_CPE_Bond_Bandwidth    nanjing    &{guangzhou_cpe}[chassis_id]    nanjing    guangzhou    15375    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    guangzhou    &{nanjing_cpe}[chassis_id]    nanjing    guangzhou    15375    5
+    ...    10
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    10
+    Wait Until Keyword Succeeds    14s    1s    check_iperf_band_result_in_pc    14    guangzhou    15
+    ...    ${False}
+    [Teardown]    run keywords    Teardown_Bond
+    ...    AND    Print Iperf Server Log    nanjing
+
+Arm_Gateway_site_bond_20M_with_link_8ms_diff
+    [Tags]    SDWANDEV-1138
+    [Setup]    run keywords    Add_Delay_on_Gateway_Interface    changsha    &{changsha_cpe}[if_list]    &{changsha_cpe}[if_delay]
+    ...    AND    set_3_site_wan_limit_gateway
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    changsha    ${r_iperf_s_port}    10
+    Wait Until Keyword Succeeds    16s    1s    check_iperf_band_result_in_pc    17    changsha    20
+    ...    ${False}
+    Set_CPE_Bond_Bandwidth    nanjing    &{guangzhou_cpe}[chassis_id]    nanjing    guangzhou    15375    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    changsha    &{nanjing_cpe}[chassis_id]    nanjing    changsha    15375    5
+    ...    10
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    changsha    ${r_iperf_s_port}    9
+    Wait Until Keyword Succeeds    16s    1s    check_iperf_band_result_in_pc    14    changsha    15
+    ...    ${False}
+    [Teardown]    run keywords    clear_Delay_on_Gateway_Interface    changsha    &{changsha_cpe}[if_list]
+    ...    AND    Teardown_Bond
+    ...    AND    Print Iperf Server Log    nanjing
+
+Small_site_global_15M_limit_CLI
+    [Tags]    SDWANDEV-3960
+    [Setup]    set_3_site_wan_limit    80
+    Set_Site_Bandwidth    local    ${suite_&{local_pc}[site_name]_site_id}    15360    5    10
+    Iperf3_band_From_PC_With_Port    &{dns_server}[ip]    local    ${r_iperf_s_port}    5    ${True}
+    Wait Until Keyword Succeeds    6s    1s    check_cpe_Qos_Ts_Cli    local    global_input
+    [Teardown]    run keywords    Teardown_Bond
+    ...    AND    Teardown_Site
+    ...    AND    Print Iperf Server Log    local
+
+Small_site_bond_10M_limit_CLI
+    [Tags]    SDWANDEV-3958
+    [Setup]    set_nanjing_wan_10M
+    Set_CPE_Bond_Bandwidth    nanjing    &{wuhan_cpe}[chassis_id]    nanjing    wuhan    8192    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    wuhan    &{nanjing_cpe}[chassis_id]    nanjing    wuhan    8192    5
+    ...    10
+    Iperf3_band_From_PC_With_Port    &{wuhan_pc}[inner_ip]    nanjing    ${r_iperf_s_port}    10
+    Wait Until Keyword Succeeds    6s    1s    check_cpe_Qos_Ts_Cli    nanjing    bond_output    &{wuhan_cpe}[chassis_id]
+    [Teardown]    run keywords    Teardown_Bond
+    ...    AND    Print Iperf Server Log    wuhan
+
+vport_limit_cli
+    [Tags]    SDWANDEV-3959
+    [Setup]
+    put_cpe_wan_bandwidth    &{local_cpe}[chassis_id]    &{local_cpe}[internet_if]    0    10240    10    10
+    ...    100
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    local    &{local_cpe}[internet_if]    ${0}
+    ...    10240    10    10    100
+    Iperf3_band_From_PC_With_Port    &{dns_server}[ip]    local    ${r_iperf_s_port}    10
+    Wait Until Keyword Succeeds    6s    1s    check_cpe_Qos_Ts_Cli    local    vport    0
+    ...    &{local_cpe}[internet_if]    0
+    [Teardown]    teardown_cpe_wan    local
+
+*** Keywords ***
+get_flowtable_counters
+    [Arguments]    ${links}
+    ${links}=    get_e2e_links_from_controller    &{nanjing_cpe}[chassis_id]    &{wuhan_cpe}[chassis_id]
+    ${packet_list}    create list
+    : FOR    ${link}    IN    @{links}
+    \    ${init_send_packets}=    get_cpe_table1_des_link_des_dev_packets    &{nanjing_cpe}[chassis_id]    ${link['content'][0]['portNumber']}    &{wuhan_cpe}[chassis_id]
+    \    append to list    ${packet_list}    ${init_send_packets}
+    [Return]    ${packet_list}
+
+set_nanjing_wan_50M
+    [Arguments]    ${ratio}=100
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    51200    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    51200    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    1    20480    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${1}
+    ...    20480    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{wuhan_cpe}[chassis_id]    &{wuhan_cpe}[internet_if]    0    512000    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    wuhan    &{wuhan_cpe}[internet_if]    ${0}
+    ...    512000    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{wuhan_cpe}[chassis_id]    &{wuhan_cpe}[internet_if]    1    204800    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    wuhan    &{wuhan_cpe}[internet_if]    ${1}
+    ...    204800    10    10    ${ratio}
+
+Teardown_Bond
+    Set_CPE_Bond_Bandwidth    nanjing    &{wuhan_cpe}[chassis_id]    nanjing    wuhan    10240000    10
+    ...    10
+    Set_CPE_Bond_Bandwidth    wuhan    &{nanjing_cpe}[chassis_id]    nanjing    wuhan    10240000    10
+    ...    10
+    Set_CPE_Bond_Bandwidth    local    &{remote_cpe}[chassis_id]    beijing    shanghai    10240000    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    remote    &{local_cpe}[chassis_id]    beijing    shanghai    10240000    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    local    &{chongqing_cpe}[chassis_id]    beijing    chongqing    10240000    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    chongqing    &{local_cpe}[chassis_id]    beijing    chongqing    10240000    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    nanjing    &{guangzhou_cpe}[chassis_id]    nanjing    guangzhou    10240000    10
+    ...    10
+    Set_CPE_Bond_Bandwidth    guangzhou    &{nanjing_cpe}[chassis_id]    nanjing    guangzhou    10240000    10
+    ...    10
+    Set_CPE_Bond_Bandwidth    nanjing    &{guangzhou_cpe}[chassis_id]    nanjing    changsha    10240000    10
+    ...    10
+    Set_CPE_Bond_Bandwidth    changsha    &{nanjing_cpe}[chassis_id]    nanjing    changsha    10240000    10
+    ...    10
+
+set_3_site_wan_limit
+    [Arguments]    ${ratio}=100
+    put_cpe_wan_bandwidth    &{local_cpe}[chassis_id]    &{local_cpe}[internet_if]    0    102400    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    local    &{local_cpe}[internet_if]    ${0}
+    ...    102400    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{remote_cpe}[chassis_id]    &{remote_cpe}[internet_if]    0    10240    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    remote    &{remote_cpe}[internet_if]    ${0}
+    ...    10240    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{chongqing_cpe}[chassis_id]    &{chongqing_cpe}[internet_if]    0    51200    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    chongqing    &{chongqing_cpe}[internet_if]    ${0}
+    ...    51200    10    10    ${ratio}
+    Set_CPE_Bond_Bandwidth    local    &{remote_cpe}[chassis_id]    beijing    shanghai    10240    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    remote    &{local_cpe}[chassis_id]    beijing    shanghai    10240    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    local    &{chongqing_cpe}[chassis_id]    beijing    chongqing    40960    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    chongqing    &{local_cpe}[chassis_id]    beijing    chongqing    40960    5
+    ...    10
+
+Teardown_Site
+    Set_Site_Bandwidth    local    ${suite_&{local_pc}[site_name]_site_id}    1024000    5    10
+
+set_3_site_wan_limit_gateway
+    [Arguments]    ${ratio}=100
+    put_cpe_wan_bandwidth    &{nanjing_cpe}[chassis_id]    &{nanjing_cpe}[internet_if]    0    102400    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    nanjing    &{nanjing_cpe}[internet_if]    ${0}
+    ...    102400    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{wuhan_cpe}[chassis_id]    &{wuhan_cpe}[internet_if]    0    10240    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    wuhan    &{wuhan_cpe}[internet_if]    ${0}
+    ...    10240    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{guangzhou_cpe}[chassis_id]    &{guangzhou_cpe}[internet_if]    0    51200    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    guangzhou    &{guangzhou_cpe}[internet_if]    ${0}
+    ...    51200    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{changsha_cpe}[chassis_id]    &{changsha_cpe}[internet_if]    0    10240    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    changsha    &{changsha_cpe}[internet_if]    ${0}
+    ...    10240    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{changsha_cpe}[chassis_id]    &{changsha_cpe}[internet_if2]    0    10240    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    changsha    &{changsha_cpe}[internet_if2]    ${0}
+    ...    10240    10    10    ${ratio}
+    Set_CPE_Bond_Bandwidth    nanjing    &{wuhan_cpe}[chassis_id]    nanjing    wuhan    10240    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    wuhan    &{nanjing_cpe}[chassis_id]    nanjing    wuhan    10240    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    nanjing    &{guangzhou_cpe}[chassis_id]    nanjing    guangzhou    40960    5
+    ...    10
+    Set_CPE_Bond_Bandwidth    guangzhou    &{nanjing_cpe}[chassis_id]    nanjing    guangzhou    40960    5
+    ...    10
+
+Teardown_Site_Gateway
+    Set_Site_Bandwidth    nanjing    ${suite_&{nanjing_pc}[site_name]_site_id}    400000    5    10
+
+check_flow_score
+    [Arguments]    ${b_f_score_list}    ${b_f_num_list}    ${b_qos_list}    ${f_score_list}    ${f_num_list}    ${qos_list}
+    ...    ${b_score_list}
+    : FOR    ${qos}    IN    @{qos_list}
+    \    ${i}=    get index from list    ${qos_list}    ${qos}
+    \    run keyword if    '${qos}' == 'bad'    check_bad_link_flow_score    ${b_f_score_list}    ${b_f_num_list}    ${b_qos_list}
+    \    ...    ${f_score_list}    ${f_num_list}    ${qos_list}    ${b_score_list}    ${i}
+    \    ...    ELSE    check_good_link_flow_score    ${b_f_score_list}    ${b_f_num_list}    ${b_qos_list}
+    \    ...    ${f_score_list}    ${f_num_list}    ${qos_list}    ${b_score_list}    ${i}
+
+check_bad_link_flow_score
+    [Arguments]    ${b_f_score_list}    ${b_f_num_list}    ${b_qos_list}    ${f_score_list}    ${f_num_list}    ${qos_list}
+    ...    ${b_score_list}    ${i}
+    ${f_num}    get from list    ${f_num_list}    ${i}
+    ${b_f_num}    get from list    ${b_f_num_list}    ${i}
+    ${f_score}    get from list    ${f_score_list}    ${i}
+    ${b_score}    get from list    ${b_score_list}    ${i}
+    should be equal    ${f_num}    ${b_f_num}
+    should be equal    ${f_score}    0
+    should be true    ${b_score} > 220
+
+check_good_link_flow_score
+    [Arguments]    ${b_f_score_list}    ${b_f_num_list}    ${b_qos_list}    ${f_score_list}    ${f_num_list}    ${qos_list}
+    ...    ${b_score_list}    ${i}
+    ${f_num}    get from list    ${f_num_list}    ${i}
+    ${b_f_num}    get from list    ${b_f_num_list}    ${i}
+    ${f_score}    get from list    ${f_score_list}    ${i}
+    ${num}=    evaluate    ${f_num}-${b_f_num}
+    should be equal    ${f_score}    102400
+    should be true    ${num} >=2
+
+check_good_link_bandwidth
+    [Arguments]    ${f_score_list}    ${qos_list}    ${bandwidth}
+    : FOR    ${f_score}    IN    @{f_score_list}
+    \    ${i}=    get index from list    ${f_score_list}    ${f_score}
+    \    ${qos}=    get from list    ${qos_list}    ${i}
+    \    run keyword if    '${qos}'=='good'    should be true    ${f_score}>=5120
+
+Check_CPE_Qos_Ts_Cli
+    [Arguments]    ${cpe}    ${qos_type}    ${dst_id}=0    ${interface}=0    ${index}=0
+    ${pwd}=    ssh cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${g_input_fail}    ${g_output_fail}    ${b_ts}    ${vport_ts}=    get_cpe_qos_json_result    ${openwrt}    ${pwd}
+    run keyword if    '${qos_type}'=='global_input'    should be true    ${g_input_fail}>0
+    run keyword if    '${qos_type}'=='global_output'    should be true    ${g_output_fail}>0
+    run keyword if    '${qos_type}'=='bond_output'    check_bond_ts    ${b_ts}    ${dst_id}
+    run keyword if    '${qos_type}'=='vport'    check_vport_ts    ${vport_ts}    ${interface}    ${index}
+
+check_bond_ts
+    [Arguments]    ${b_ts}    ${dst_id}
+    ${dst_bond}=    evaluate    filter(lambda x:x['dst_id']==${dst_id},${b_ts})
+    should be true    ${dst_bond[0]['fail']}>0
+
+check_vport_ts
+    [Arguments]    ${vport_ts}    ${interface}    ${vport}
+    ${dst_vport}=    evaluate    filter(lambda x:x['name']=='${interface}' and x['index']==${vport},${vport_ts})
+    should be true    ${dst_vport[0]['rfail']}>0

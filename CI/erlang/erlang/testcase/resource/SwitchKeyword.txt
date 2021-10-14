@@ -1,0 +1,126 @@
+*** Settings ***
+Library           ../../libs/switch/SwitchKeyword.py
+
+*** Keywords ***
+Create_Switch_Connect
+    [Arguments]    ${switch}
+    ${c_id}=    run keyword if    '${switch}' == 'm_241'    connect_switch    &{mirror_switch_241}[type]    &{mirror_switch_241}[ip]    &{mirror_switch_241}[port]
+    ...    &{mirror_switch_241}[user]    &{mirror_switch_241}[password]
+    ...    ELSE IF    '${switch}' == 'm_242'    connect_switch    &{mirror_switch_242}[type]    &{mirror_switch_242}[ip]    &{mirror_switch_242}[port]
+    ...    &{mirror_switch_242}[user]    &{mirror_switch_242}[password]
+    ...    ELSE IF    '${switch}' == 'm_243'    connect_switch    &{mirror_switch_243}[type]    &{mirror_switch_243}[ip]    &{mirror_switch_243}[port]
+    ...    &{mirror_switch_243}[user]    &{mirror_switch_243}[password]
+    ...    ELSE IF    '${switch}' == 'm_240'    connect_switch    &{mirror_switch_240}[type]    &{mirror_switch_240}[ip]    &{mirror_switch_240}[port]
+    ...    &{mirror_switch_240}[user]    &{mirror_switch_240}[password]
+    ...    ELSE IF    '${switch}' == 'm_245'    connect_switch    &{mirror_switch_245}[type]    &{mirror_switch_245}[ip]    &{mirror_switch_245}[port]
+    ...    &{mirror_switch_245}[user]    &{mirror_switch_245}[password]
+    ...    ELSE IF    '${switch}' == 'i_dell'    connect_switch    &{internet_switch}[type]    &{internet_switch}[ip]    &{internet_switch}[port]
+    ...    &{internet_switch}[user]    &{internet_switch}[password]
+    ...    ELSE IF    '${switch}' == 'cq_routeos'    connect_switch    &{chongqing_switch}[type]    &{chongqing_switch}[jump_ip]    &{chongqing_switch}[port]
+    ...    &{chongqing_switch}[user]    &{chongqing_switch}[password]
+    ...    ELSE IF    '${switch}' == 'gz_routeos'    connect_switch    &{guangzhou_switch}[type]    &{guangzhou_switch}[ctl_ip]    &{guangzhou_switch}[port]
+    ...    &{guangzhou_switch}[user]    &{guangzhou_switch}[password]
+    [Return]    ${c_id}
+
+Close_All_Net_Connections
+    close_all_connect
+
+shutdown_switch_port
+    [Arguments]    ${switch}    ${port}
+    ${c_id}=    Create_Switch_Connect    ${switch}
+    shutdown_interface    ${c_id}    ${port}
+    [Return]    ${c_id}
+
+unshutdown_switch_port
+    [Arguments]    ${c_id}    ${port}
+    no_shutdown_interface    ${c_id}    ${port}
+    close_connect    ${c_id}
+
+Enable_CPE1_To_CPE2_OutBand_Connect
+    ${c_id}=    Create_Switch_Connect    i_dell
+    disable_interface_acl    ${c_id}    &{internet_switch}[local_cpe_if]    &{internet_switch}[local_cpe_acl]
+    disable_interface_acl    ${c_id}    &{internet_switch}[remote_cpe_if]    &{internet_switch}[remote_cpe_acl]
+    Close_All_Net_Connections
+
+Disable_CPE1_To_CPE2_OutBand_Connect
+    ${c_id}=    Create_Switch_Connect    i_dell
+    enable_interface_acl    ${c_id}    &{internet_switch}[local_cpe_if]    &{internet_switch}[local_cpe_acl]
+    enable_interface_acl    ${c_id}    &{internet_switch}[remote_cpe_if]    &{internet_switch}[remote_cpe_acl]
+    Close_All_Net_Connections
+
+config_switch_port_address
+    [Arguments]    ${switch}    ${port}    ${address}
+    ${c_id}=    Create_Switch_Connect    ${switch}
+    config_interface_address    ${c_id}    ${port}    ${address}
+    [Return]    ${c_id}
+
+Create_Switch_Telnet
+    [Arguments]    ${switch}
+    ${c_id}=    run keyword if    '${switch}' == 'nanjing_switch'    telnet_switch    &{nanjing_switch}[type]    &{nanjing_switch}[ip]    &{nanjing_switch}[user]
+    ...    &{nanjing_switch}[password]
+    ...    ELSE IF    '${switch}' == 'wuhan_switch'    telnet_switch    &{wuhan_switch}[type]    &{wuhan_switch}[ip]    &{wuhan_switch}[user]
+    ...    &{wuhan_switch}[password]
+    [Return]    ${c_id}
+
+Close_All_Net_Telnet_Connections
+    close_all_telnet_connect
+
+speed_limit_switch_port
+    [Arguments]    ${switch}    ${port}    ${ip}    ${speed}
+    ${c_id}=    Create_Switch_Telnet    ${switch}
+    port_speed_limit    ${c_id}    ${port}    ${speed}
+    [Return]    ${c_id}
+
+Ping_From_Switch
+    [Arguments]    ${switch}    ${peer_ip}
+    ${c_id}=    Create_Switch_Telnet    ${switch}
+    ${res}=    ping_from_gw    ${c_id}    ${peer_ip}
+    [Return]    ${res}
+
+undo_speed_limit_switch_port
+    [Arguments]    ${c_id}    ${port}    ${ip}
+    disable_port_speed_limit    ${c_id}    ${port}
+    Close_All_Net_Telnet_Connections
+
+traffic_filter_switch_port
+    [Arguments]    ${switch}    ${port}    ${acl_name}
+    ${c_id}=    Create_Switch_Telnet    ${switch}
+    port_traffic_filter    ${c_id}    ${port}    ${acl_name}
+    [Return]    ${c_id}
+
+undo_traffic_filter_switch_port
+    [Arguments]    ${c_id}    ${port}
+    disable_port_traffic_filter    ${c_id}    ${port}
+    Close_All_Net_Telnet_Connections
+
+packet_filter_switch_port
+    [Arguments]    ${switch}    ${port}    ${acl_name}
+    ${c_id}=    Create_Switch_Connect    ${switch}
+    port_packet_filter    ${c_id}    ${port}    ${acl_name}
+    [Return]    ${c_id}
+
+undo_packet_filter_switch_port
+    [Arguments]    ${c_id}    ${port}    ${acl}
+    disable_port_packet_filter    ${c_id}    ${port}    ${acl}
+    Close_All_Net_Connections
+
+Switch PPPoE Server
+    [Arguments]    ${router}
+    ${sess}=    Create_Switch_Connect    ${router}
+    ${res}=    print_pppoe_server    ${sess}
+    ${match}    ${dis_num}=    should match regexp    ${res}    ([0-9]) X service-name
+    ${en_num}=    set variable if    ${dis_num} == ${0}    ${1}    ${0}
+    disable pppoe server    ${sess}    ${en_num}
+    enable pppoe server    ${sess}    ${dis_num}
+    ${res}=    print_pppoe_server    ${sess}
+
+add_route_static_on_switch
+    [Arguments]    ${switch}    ${net}    ${mask}    ${if}    ${gw}
+    ${c_id}=    Create_Switch_Telnet    ${switch}
+    add_route_static    ${c_id}    ${net}    ${mask}    ${if}    ${gw}
+    [Return]    ${c_id}
+
+delete_route_static_on_switch
+    [Arguments]    ${switch}    ${net}    ${mask}    ${if}    ${gw}
+    ${c_id}=    Create_Switch_Telnet    ${switch}
+    delete_route_static    ${c_id}    ${net}    ${mask}    ${if}    ${gw}

@@ -1,0 +1,379 @@
+*** Settings ***
+Suite Setup       Setup
+Suite Teardown    close all connections
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+Resource          resource/SwitchKeyword.txt
+Resource          resource/ManagerKeyword.txt
+
+*** Variables ***
+${exec_time}      5
+${frag_sideway_log}    frag_1472_ping.log
+${frag_inborn_sideway_log}    frag_1500_ping.log
+
+*** Test Cases ***
+Internet Direct Connection Task
+    [Tags]    End2EndMeasure    SDWANDEV-515    long    SDWANDEV-3272    SDWANDEV-2344
+    [Setup]
+    ${remote_ip}=    get_ip_from_cnf_by_id_port    &{remote_cpe}[chassis_id]    &{remote_cpe}[internet_if]
+    ${cpe_task_ids_2remote}    ${cpe_task_2remote}=    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    local
+    ...    &{remote_cpe}[chassis_id]    2
+    # then there sould be the tunnel
+    ${tunnel_id}=    wait until keyword succeeds    10s    200ms    Check End2End Tunnels    local_cpe    ${remote_ip}
+    ...    1    1
+    # check measure task result
+    ${b_timestamp}=    Get Time    epoch
+    sleep    9s
+    ${timestamp}=    Get Time    epoch
+    : FOR    ${task}    IN    @{cpe_task_ids_2remote}
+    \    ${id}=    get index from list    ${cpe_task_ids_2remote}    ${task}
+    \    wait until keyword succeeds    11s    1s    check_ne_measure_task_count    &{local_cpe}[chassis_id]    ${task}
+    \    ...    ${b_timestamp}    ${timestamp}
+    \    ${delay_min}=    set variable if    ${cpe_task_2remote[${id}]['tunnel-number']} == ${tunnel_id[0]}    250000    50
+    \    ${delay_max}=    set variable if    ${cpe_task_2remote[${id}]['tunnel-number']} == ${tunnel_id[0]}    253000    1100
+    \    Check_NE_Measure_Task_Value    &{local_cpe}[chassis_id]    ${task}    ${b_timestamp}    ${delay_max}    ${delay_min}
+    \    ...    ${timestamp}
+    # then check the flowtable
+    [Teardown]
+
+Nat Direct Connection Task
+    [Tags]    SDWANDEV-965    long
+    ${chongqingi_ip}=    get_ip_from_cnf_by_id_port    &{chongqing_cpe}[chassis_id]    &{chongqing_cpe}[internet_if]
+    ${cpe_task_ids_2chongqing}    ${cpe_task_2chongqing}=    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    local
+    ...    &{chongqing_cpe}[chassis_id]    2
+    ${cpe_task_ids_2local}    ${cpe_task_2local}=    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    chongqing
+    ...    &{local_cpe}[chassis_id]    2
+    # check measure task result
+    ${task_list}=    create list    @{cpe_task_2chongqing}    @{cpe_task_2local}
+    ${timestamp}=    Get Time    epoch
+    ${b_timestamp}=    evaluate    ${timestamp}-9
+    : FOR    ${task}    IN    @{cpe_task_2chongqing}
+    \    wait until keyword succeeds    11s    1s    check_ne_measure_task_count    &{local_cpe}[chassis_id]    ${task["number"]}
+    \    ...    ${b_timestamp}    ${timestamp}
+    \    Check_NE_Measure_Task_Value    &{local_cpe}[chassis_id]    ${task["number"]}    ${b_timestamp}    3000    50
+    \    ...    ${timestamp}
+    # then there sould be the tunnel
+    ${tunnel_ids_ip}=    wait until keyword succeeds    10s    200ms    Check End2End Tunnels    local_cpe    ${chongqingi_ip}
+    ...    1    1
+    ${tunnel_ids_ip2}=    wait until keyword succeeds    10s    200ms    Check End2End Tunnels    chongqing_cpe    &{local_pc}[cpe_ip]
+    ...    1    1
+    # then check the natmap
+    Check_CPE_Natmap    local    &{chongqing_switch}[ip]
+
+Check_E2E_Bonds_Links_Serise
+    [Tags]    SDWANDEV-980
+    [Setup]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    local    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    local    &{remote_cpe}[chassis_id]    2
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    local    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    local    &{chongqing_cpe}[chassis_id]    2
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    chongqing    &{chongqing_cpe}[chassis_id]    &{local_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    chongqing    &{local_cpe}[chassis_id]    2
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    remote    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    remote    &{local_cpe}[chassis_id]    2
+    [Teardown]
+
+Check_E2E_Bonds_Links_Parallel_Gateway
+    [Tags]    SDWANDEV-1518    SanityCheck
+    [Setup]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    nanjing    &{nanjing_cpe}[chassis_id]    &{wuhan_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    nanjing    &{wuhan_cpe}[chassis_id]    8
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    wuhan    &{wuhan_cpe}[chassis_id]    &{nanjing_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    wuhan    &{nanjing_cpe}[chassis_id]    8
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    nanjing    &{nanjing_cpe}[chassis_id]    &{guangzhou_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    nanjing    &{wuhan_cpe}[chassis_id]    8
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    guangzhou    &{guangzhou_cpe}[chassis_id]    &{nanjing_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    [Teardown]
+
+Add_Delete_Union_Check_E2E_Bonds_Links
+    [Tags]    SDWANDEV-981
+    [Setup]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    local    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Bond    chongqing    &{chongqing_cpe}[chassis_id]    &{local_cpe}[chassis_id]
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{chongqing_pc}[site_name]'
+    delete_company_unions    ${suite_company_id}    ${suite_${c_name}_union_id}
+    Wait Until Keyword Succeeds    2s    500ms    Check End2End Bond Deleted    local    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    2s    500ms    Check End2End Links    local    &{chongqing_cpe}[chassis_id]    0
+    Wait Until Keyword Succeeds    2s    500ms    Check End2End Bond Deleted    chongqing    &{chongqing_cpe}[chassis_id]    &{local_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    2s    500ms    Check End2End Links    chongqing    &{local_cpe}[chassis_id]    0
+    [Teardown]    unions_bonds_links_teardown
+
+Get_CPE_Bond_Link_Score_Packet_From_Manager_Serise
+    [Tags]    SDWANDEV-1221    long    SDWANDEV-2489
+    Check_NE_LInk_INFO_From_Manager    local    remote    2
+    Wait Until Keyword Succeeds    60s    1s    Check_NE_LInk_INFO_From_Manager    local    chongqing    2
+
+Change_Nat_Wan_IP_Direct_Connection_Task
+    [Tags]    SDWANDEV-966    long
+    config_switch_port_address    cq_routeos    &{chongqing_switch}[wan_if]    &{chongqing_switch}[ip2]
+    wait until keyword succeeds    10s    200ms    Check_CPE_Natmap    local    &{chongqing_switch}[ip2]
+    ${chongqingi_ip}=    get_ip_from_cnf_by_id_port    &{chongqing_cpe}[chassis_id]    &{chongqing_cpe}[internet_if]
+    ${cpe_task_ids_2chongqing}    ${cpe_task_2chongqing}=    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    local
+    ...    &{chongqing_cpe}[chassis_id]    2
+    ${cpe_task_ids_2local}    ${cpe_task_2local}=    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    chongqing
+    ...    &{local_cpe}[chassis_id]    2
+    # check measure task result
+    ${task_list}=    create list    @{cpe_task_ids_2chongqing}    @{cpe_task_ids_2local}
+    ${timestamp}=    Get Time    epoch
+    sleep    5
+    ${e_timestamp}=    Get Time    epoch
+    : FOR    ${task}    IN    @{cpe_task_2chongqing}
+    \    wait until keyword succeeds    62s    1s    check_ne_measure_task_count    &{local_cpe}[chassis_id]    ${task["number"]}
+    \    ...    ${timestamp}    ${e_timestamp}
+    \    Comment    Check_NE_Measure_Task_Value    &{local_cpe}[chassis_id]    ${task["taskId"]}    ${timestamp}    3000
+    \    ...    -1
+    # then there sould be the tunnel
+    ${tunnel_ids_ip}=    wait until keyword succeeds    10s    200ms    Check End2End Tunnels    local_cpe    ${chongqingi_ip}
+    ...    1    1
+    ${tunnel_ids_ip2}=    wait until keyword succeeds    10s    200ms    Check End2End Tunnels    chongqing_cpe    &{local_pc}[cpe_ip]
+    ...    1    1
+    [Teardown]    Change_Nat_Wan_TearDown
+
+Change_Measure_Algo_Param_Score_Change
+    [Tags]    SDWANDEV-1043    long
+    ${remote_ip}=    get_ip_from_cnf_by_id_port    &{remote_cpe}[chassis_id]    &{remote_cpe}[internet_if]
+    ${link_ids}    ${links}=    Check End2End Links    local    &{remote_cpe}[chassis_id]    2
+    set test variable    ${link_ids_t}    ${link_ids}
+    ${cpe_tunnels}=    get_cpe_end2end_measure_tunnels    &{local_cpe}[ip]    ${remote_ip}    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    Wait Until Keyword Succeeds    10s    1s    check_link_score    ${link_ids}    ${links}    ${cpe_tunnels}
+    ...    288    250
+    set_cpe_measure_algo    local    1    100    100    70    20
+    ...    10    5
+    wait until keyword succeeds    11s    1s    check_link_score    ${link_ids}    ${links}    ${cpe_tunnels}
+    ...    26    2.0
+    set test variable    ${links_t}    ${links}
+    set test variable    ${cpe_tunnels_t}    ${cpe_tunnels}
+    [Teardown]    teardown_measure_algo
+
+Get_CPE_Link_Score_Packet_From_Manager_Parallel_Gateway
+    [Tags]    long    SDWANDEV-1222    SDNWANDEV-1519    SDWANDEV-2488
+    Check_NE_LInk_INFO_From_Manager    nanjing    wuhan    8
+    Check_NE_LInk_INFO_From_Manager    nanjing    guangzhou    8
+    Check_NE_LInk_INFO_From_Manager    guangzhou    nanjing    8
+
+Promethues Interface P2P Test
+    [Tags]    SDWANDEV-3051    long
+    : FOR    ${dst_ne}    IN    @{pop_list}
+    \    Nest For 2nd    ${dst_ne}    p2p
+
+Promethues Interface E2P Test
+    [Tags]    SDWANDEV-3052    long
+    [Setup]    enshare_cpe_master    nanchang
+    : FOR    ${dst_ne}    IN    @{pop_list}
+    \    E2P Nest For 2nd    ${dst_ne}
+
+Promethues Interface E2S Test
+    [Tags]    SDWANDEV-3053    long
+    E2S Nest For 2nd    Saas_Service1
+
+Promethues Interface E2E Test
+    [Tags]    SDWANDEV-3054    long
+    : FOR    ${cpe_pair}    IN    @{union_check_list}
+    \    run keyword if    ${cpe_pair} == ['wuhan','nanchang','parallel']   set test variable   ${flag_direct}   ${False}
+    ...   ELSE    set test variable   ${flag_direct}   ${True}
+    \    run keyword if    ${cpe_pair} != ['guangzhou','changsha','parallel']    E2E Nest For 2nd    ${cpe_pair}
+
+AuthServer_get_metrics
+    [Tags]    SDWANDEV-2346
+    run keyword and continue on failure    get_autherserver_statistics
+
+*** Keywords ***
+Check Flowtable Number
+    [Arguments]    ${dev_id}    ${tunnel_id}    ${lan_num}
+    ${flow_num}=    get_device_end2end_flow    ${dev_id}    ${tunnel_id}
+    should be equal    ${flow_num}    ${lan_num}
+
+unions_bonds_links_teardown
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{chongqing_pc}[site_name]'
+    create_company_union_set_suite_id    ${suite_company_id}    ${c_name}    ${False}    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{chongqing_pc}[site_name]_site_id}
+    wait until keyword succeeds    ${union_timer}    2s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{chongqing_pc}[site_name]_site_id}
+    ...    &{chongqing_cpe}[chassis_id]
+    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{chongqing_cpe}[chassis_id]    ${suite_&{chongqing_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    1    2    0
+    ${bond_number}=    Wait Until Keyword Succeeds    2s    500ms    Check End2End Bond    local    &{local_cpe}[chassis_id]
+    ...    &{chongqing_cpe}[chassis_id]
+
+Change_Nat_Wan_TearDown
+    config_switch_port_address    cq_routeos    &{chongqing_switch}[wan_if]    &{chongqing_switch}[ip]
+    Wait All netconf and of avaiable
+
+check_link_score
+    [Arguments]    ${link_ids}    ${links}    ${cpe_tunnels}    ${big}    ${small}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${link}    IN    @{links}
+    \    ${i}=    get index from list    ${links}    ${link}
+    \    ${s}=    get from list    ${score_list}    ${i}
+    \    run keyword if    ${link['tunnel-number']} == ${cpe_tunnels[0]['number']}    should be true    ${s}>=${small}
+    \    ...    ELSE    should be true    ${s}>=0.01
+    \    run keyword if    ${link['tunnel-number']} == ${cpe_tunnels[0]['number']}    should be true    ${s}<=${big}
+    \    ...    ELSE    should be true    ${s}<=2.5
+
+check_bond_Force_frag_num_send
+    [Arguments]    ${cpe}    ${r_site}    ${r_b}    ${t_b}    ${r_m}    ${t_m}
+    ...    ${r_f}    ${t_f}    ${r_n}    ${t_n}
+    ${e_r_b1}    ${e_t_b1}    ${e_r_m1}    ${e_t_m1}    ${e_r_f1}    ${e_t_f1}    ${e_r_n1}
+    ...    ${e_t_n1}    GET_NE_Bond_Frag_From_Manager    ${cpe}    ${r_site}
+    run keyword and continue on failure    should be true    ${e_t_f1} -${exec_time}*2 ==${t_f}
+    run keyword and continue on failure    should be true    ${e_r_f1}==${r_f}
+    run keyword and continue on failure    should be true    ${e_r_b1} -${exec_time}*2 ==${r_b}
+    run keyword and continue on failure    should be true    ${e_t_b1}==${t_b}
+    run keyword and continue on failure    should be true    ${e_r_m1}==${r_m}
+    run keyword and continue on failure    should be true    ${e_t_m1}==${t_m}
+    run keyword and continue on failure    should be true    ${e_t_n1}==${t_n}
+    run keyword and continue on failure    should be true    ${e_r_n1}==${r_n}
+
+check_bond_Force_frag_num_receive
+    [Arguments]    ${cpe}    ${r_site}    ${r_b}    ${t_b}    ${r_m}    ${t_m}
+    ...    ${r_f}    ${t_f}    ${r_n}    ${t_n}
+    ${e_r_b1}    ${e_t_b1}    ${e_r_m1}    ${e_t_m1}    ${e_r_f1}    ${e_t_f1}    ${e_r_n1}
+    ...    ${e_t_n1}    GET_NE_Bond_Frag_From_Manager    ${cpe}    ${r_site}
+    run keyword and continue on failure    should be true    ${e_r_f1} -${exec_time}*2 ==${r_f}
+    run keyword and continue on failure    should be true    ${e_t_f1}==${t_f}
+    run keyword and continue on failure    should be true    ${e_r_b1}==${r_b}
+    run keyword and continue on failure    should be true    ${e_t_b1}==${t_b}
+    run keyword and continue on failure    should be true    ${e_t_m1} -${exec_time}*2 ==${t_m}
+    run keyword and continue on failure    should be true    ${e_r_m1}==${r_m}
+    run keyword and continue on failure    should be true    ${e_t_n1}==${t_n}
+    run keyword and continue on failure    should be true    ${e_r_n1}==${r_n}
+
+check_bond_Manual_frag_num
+    [Arguments]    ${cpe}    ${r_site}    ${r_b}    ${t_b}    ${r_m}    ${t_m}
+    ...    ${r_f}    ${t_f}    ${r_n}    ${t_n}
+    ${e_r_b1}    ${e_t_b1}    ${e_r_m1}    ${e_t_m1}    ${e_r_f1}    ${e_t_f1}    ${e_r_n1}
+    ...    ${e_t_n1}    GET_NE_Bond_Frag_From_Manager    ${cpe}    ${r_site}
+    run keyword and continue on failure    should be true    ${e_t_m1} -${exec_time}*2 ==${t_m}
+    run keyword and continue on failure    should be true    ${e_r_m1}==${r_m}
+    run keyword and continue on failure    should be true    ${e_r_b1} -${exec_time}*3 ==${r_b}
+    run keyword and continue on failure    should be true    ${e_t_b1} -${exec_time}==${t_b}
+    run keyword and continue on failure    should be true    ${e_r_f1}==${r_f}
+    run keyword and continue on failure    should be true    ${e_t_f1}==${t_f}
+    run keyword and continue on failure    should be true    ${e_t_n1}==${t_n}
+    run keyword and continue on failure    should be true    ${e_r_n1}==${r_n}
+
+check_bond_None_frag_num
+    [Arguments]    ${cpe}    ${r_site}    ${r_b}    ${t_b}    ${r_m}    ${t_m}
+    ...    ${r_f}    ${t_f}    ${r_n}    ${t_n}
+    ${e_r_b1}    ${e_t_b1}    ${e_r_m1}    ${e_t_m1}    ${e_r_f1}    ${e_t_f1}    ${e_r_n1}
+    ...    ${e_t_n1}    GET_NE_Bond_Frag_From_Manager    ${cpe}    ${r_site}
+    run keyword and continue on failure    should be true    ${e_t_m1}==${t_m}
+    run keyword and continue on failure    should be true    ${e_r_m1}==${r_m}
+    run keyword and continue on failure    should be true    ${e_r_b1}==${r_b}
+    run keyword and continue on failure    should be true    ${e_t_b1}==${t_b}
+    run keyword and continue on failure    should be true    ${e_r_f1}==${r_f}
+    run keyword and continue on failure    should be true    ${e_t_f1}==${t_f}
+    run keyword and continue on failure    should be true    ${e_t_n1} -${exec_time}>=${t_n}
+    run keyword and continue on failure    should be true    ${e_r_n1} -${exec_time}>=${r_n}
+
+teardown_measure_algo
+    set_cpe_measure_algo    local    100    100    100    70    20
+    ...    10    5
+    wait until keyword succeeds    11s    1s    check_link_score    ${link_ids_t}    ${links_t}    ${cpe_tunnels_t}
+    ...    275    250
+
+Setup
+    ssh_pc    wuhan    sess_wuhan_pc
+    set suite variable    ${sess_wuhan_pc}    sess_wuhan_pc
+    ssh_pc    wuhan    sess_wuhan_pc_async
+    set suite variable    ${sess_wuhan_pc_async}    sess_wuhan_pc_async
+
+Nest For 2nd
+    [Arguments]    ${dst_ne}    ${type}
+    : FOR    ${src_ne}    IN    @{pop_list}
+    \    run keyword if    '${src_ne}' != '${dst_ne}'    Nest For 3rd    ${dst_ne}    ${src_ne}    ${type}
+
+Nest For 3rd
+    [Arguments]    ${dst_ne}    ${src_ne}    ${type}
+    ${l_dstip}=    create list    &{${dst_ne}_pop}[ip]    &{${dst_ne}_pop}[ip2]
+    : FOR    ${dstip}    IN    @{l_dstip}
+    \    run keyword if    '${type}' == 'p2p'    P2P Nest For 4th    ${dst_ne}    ${src_ne}    ${dstip}
+    \    run keyword if    '${type}' == 'e2p'    E2X Nest For 4th    ${dst_ne}    ${src_ne}    ${dstip}
+    \    ...    ${type}
+
+P2P Nest For 4th
+    [Arguments]    ${dst_ne}    ${src_ne}    ${dstip_or_dstwan}
+    ${d_id}=    Set Variable If    '${src_ne}' == 'local'    &{local_pop}[minion_id]    '${src_ne}' == 'remote'    &{remote_pop}[minion_id]
+    ${l_srcip}=    create list    &{${src_ne}_pop}[ip]    &{${src_ne}_pop}[ip2]
+    : FOR    ${srcip}    IN    @{l_srcip}
+    \    run keyword if    '${srcip}' != '${dstip_or_dstwan}'    Check P2P    ${d_id}    ${dst_ne}    ${src_ne}
+    \    ...    ${dstip_or_dstwan}    ${srcip}
+
+E2P Nest For 2nd
+    [Arguments]    ${dst_pop}
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    Nest For 3rd    ${dst_pop}    ${cpe}    e2p
+
+E2X Nest For 4th
+    [Arguments]    ${dst_ne}    ${src_ne}    ${dstip}    ${type}
+    ${d_id}=    get_cpe_minion_id    ${src_ne}
+    ${l_srcwan}=    evaluate    range(1, &{${src_ne}_cpe}[wan_num]+1)
+    : FOR    ${srcwan}    IN    @{l_srcwan}
+    \    run keyword if    '${type}' == 'e2p' and '${src_ne}' != 'guangzhou'    Check E2P    ${d_id}    ${dst_ne}    ${src_ne}
+    \    ...    ${dstip}    ${srcwan}
+    \    run keyword if    '${type}' == 'e2p' and '${src_ne}' == 'guangzhou'    E2P Wan Port Check    ${dst_ne}    ${src_ne}    ${dstip}
+    \    ...    ${srcwan}
+    \    run keyword if    '${type}' == 'e2s' and '${src_ne}' != 'guangzhou'    Check E2S    ${d_id}    ${dst_ne}    ${src_ne}
+    \    ...    ${dstip}    ${srcwan}
+    \    run keyword if    '${type}' == 'e2s' and '${src_ne}' == 'guangzhou'    E2S Wan Port Check    ${dst_ne}    ${src_ne}    ${dstip}
+    \    ...    ${srcwan}
+    \    run keyword if    '${type}' == 'e2e'    Check E2E    ${d_id}    ${dst_ne}    ${src_ne}
+    \    ...    ${dstip}    ${srcwan}
+
+E2S Nest For 2nd
+    [Arguments]    ${dst_saas}
+    : FOR    ${src_ne}    IN    @{saas_cpe_list}
+    \    ${dst_ip}=    set variable    &{${dst_saas}}[ip]
+    \    E2X Nest For 4th    ${dst_saas}    ${src_ne}    ${dst_ip}    e2s
+
+E2E Nest For 2nd
+    [Arguments]    ${cpe_pair}
+    E2E Nest For 3rd    @{cpe_pair}[0]    @{cpe_pair}[1]
+    E2E Nest For 3rd    @{cpe_pair}[1]    @{cpe_pair}[0]
+
+E2E Nest For 3rd
+    [Arguments]    ${dst_ne}    ${src_ne}
+    ${l_dstwan}=    evaluate    range(1, &{${dst_ne}_cpe}[wan_num]+1)
+    : FOR    ${dstwan}    IN    @{l_dstwan}
+    \    E2X Nest For 4th    ${dst_ne}    ${src_ne}    ${dstwan}    e2e
+
+Check P2P
+    [Arguments]    ${device_id}    ${dst_ne}    ${src_ne}    ${dst_ip}    ${src_ip}
+    ${l_labels}=    create list    dst_devid    src_devid    dst_ip    src_ip
+    ${v_list}=    create list    &{${dst_ne}_pop}[ne_id]    &{${src_ne}_pop}[ne_id]    ${dst_ip}    ${src_ip}
+    : FOR    ${item}    IN    delay_second    loss_ratio    jitter_second
+    \    run keyword and continue on failure    get_ne_metric_value    ${device_id}    collectd_P2P_measure_results_${item}    ${l_labels}    ${v_list}
+
+E2P Wan Port Check
+    [Arguments]    ${dst_pop}    ${src_ne}    ${dst_ip}    ${src_wanid}
+    ${d_id}=    get_cpe_minion_id    ${src_ne}
+    run keyword if    '&{${src_ne}_cpe}[4G_wan_id]' != '${src_wanid}'    Check E2P    ${d_id}    ${dst_pop}    ${src_ne}    ${dst_ip}
+    ...    ${src_wanid}
+
+Check E2P
+    [Arguments]    ${device_id}    ${dst_pop}    ${src_ne}    ${dst_ip}    ${src_wanid}
+    ${l_labels}=    create list    dst_devid    src_devid    dst_ip    local_wanid
+    ${v_list}=    create list    &{${dst_pop}_pop}[ne_id]    &{${src_ne}_cpe}[chassis_id]    ${dst_ip}    ${src_wanid}
+    : FOR    ${item}    IN    delay_second    loss_ratio    jitter_second
+    \    run keyword and continue on failure    get_ne_metric_value    ${device_id}    collectd_E2P_measure_results_${item}    ${l_labels}    ${v_list}
+
+E2S Wan Port Check
+    [Arguments]    ${dst_saas}    ${src_ne}    ${dst_ip}    ${src_wanid}
+    ${d_id}=    get_cpe_minion_id    ${src_ne}
+    run keyword if    '&{${src_ne}_cpe}[4G_wan_id]' != '${src_wanid}'    Check E2S    ${d_id}    ${dst_saas}    ${src_ne}    ${dst_ip}
+    ...    ${src_wanid}
+
+Check E2S
+    [Arguments]    ${device_id}    ${dst_saas}    ${src_ne}    ${dst_ip}    ${src_wanid}
+    ${l_labels}=    create list    dst_devid    src_devid    dst_ip    local_wanid    direct
+    ${v_list}=    create list    &{${dst_saas}}[ne_id]    &{${src_ne}_cpe}[chassis_id]    ${dst_ip}    ${src_wanid}    true
+    : FOR    ${item}    IN    delay_second    loss_ratio    jitter_second
+    \    run keyword and continue on failure    get_ne_metric_value    ${device_id}    collectd_E2S_measure_results_${item}    ${l_labels}    ${v_list}
+
+Check E2E
+    [Arguments]    ${device_id}    ${dst_ne}    ${src_ne}    ${dst_wanid}    ${src_wanid}
+    ${l_labels}=    create list    dst_devid    src_devid    remote_wanid    local_wanid    direct
+    ${v_list_true}=    create list    &{${dst_ne}_cpe}[chassis_id]    &{${src_ne}_cpe}[chassis_id]    ${dst_wanid}    ${src_wanid}    true
+    ${v_list_false}=    create list    &{${dst_ne}_cpe}[chassis_id]    &{${src_ne}_cpe}[chassis_id]    ${dst_wanid}    ${src_wanid}    false
+    : FOR    ${item}    IN    delay_second    loss_ratio    jitter_second
+    \    run keyword if   '${flag_direct}' == '${True}'    run keyword and continue on failure    get_ne_metric_value    ${device_id}    collectd_E2E_measure_results_${item}    ${l_labels}    ${v_list_true}
+    \    run keyword and continue on failure    get_ne_metric_value    ${device_id}    collectd_E2E_measure_results_${item}    ${l_labels}    ${v_list_false}

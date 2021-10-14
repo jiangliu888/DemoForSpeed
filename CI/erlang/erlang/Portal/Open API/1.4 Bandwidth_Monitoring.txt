@@ -1,0 +1,92 @@
+*** Settings ***
+Documentation     GET /api/v1/channel/metrics/bandwidth?deviceId=,&interfaceType=,&startTime=&endTime=
+...
+...               必参：deviceId, startTime;
+Suite Setup
+Suite Teardown
+Library           ../../libs/portal/RequestApi.py
+Library           Collections
+Library           ../../libs/portal/JsonValidate.py
+Library           Dialogs
+
+*** Test Cases ***
+1. authority limitation
+    [Tags]    SDWANDEV-4542
+    [Setup]
+    ${code}    ${res}    get bandwidth info    ${test_data}[account5_1]    ${test_data}[psd5_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN&startTime=1624432213    #公司账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN&startTime=1624432213    #正确渠道账户查询公司1
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_3]&interfaceType=WAN&startTime=1624424653    #正确渠道账户查询公司2
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_2]    ${test_data}[psd6_2]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN&startTime=1624432213    #公司(属渠道)账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+    ${code}    ${res}    get bandwidth info    ${test_data}[account8_1]    ${test_data}[psd8_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN&startTime=1624432213    #其他渠道账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+    [Teardown]
+
+2. params verify
+    [Tags]    SDWANDEV-4543
+    #必参校验
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    \    #不携带任何参数
+    should be equal as integers    ${code}    404
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]    #携带deviceId
+    should be equal as integers    ${code}    404    #期待400，待修改
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #携带deviceId&startTime
+    should be equal as integers    ${code}    200
+    check response format    ${res}    bandwidth info
+    #异常参数校验
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN,LAN&startTime=1624432213&xxx=11    #携带未知参数
+    should be equal as integers    ${code}    200    #期待400，待修改
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=abcd&interfaceType=WAN&startTime=1624432213    #错误deviceId
+    should be equal as integers    ${code}    404
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&interfaceType=abc&startTime=1624432213    #错误interfaceType
+    should be equal as integers    ${code}    200
+    should be empty    ${res}[data]
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN&startTime=1624432213&endTime=1624432210    #endtime<starttime
+    should be equal as integers    ${code}    500
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN&startTime=1624432213&endTime=1624432213    #endtime=starttime
+    should be equal as integers    ${code}    200
+    check response format    ${res}    bandwidth info
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN,LAN&startTime=1624432213&endTime=    #endTime空值传入
+    should be equal as integers    ${code}    200
+    check response format    ${res}    bandwidth info
+    #interfaceType带多参数
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&interfaceType=WAN,LAN&startTime=1624432213&endTime=1624461613
+    should be equal as integers    ${code}    200
+    check response format    ${res}    bandwidth info
+    #deviceId带多参数
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&interfaceType=WAN,LAN&startTime=1624432213&endTime=1624461613
+    should be equal as integers    ${code}    200
+    check response format    ${res}    bandwidth info
+
+3. sampling number
+    [Tags]    SDWANDEV-4544
+    #采样点数量校验
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&interfaceType=WAN,LAN&startTime=1624432213&endTime=1624432813    #10分钟
+    should be equal as integers    ${code}    200
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_1]    WAN    6
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_1]    LAN    6
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_2]    WAN    6
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_2]    LAN    6
+    should be equal    ${res}    ${bandwidth_data}    \    \    \    #数据值校验
+    ${code}    ${res}    get bandwidth info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&interfaceType=WAN,LAN&startTime=1624432213&endTime=1624437613    #1.5小时
+    should be equal as integers    ${code}    200
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_1]    WAN    46
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_1]    LAN    46
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_2]    WAN    46
+    bandwidth sampling check    ${res}    ${test_data}[deviceId_2]    LAN    46
+
+*** Keywords ***
+bandwidth sampling check
+    [Arguments]    ${res}    ${device}    ${interface}    ${expect_num}
+    @{res}    convert to list    ${res}[data]
+    ${expect_num}    evaluate    ${expect_num}
+    : FOR    ${i}    IN    @{res}
+    \    ${num}=    run keyword if    '${i}[deviceId]'=='${device}' and '${i}[interfaceType]' =='${interface}'    get length    ${i}[values]
+    \    run keyword if    '${num}' != 'None'    should be equal    ${num}    ${expect_num}

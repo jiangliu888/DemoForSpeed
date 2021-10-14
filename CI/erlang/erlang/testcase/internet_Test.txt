@@ -1,0 +1,1925 @@
+*** Settings ***
+Suite Setup       internet_Setup
+Suite Teardown
+Library           ../libs/uranus/UranusKeyword.py
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+Library           ../libs/manager/ManagerKeyword.py
+Library           ../libs/prism/PrismKeyword.py
+Resource          resource/ManagerKeyword.txt
+Resource          resource/PingKeyword.txt
+Library           ../libs/configCenter/ConsulKeyword.py
+Resource          resource/SaltKeyword.txt
+
+*** Variables ***
+${flow_ttl}       5
+${r_iperf_s_port}    5201
+${domain_wait}    11s
+${exec_time}      10
+${remote_code}    1074003988
+${restart_timer}    10s
+${japan_code}     134742016
+${singapore_code}    403439616
+
+*** Test Cases ***
+Reload_CPE_IPIP
+    [Tags]    SDWANDEV-1673    SDWANDEV-1467    SDWANDEV-1627
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Salt reload ip2pop    &{${cpe}_cpe}[minion_id]
+
+Icmp_Speed_Up
+    [Tags]    SDWANDEV-231    SDWANDEV-1873    SDWANDEV-3244
+    [Setup]
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}    Get CPE Saas Metrics    &{local_cpe}[minion_id]
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{local_cpe}[minion_id]    .*.sh.wsdashi.com
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    .*.sh.wsdashi.com    &{default_dns}[ip]
+    ...    ${0}
+    Check_Nat_Ping_OK    &{remote_pop}[ip]    local
+    wait until keyword succeeds    21    200ms    Check Saas Metrics    &{local_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    10    10
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{local_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    10    10    .*.sh.wsdashi.com
+    [Teardown]
+
+UDP_Speed_UP_With_DNS_IP
+    [Tags]    SDWANDEV-393
+    [Setup]
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    dig samba.systemtest.com
+    Write    sudo nping --udp -c 10 --delay 1s samba.systemtest.com -g 1000 -p 22 \ > nping_u.log &
+    Start_Tcpdump_With_From_Salt_Master_Internet_Host    &{salt-master}[internet_phy_port]    tcpdump.log    udp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep UDP \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    [Teardown]
+
+Agent UDP Speed UP
+    [Tags]    SDWANDEV-3295
+    ${cpe}=    set variable    local
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}=    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]    samba.systemtest.com
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]    ~$    sess_local_pc
+    Start Tcpdump    &{local_pc}[inner_nic]    agentUDP3295.pcap    &{local_pc}[passwd]
+    ssh_cpe    local
+    Write Sudo Cmd    aiwan-ctl --pcapStart &{local_cpe}[internet_if] --pcapSeconds 20    &{local_cpe}[passwd]
+    netcat_udp_test    ${cpe}
+    wait until keyword succeeds    22    200ms    Check Saas Metrics    &{${cpe}_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    1    1
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{${cpe}_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    1    1    samba.systemtest.com
+    [Teardown]    run keywords    switch connection    sess_local_pc
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{local_pc}[passwd]
+    ...    AND    close connection
+
+TCP_Speed_UP_Without_DNS_IP
+    [Tags]    SDWANDEV-397    SDWANDEV-2051    SDWANDEV-3296
+    ssh_cpe    local
+    ssh_write_command_and_check_string    dig &{internet_host}[saas_dns]    &{internet_host}[ip]
+    close connection
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}    Get CPE Saas Metrics    &{local_cpe}[minion_id]
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{local_cpe}[minion_id]    &{internet_host}[dns_pattern]
+    ssh_cpe    local
+    Write Sudo Cmd    aiwan-ctl --pcapStart &{local_cpe}[internet_if] --pcapSeconds 40    &{local_cpe}[passwd]
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]    ~$    sess_local_pc
+    Start Tcpdump    &{local_pc}[inner_nic]    agentTCP3296.pcap    &{local_pc}[passwd]
+    Write    dig &{internet_host}[saas_dns]
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${local_code}    ${True}    &{local_cpe}[chassis_id]
+    Write    sudo nping --tcp-connect -c 20 --delay 1s \ &{internet_host}[saas_dns2] \ -p 22 > nping_u_3296.log &
+    Write    sudo nping --tcp-connect -c 20 --delay 1s \ &{internet_host}[saas_dns] \ -p 22 > nping_u_3296.log &
+    Start_Tcpdump_With_From_Internet_Host    &{internet_host}[nat_phy_port]    tcpdump.log    tcp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep win \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    close connection
+    wait until keyword succeeds    30    200ms    Check Saas Metrics    &{local_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    80    160
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{local_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    80    160    &{internet_host}[dns_pattern]    ${False}
+    [Teardown]    run keywords    switch connection    sess_local_pc
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{local_pc}[passwd]
+    ...    AND    close connection
+
+IP_Speed_UP
+    [Tags]    SDWANDEV-1033    SDWANDEV-2486
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}    Get CPE Saas Metrics    &{local_cpe}[minion_id]
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    sudo nping --tcp-connect -c 10 --delay 0.5s &{dns_server}[ip] -p 22 > nping_u.log &
+    Start_Tcpdump_With_From_Dns_Server    &{dns_server}[phy_port]    tcpdump.log    tcp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep win \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    wait until keyword succeeds    25s    1s    Check Saas Metrics    &{local_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    10    40
+    [Teardown]
+
+Combine_UDP_Speed_UP_With_DNS_IP
+    [Tags]    SDWANDEV-393    SDWANDEV-1626
+    [Setup]    Apply Default Saas SPI To CPEs    zhenjiang    ${suite_saas_tag_id}
+    ${nanjing_c}=    ssh login    &{nanjing_pc}[ctrl_ip]    &{nanjing_pc}[ctrl_port]    &{nanjing_pc}[user]    &{nanjing_pc}[passwd]
+    Write Sudo Cmd    dig samba.systemtest.com    &{nanjing_pc}[passwd]
+    Check_CPE_Dns_Proxy_Stats    zhenjiang    samba.systemtest.com    &{salt-master}[internet_ip]    ${CM_local_code}
+    switch connection    ${nanjing_c}
+    Write Sudo Cmd    nping --udp -c 10 --delay 1s samba.systemtest.com -g 1000 -p 22 >nping_u.log &    &{nanjing_pc}[passwd]
+    Start_Tcpdump_With_From_Salt_Master_Internet_Host    &{salt-master}[internet_phy_port]    tcpdump.log    udp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep UDP \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    [Teardown]    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{zhenjiang_pc}[site_name]_site_id}    ${suite_saas_tag_id}
+
+Check_DNS_Request_Speed_UP
+    [Tags]    SDWANDEV-3029    debug
+    [Setup]
+    Start_Tcpdump_dns_With_From_Dns_Server    &{dns_server}[phy_port]    tcpdump.pcap    &{remote_pop}[ip]    dns_s_alias
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    ${rc}    ${stderr}=    execute command    dig samba.systemtest.com    return_stderr=True
+    should contain    ${rc}    &{salt-master}[internet_ip]
+    should be empty    ${stderr}
+    switch connection    dns_s_alias
+    read until    2 packets captured
+    Write Sudo Cmd    pkill -9 tcpdump    &{dns_server}[passwd]
+    ${rc}    ${stderr}=    execute command    tcpdump -r \ tcpdump.pcap    return_stderr=True
+    ${rc}    ${stderr}=    execute command    tcpdump -r \ tcpdump.pcap|grep IP|wc -l    return_stderr=True
+    Should Be True    ${rc}==2
+    should be empty    ${stderr}
+    [Teardown]
+
+GW_UDP_Speed_UP_With_DNS_IP
+    [Tags]    SDWANDEV-1669    SDWANDEV-1667
+    [Setup]
+    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    dig samba.systemtest.com    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    sudo nping --udp -c 10 --delay 1s samba.systemtest.com -g 1000 -p 22 \ > nping_u.log &    &{guangzhou_pc}[passwd]
+    Start_Tcpdump_With_From_Salt_Master_Internet_Host    &{salt-master}[internet_phy_port]    tcpdump.log    udp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep UDP \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    [Teardown]
+
+Gw_IP_Speed_UP
+    [Tags]    SDWANDEV-1672
+    [Setup]    Valid Ping Gateway Suite Setup    saas_ip_4gtcpdump.pcap    saas_ip_wan_tcpdump.pcap    saas_ip_lan_tcpdump.pcap
+    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    ps    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    nping --udp -c 10 --delay 1s &{dns_server}[ip] \ --data-length 512 -p 22 \ > nping_u.log &    &{guangzhou_pc}[passwd]
+    Start_Tcpdump_With_From_Dns_Server    &{dns_server}[phy_port]    tcpdump.log    udp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep UDP \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    [Teardown]    run keywords    Suite_stop_tcpdump_parallele
+    ...    AND    close all connections
+
+Gw_Icmp_Speed_Up
+    [Tags]    SDWANDEV-1668
+    [Setup]    open_cpe_debug_mode    guangzhou
+    ssh_pc    guangzhou
+    Write Sudo Cmd    dig &{internet_host}[saas_dns]    &{guangzhou_pc}[passwd]
+    ssh cpe    guangzhou
+    Wait Until Keyword Succeeds    2s    200ms    gw_cpe_ip_in_ipset    &{internet_host}[ip]
+    Check_Nat_Ping_OK    &{remote_pop}[ip]    guangzhou
+    [Teardown]    close_cpe_debug_mode    guangzhou
+
+Collectd Saas Icmp Speed Up
+    [Tags]    SDWANDEV-3245
+    ${cpe}=    set variable    @{opwrt_list}[1]
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]    samba.systemtest.com
+    ssh_pc    ${cpe}
+    Write Sudo Cmd    dig samba.systemtest.com    &{${cpe}_pc}[passwd]
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}    ${cpe}
+    Write Sudo Cmd    ping -M do -s 1360 samba.systemtest.com -c ${exec_time} -i 0.2 > ping_p.log    &{${cpe}_pc}[passwd]
+    wait until keyword succeeds    51    200ms    Check Saas Metrics    &{${cpe}_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    10    10
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{${cpe}_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    10    10    samba.systemtest.com
+
+Gw_TCP_Speed_UP_Without_DNS_IP
+    [Tags]    SDWANDEV-1670    SDWANDEV-1947    SDWANDEV-2487
+    [Setup]    open_cpe_debug_mode    guangzhou
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}=    Get CPE Saas Metrics    &{guangzhou_cpe}[minion_id]
+    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    dig &{internet_host}[saas_dns]    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    nping --tcp-connect -c 8 --delay 1s \ &{internet_host}[saas_dns] \ -p 22 > nping_u.log &    &{guangzhou_pc}[passwd]
+    Start_Tcpdump_With_From_Internet_Host    &{internet_host}[nat_phy_port]    tcpdump.log    tcp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep win \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    wait until keyword succeeds    22s    1s    Check Saas Metrics    &{guangzhou_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    8    8
+    [Teardown]    close_cpe_debug_mode    guangzhou
+
+Collectd UDP Speed UP
+    [Tags]    SDWANDEV-3297
+    ${cpe}=    set variable    @{opwrt_list}[1]
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}=    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]    samba.systemtest.com
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    Start Tcpdump    &{${cpe}_cpe}[intranet_if]    udpSpeedup3297.pcap    &{${cpe}_cpe}[passwd]
+    netcat_udp_test    ${cpe}
+    wait until keyword succeeds    22    200ms    Check Saas Metrics    &{${cpe}_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    1    1
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{${cpe}_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    1    1    samba.systemtest.com
+    [Teardown]    run keywords    switch connection    sess_${cpe}_cpe
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{${cpe}_cpe}[passwd]
+    ...    AND    close connection
+
+Collectd TCP Speed UP
+    [Tags]    SDWANDEV-3298    SDWANDEV-3400
+    ${cpe}=    set variable    @{opwrt_list}[1]
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}=    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]    samba.systemtest.com
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    Start Tcpdump    &{${cpe}_cpe}[intranet_if]    udpSpeedup3298.pcap    &{${cpe}_cpe}[passwd]
+    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ${res}=    Write Sudo Cmd    dig samba.systemtest.com    &{${cpe}_pc}[passwd]
+    should contain    ${res}    100.64.
+    Write Sudo Cmd    nping --tcp-connect -c 8 --delay 1s samba.systemtest.com -p 22 > nping_u.log    &{${cpe}_pc}[passwd]
+    wait until keyword succeeds    40    200ms    Check Saas Metrics    &{${cpe}_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    16    32
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{${cpe}_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    16    32    samba.systemtest.com
+    [Teardown]    run keywords    switch connection    sess_${cpe}_cpe
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{${cpe}_cpe}[passwd]
+    ...    AND    close connection
+
+site_saas_speed_limit
+    [Tags]    SDWANDEV-1789
+    [Setup]    init_iperf_server
+    Set_Site_Bandwidth    local    ${suite_&{local_pc}[site_name]_site_id}    5120    5    10
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    dig &{internet_host}[saas_dns]
+    Iperf3_band_From_PC_With_Port    &{internet_host}[saas_dns]    local    ${r_iperf_s_port}    5    ${True}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    6s    1s    check_iperf_band_result_in_pc    4.8    local
+    ...    5.2    ${False}
+    Iperf3_band_From_PC_With_Port    &{internet_host}[saas_dns]    local    ${r_iperf_s_port}    5    ${False}
+    run keyword and continue on failure    Wait Until Keyword Succeeds    8s    1s    check_iperf_band_result_in_pc    4.8    local
+    ...    5.5    ${False}
+    [Teardown]    run keywords    teardown_iperf_server
+    ...    AND    Teardown_beijing_Site
+
+GW_Dig_Dns_less_3ms
+    [Tags]    SDWANDEV-1666
+    [Setup]
+    ssh_pc    guangzhou
+    ${rc}    ${stderr}=    execute command    dig &{internet_host}[saas_dns]>/tmp/dns    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep msec /tmp/dns |awk -F " " '{print $(NF-1)}'    return_stderr=True
+    Should Be True    ${rc}<=20
+    should be empty    ${stderr}
+    [Teardown]    close connection
+
+GW_Dig_Office_Dns
+    [Tags]    SDWANDEV-1665
+    [Setup]
+    dns_server_nanjing    start
+    ssh_pc    guangzhou
+    ${rc}    ${stderr}=    execute command    dig ns1.test-company.com    return_stderr=True
+    should contain    ${rc}    &{nanjing_pc}[inner_ip]
+    should be empty    ${stderr}
+    close connection
+    [Teardown]    dns_server_nanjing    stop
+
+Gw_Udp_Speed_UP_Check_SAAS_TTL
+    [Tags]    SDWANDEV-1809
+    ssh_cpe    guangzhou
+    gw_cpe_ip_in_ipset    &{dns_server}[ip]    dst_ip_set
+    write    tcpdump -i eth0 -n -X -c 3 udp dst portrange &{local_pop}[tunnel_port]-&{Saas_Service1}[tunnel_port] and greater 500 > /tmp/ttl.txt &
+    close connection
+    ssh_pc    guangzhou
+    Write Sudo Cmd    ps    &{guangzhou_cpe}[passwd]
+    Write Sudo Cmd    nping --udp -c 5 --delay 1s &{dns_server}[ip] -p 22 --data-length 512 > nping_u.log    &{guangzhou_pc}[passwd]
+    ${rc}    ${stderr}=    execute command    cat nping_u.log    return_stderr=True
+    should be empty    ${stderr}
+    close connection
+    ssh_cpe    guangzhou
+    ${rc}    ${stderr}=    execute command    cat /tmp/ttl.txt    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep '0x0010' /tmp/ttl.txt|grep '08 \ '|wc -l    return_stderr=True
+    Should Be True    ${rc}>=1
+    should be empty    ${stderr}
+    [Teardown]
+
+CPE_And_PC_Can_Speed_Aliyun_DNS
+    [Tags]    SDWANDEV-2051
+    ssh_pc    local
+    ssh_write_command_and_check_string    dig &{aliyuncs_server}[log_server_dns]    &{aliyuncs_server}[log_server_ip]
+    ssh_write_command_and_check_string    ping &{aliyuncs_server}[log_server_dns] -c 3 -i 0.3    0% packet loss
+    close connection
+    ssh_cpe    local
+    ssh_write_command_and_check_string    dig &{aliyuncs_server}[log_server_dns]    &{aliyuncs_server}[log_server_ip]
+    close connection
+    [Teardown]
+
+Series_CPE_And_PC_All_Can_Dig_Aliyun_DNS
+    [Tags]    SDWANDEV-2050
+    [Setup]    Init OSSSimulator
+    ssh_cpe    local
+    ssh_write_command_and_check_string    dig &{aliyuncs_server}[log_server_dns]    &{aliyuncs_server}[log_server_ip]
+    ssh_write_command_and_check_string    curl --header "Authorization: OSS qn6qrrqxo2oawuk53otfjbyc:UNQDb7GapEgJkcde6OhZ9J*****" oss-aiwan-cn-beijing.aliyuncs.com test.oss-aiwan-cn-beijing.aliyuncs.com:9999/plugin/1004/spi.db    172.19.14.125
+    close connection
+    ssh_pc    local
+    ssh_write_command_and_check_string    dig &{aliyuncs_server}[log_server_dns]    &{aliyuncs_server}[log_server_ip]
+    ssh_write_command_and_check_string    curl --header "Authorization: OSS qn6qrrqxo2oawuk53otfjbyc:UNQDb7GapEgJkcde6OhZ9J*****" oss-aiwan-cn-beijing.aliyuncs.com test.oss-aiwan-cn-beijing.aliyuncs.com:9999/plugin/1004/spi.db    172.19.14.125
+    close connection
+    [Teardown]
+
+Parallel_CPE_And_PC_All_Can_Dig_Aliyun_DNS
+    [Tags]    SDWANDEV-2049
+    [Setup]    Init OSSSimulator
+    ssh_cpe    wuhan
+    ssh_write_command_and_check_string    dig &{aliyuncs_server}[log_server_dns]    &{aliyuncs_server}[log_server_ip]
+    ssh_write_command_and_check_string    curl --header "Authorization: OSS qn6qrrqxo2oawuk53otfjbyc:UNQDb7GapEgJkcde6OhZ9J*****" oss-aiwan-cn-beijing.aliyuncs.com test.oss-aiwan-cn-beijing.aliyuncs.com:9999/plugin/1004/spi.db    172.19.14.125
+    close connection
+    [Teardown]
+
+Saas Sync CPE Domain
+    [Tags]    SDWANDEV-1557
+    [Setup]
+    ${res}=    del nat agent config    &{local_cpe}[ip]    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    ssh_cpe    local
+    ${cmd}=    set variable    sysrepocfg -X -d running -m aiwan-config| grep domain
+    write    ${cmd}
+    ${res}=    read until prompt
+    close connection
+    should not contain    ${res}    domain-nat-patterns
+    wait until keyword succeeds    60s    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    .*.sh.wsdashi.com    &{default_dns}[ip]
+    ...    ${0}
+    [Teardown]
+
+Delete_Nat_Agent_CPE_Flows_Deleted
+    [Tags]    SDWANDEV-390    debug
+    delete_pop_saas    &{remote_pop}[ne_id]
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow    ${local_code}    ${False}    local
+    [Teardown]    run keywords    create_pop_saas    &{remote_pop}[ne_id]    10    &{local_pop}[nat_phy_port]
+
+DNS_Chang_To_Mulit_Address
+    [Tags]    SDWANDEV-1465
+    ${dns_timeout}=    evaluate    ${flow_ttl} * 3
+    ${local_pc_c}=    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    dig samba.systemtest.com
+    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{salt-master}[internet_ip]    ${CM_local_code}
+    Change_DNS_Server_Config_To_MultiIp
+    switch connection    ${local_pc_c}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_ip_in_dns_result    samba.systemtest.com    &{dns_server}[a_ip2]
+    Write    ping -M do -s 1360 \ samba.systemtest.com \ -c 10 -i 0.2 -w 500 > ping_p.log &
+    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{dns_server}[a_ip2]    ${remote_code}
+    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{salt-master}[internet_ip]    ${CM_local_code}
+    [Teardown]    run keywords    Teardown_DNS_Server_Config
+
+Nat_Pattern_With_High_Pority
+    [Tags]    SDWANDEV-398
+    ${tag_name}=    set variable    saas_tag_high_priority1
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    .*systemtest.com    ${tag_name}
+    ${agent_codes}=    create list    &{default_dns}[ip]
+    ${indexes}=    create list    0
+    ${ttls}=    create list    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    ${tag_id}    999    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    .*systemtest.com    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{dns_server}[a_wrong_ip]    1s
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    ${tag_id}    1900    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    .*systemtest.com    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{salt-master}[internet_ip]    1s
+    [Teardown]    teardown_saas_group    local    ${tag_id}    ${tag_name}
+
+DNS_Cache_Timeout_Get_New_IP
+    [Tags]    SDWANDEV-1550
+    ${local_pc_c}=    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{salt-master}[internet_ip]    1s
+    Change_DNS_Server_Config_To_MultiIp
+    sleep    6s
+    switch connection    ${local_pc_c}
+    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{salt-master}[internet_ip]    1s
+    Wait Until Keyword Succeeds    2x    200ms    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{dns_server}[a_ip1]
+    ...    ${remote_code}
+    Check_CPE_Dns_Proxy_Reply_Dns_Stats    local    samba.systemtest.com    192.168.0.1    0
+    sleep    4s
+    switch connection    ${local_pc_c}
+    SSH_Write_Command_And_Check_String    ping -M do -s 1360 samba.systemtest.com -c 1 \ -i 0.2 -w 500    191.168.0    1s
+    [Teardown]    run keywords    Teardown_DNS_Server_Config
+
+DNS_Cache_Without_New_IP
+    [Tags]    SDWANDEV-404
+    Change_DNS_Server_Config_To_Timeout0
+    ${local_pc_c}=    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Wait Until Keyword Succeeds    20x    200ms    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{salt-master}[internet_ip]    1s
+    Change_DNS_Server_Config_To_MultiIp
+    switch connection    ${local_pc_c}
+    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{salt-master}[internet_ip]    1s
+    [Teardown]    run keywords    Teardown_DNS_Server_Config
+
+DNS_Cache_Update_Multi_DNS
+    [Tags]    SDWANDEV-1561
+    [Setup]
+    ${dns_timeout}=    evaluate    ${flow_ttl} * 17280
+    ${agent_codes}=    run keyword if    '&{dns_server}[ip]' != '&{default_dns}[ip]'    create list    &{default_dns}[ip]    ${EMPTY}    ${CM_local_code}
+    ...    &{default_dns}[ip]    &{default_dns}[ip]
+    ...    ELSE    create list    &{default_dns}[ip]    &{dns_server}[ip]    ${CM_local_code}    &{default_dns}[ip]
+    ...    &{default_dns}[ip]    ${CM_local_code}
+    ${indexes}=    run keyword if    '&{dns_server}[ip]' != '&{default_dns}[ip]'    create list    0    1    2
+    ...    3    4
+    ...    ELSE    create list    0    1    2    3
+    ...    4    5
+    ${ttls}=    run keyword if    '&{dns_server}[ip]' != '&{default_dns}[ip]'    create list    ${flow_ttl}    ${dns_timeout}    ${flow_ttl}
+    ...    ${flow_ttl}    ${flow_ttl}
+    ...    ELSE    create list    ${flow_ttl}    ${dns_timeout}    ${flow_ttl}    ${flow_ttl}
+    ...    ${flow_ttl}    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    .*.sh.wsdashi.com    @{agent_codes}[0]
+    ...    @{indexes}[0]
+    ${local_pc_c}=    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    SSH_Write_Command_And_Check_String    nslookup samba.systemtest.com 10.192.20.15    &{salt-master}[internet_ip]    1s
+    run keyword and continue on failure    Wait Until Keyword Succeeds    2x    200ms    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{dns_server}[a_wrong_ip]
+    ...    1s
+    Wait Until Keyword Succeeds    2x    200ms    Check_CPE_Dns_Proxy_Reply_Dns_Stats    local    samba.systemtest.com    &{dns_server}[ip]
+    ...    0    1
+    Check_CPE_Dns_Proxy_Reply_Dns_Stats    local    samba.systemtest.com    192.168.0.1    0
+    Change_DNS_Server_Config_To_MultiIp
+    switch connection    ${local_pc_c}
+    SSH_Write_Command_And_Check_String    nslookup samba.systemtest.com 10.192.20.15    &{salt-master}[internet_ip]    1s
+    [Teardown]    run keywords    Teardown_DNS_Server_Config
+    ...    AND    Apply Default Saas SPI To CPEs    local    ${suite_saas_tag_id}
+
+DNS_Chang_To_Mulit_Address_ttl_Timeout
+    [Tags]    SDWANDEV-1466    long
+    ${local_pc_c}=    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Wait Until Keyword Succeeds    20x    200ms    Dig_And_Check_CPE_Dns_Proxy_Stats    local    &{salt-master}[internet_ip]    ${CM_local_code}
+    Change_DNS_Server_Config_To_MultiIp
+    switch connection    ${local_pc_c}
+    Write    ping -M do -s 1360 \ samba.systemtest.com \ -c 10 -i 0.2 -w 500 > ping_p.log &
+    Wait Until Keyword Succeeds    1s    200ms    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{dns_server}[a_ip1]
+    ...    ${remote_code}
+    Wait Until Keyword Succeeds    1s    200ms    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{dns_server}[a_ip2]
+    ...    ${remote_code}
+    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{salt-master}[internet_ip]    ${CM_local_code}
+    sleep    65
+    switch connection    ${local_pc_c}
+    Write    dig samba.systemtest.com
+    Write    ping -M do -s 1360 \ samba.systemtest.com \ -c 10 -i 0.2 -w 500 > ping_p.log &
+    Check_CPE_Dns_Proxy_Stats    local    samba.systemtest.com    &{salt-master}[internet_ip]    ${CM_local_code}    ${True}    ${0}
+    [Teardown]    run keywords    Teardown_DNS_Server_Config
+
+TCP_Speed_UP_Check_MSS
+    [Tags]    SDWANDEV-1226
+    [Setup]
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    dig &{internet_host}[saas_dns]
+    PC_MSS_Check    local    &{internet_host}[saas_dns]    1260
+    [Teardown]
+
+Delete_Nat_Agent_Search_Patterns_CPE_Flows_Deleted
+    [Tags]    SDWANDEV-1469
+    delete_all_agent_pattern
+    Check_All_CPE_NAT_Flow_Table0    ${False}
+    [Teardown]    run keywords    Create_Pop_Agent_Search_Pattern
+    ...    AND    Check_All_CPE_NAT_Flow_Table0    ${True}
+
+Modify_Nat_Agent_Search_Patterns
+    [Tags]    SDWANDEV-1463
+    ${pop_list}=    create list    &{Saas_Service1}[ne_id]    &{Saas_Service2}[ne_id]
+    modify_code_agent_pattern    ${pop_list}    1    2    0    0    saas
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_CPE_NAT_Flow    ${japan_code}    ${True}    local
+    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+    [Teardown]    teardown_search_pattern
+
+Modify_Nat_Agent_Search_Patterns_CPE_Flows_Change
+    [Tags]    SDWANDEV-1464
+    Check_Nat_Ping_OK    &{remote_pop}[ip]    local
+    ${pop_list}=    create list    &{Saas_Service1}[ne_id]    &{Saas_Service2}[ne_id]
+    modify_code_agent_pattern    ${pop_list}    1    2    0    0    saas
+    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+    Check CPE Saas Bond And Links    local    Service1
+    ssh_cpe    local
+    ssh_write_command_and_check_string    dig &{internet_host}[saas_dns]    &{internet_host}[ip]
+    close connection
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    dig &{internet_host}[saas_dns]
+    Write    scp NoDeleteScp.o \ sdn@&{internet_host}[saas_dns]:/tmp &
+    Start_Tcpdump_With_From_Internet_Host    &{internet_host}[nat_phy_port]    tcpdump.log    tcp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep win tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    close connection
+    [Teardown]    teardown_search_pattern
+
+Icmp_Speed_Up_Restart_Controller
+    [Tags]    SDWANDEV-1425
+    [Setup]
+    Check_Nat_Ping_OK    &{remote_pop}[ip]    local
+    Restart_Controller
+    Wait Until Keyword Succeeds    ${restart_timer}    400ms    get_device_id_from_cnf_with_type    CPE
+    Check_Nat_Ping_OK    &{remote_pop}[ip]    local
+    [Teardown]
+
+IP_Speed_UP_restart_controller
+    [Tags]    SDWANDEV-1479
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    &{dns_server}[ip]/32    ${CM_local_code}
+    ...    2    ${suite_saas_tag_id}
+    Restart_Controller
+    Wait Until Keyword Succeeds    ${restart_timer}    400ms    get_device_id_from_cnf_with_type    CPE
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    &{dns_server}[ip]/32    ${CM_local_code}
+    ...    2    ${suite_saas_tag_id}
+    Wait Until Keyword Succeeds    ${restart_timer}    1s    Check_CPE_NAT_Flow_Table0    ${local_code}    ${True}    &{local_cpe}[chassis_id]
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    sudo nping --tcp-connect -c 20 --delay 1s &{dns_server}[ip] -p 22 > nping_u.log &
+    Start_Tcpdump_With_From_Dns_Server    &{dns_server}[phy_port]    tcpdump.log    tcp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep win \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    [Teardown]
+
+DNS_Sperf_When_No_Cache
+    [Tags]    long    SDWANDEV-1566
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    .*.baidu.com    &{default_dns}[ip]
+    ...    3
+    ${local_pc_c}=    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    DNS_Sperf_result_Check    30    5    0.5
+    [Teardown]
+
+GW Saas Config
+    [Tags]    SDWANDEV-3260    SDWANDEV-3262    SDWANDEV-3246    SanityCheck
+    ${tag_name}=    set variable    saas_tag_high_priority
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    .*systemtest.com    ${tag_name}
+    ${agent_codes}=    create list    &{dns_server}[ip]
+    ${indexes}=    create list    0
+    ${ttls}=    create list    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${tag_id}    900    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    guangzhou    .*systemtest.com    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}
+    ssh_cpe    guangzhou    sess_gw
+    wait until keyword succeeds    45s    500ms    Check GW Saas Config    systemtest.com    ${True}    samba
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    wait until keyword succeeds    11s    1s
+    ...    Get CPE Saas Metrics    &{guangzhou_cpe}[minion_id]    .*systemtest.com
+    ssh login guangzhou
+    Write Sudo Cmd    dig samba.systemtest.com    &{guangzhou_pc}[passwd]
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}    guangzhou
+    Write    ping -M do -s 1360 samba.systemtest.com -c ${exec_time} -i 0.2 > ping_p.log
+    wait until keyword succeeds    31    200ms    Check Saas Metrics with Name    &{guangzhou_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    10    10    .*systemtest.com
+    # remove the new group
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${tag_id}
+    switch connection    sess_gw
+    wait until keyword succeeds    45s    500ms    Check GW Saas Config    systemtest.com    ${False}    samba
+    ${status}=    run keyword and return status    Get CPE Saas Metrics    &{guangzhou_cpe}[chassis_id]    .*systemtest.com
+    should be equal    ${status}    ${False}
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${tag_id}
+    ...    AND    delete_company_spi_tag    ${suite_company_id}    ${tag_name}
+    ...    AND    close connection
+
+GW Ipset IP Speedup Config
+    [Tags]    SDWANDEV-3261
+    [Setup]    Apply Default Saas SPI To CPEs    guangzhou    ${suite_saas_tag_id}
+    ssh_cpe    guangzhou    sess_guangzhou_cpe
+    wait until keyword succeeds    45s    500ms    Check GW Ipset List    &{dns_server}[ip]
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${suite_saas_tag_id}
+    wait until keyword succeeds    45s    500ms    Check GW Ipset List    &{dns_server}[ip]    ${False}
+    [Teardown]    run keywords    Apply Default Saas SPI To CPEs    guangzhou    ${suite_saas_tag_id}
+    ...    AND    close connection
+
+GW Passthrough When Saas Tmpl Removed
+    [Tags]    SDWANDEV-3263
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${suite_saas_tag_id}
+    ssh_cpe    guangzhou    sess_guangzhou_cpe
+    wait until keyword succeeds    45s    500ms    Check GW Saas Config    sh.wsdashi.com    ${False}
+    wait until keyword succeeds    35s    500ms    Check GW Ipset List    &{dns_server}[ip]    ${False}
+    write openwrt cmd    ipset flush saas_vpn
+    Check GW Ipset List    Number of entries: 0    ${True}    saas_vpn
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_NAT_Flow_Table0    &{internet_host}[saas_dns]    ${False}    &{guangzhou_cpe}[chassis_id]
+    ssh login guangzhou
+    wait until keyword succeeds    3x    1s    Pingable Check    &{internet_host}[saas_dns]
+    close connection
+    [Teardown]    run keywords    Apply Default Saas SPI To CPEs    guangzhou    ${suite_saas_tag_id}
+    ...    AND    switch connection    sess_guangzhou_cpe
+    ...    AND    wait until keyword succeeds    45s    500ms    Check GW Saas Config    samba.systemtest.com/10.192.20.15
+    ...    ${True}
+    ...    AND    wait until keyword succeeds    5s    500ms    Check GW Ipset List    &{dns_server}[ip]
+    ...    ${True}
+    ...    AND    close connection
+
+Gw_DNS_Chang_To_Mulit_Address_ttl_Timeout
+    [Tags]    long    SDWANDEV-1671
+    ${local_pc_c}=    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    dig samba.systemtest.com    &{guangzhou_pc}[passwd]
+    ssh cpe    guangzhou
+    Wait Until Keyword Succeeds    2s    200ms    gw_cpe_ip_in_ipset    &{salt-master}[internet_ip]
+    sleep    6
+    Change_DNS_Server_Config_To_MultiIp
+    switch connection    ${local_pc_c}
+    Write Sudo Cmd    dig samba.systemtest.com    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    ping -M do -s 1360 \ samba.systemtest.com \ -c 10 -i 0.2> ping_p.log &    &{guangzhou_pc}[passwd]
+    ssh cpe    guangzhou
+    Wait Until Keyword Succeeds    2s    200ms    gw_cpe_ip_in_ipset    &{dns_server}[a_ip1]
+    gw_cpe_ip_in_ipset    &{dns_server}[a_ip2]
+    [Teardown]    Teardown_DNS_Server_Config
+
+GW_SAAS_IP_4G_backup
+    [Tags]    SDWANDEV-1632
+    [Setup]
+    ${score_d}    ${pkts_d}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets    guangzhou
+    ...    Service1    1    ${False}
+    ${score}    ${pkts}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets Non Direct    guangzhou
+    ...    Service1    1    ${False}
+    ${score_4g_d}    ${pkts_4g_d}=    wait until keyword succeeds    45    200ms    Get CPE Saas Bond Link Score and Packets    guangzhou
+    ...    Service1    2    ${False}
+    ${score_4g}    ${pkts_4g}=    wait until keyword succeeds    45    200ms    Get CPE Saas Bond Link Score and Packets Non Direct    guangzhou
+    ...    Service1    2    ${False}
+    ${local_pc_c}=    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    dig &{internet_host}[saas_dns]    &{guangzhou_pc}[passwd]
+    close connection
+    ssh cpe    guangzhou
+    Wait Until Keyword Succeeds    2s    200ms    gw_cpe_ip_in_ipset    &{internet_host}[ip]
+    close connection
+    Wait Until Keyword Succeeds    5x    200ms    Check_link_pkg_num_increase    guangzhou    Service1    ${pkts}
+    ...    ${pkts_d}    ${pkts_4g}    ${pkts_4g_d}
+    [Teardown]
+
+Series_SPI_UDP_Speed_UP_With_DNS_IP
+    [Tags]    SDWANDEV-2043
+    [Setup]    config_spi_skype_tag_dispatch    local    beijing
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    sudo nping --udp -c 10 --delay 1s 192.168.0.220 -g 1000 -p 3480 > nping_u.log &
+    Start_Tcpdump_With_From_Salt_Master_Internet_Host    &{salt-master}[internet_phy_port]    tcpdump.log    udp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep UDP \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    close connection
+    [Teardown]    teardown_saas_group    local    ${test_tag_id}    ${test_tag_name}
+
+NAT_CPE_Change_IP_TCP_Speed_UP_Without_DNS_IP
+    [Tags]    SDWANDEV-2405
+    ssh_pc    chongqing    chongq_a
+    Write    dig @192.168.0.1 &{internet_host}[saas_dns]
+    Wait Until Keyword Succeeds    2x    200ms    Check_CPE_Dns_Proxy_Stats    chongqing    &{internet_host}[saas_dns]    &{internet_host}[ip]
+    ...    ${CM_local_code}
+    switch connection    chongq_a
+    check_tcp_nping_ok    chongqing
+    close connection
+    config_switch_port_address    cq_routeos    &{chongqing_switch}[wan_if]    &{chongqing_switch}[ip2]
+    switch connection    chongq_a
+    Write    dig @192.168.0.1 &{internet_host}[saas_dns]
+    Wait Until Keyword Succeeds    2x    200ms    Check_CPE_Dns_Proxy_Stats    chongqing    &{internet_host}[saas_dns]    &{internet_host}[ip]
+    ...    ${CM_local_code}
+    switch connection    chongq_a
+    check_tcp_nping_ok    chongqing
+    close connection
+    [Teardown]    config_switch_port_address    cq_routeos    &{chongqing_switch}[wan_if]    &{chongqing_switch}[ip]
+
+Gw_Saas_Speed_UP
+    [Tags]    SDWANDEV-2044
+    [Setup]    config_spi_skype_tag_dispatch    guangzhou    guangzhou    172.19.43.101/30
+    ssh_cpe    guangzhou    sess_guangzhou_cpe
+    wait until keyword succeeds    45s    500ms    Check GW Ipset List    172.19.43.100/30    ${True}    src_dst_rport_set
+    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    ps    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    sudo nping --tcp-connect -c 10 --delay 1s 192.168.0.220 -g 1000 -p 3480 > nping_u.log &    &{guangzhou_pc}[passwd]
+    Start_Tcpdump_With_From_Salt_Master_Internet_Host    &{salt-master}[internet_phy_port]    tcpdump.log    TCP    &{local_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep TCP tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+    [Teardown]    teardown_saas_group    guangzhou    ${test_tag_id}    ${test_tag_name}
+
+SAAS_Never_Speed_UP_office_flow
+    [Tags]    SDWANDEV-2044    debug
+    [Setup]    config_spi_skype_tag_dispatch    guangzhou    guangzhou    172.19.43.101/30    6    443
+    ssh_cpe    guangzhou    sess_guangzhou_cpe
+    wait until keyword succeeds    45s    500ms    Check GW Ipset List    172.19.43.101/30    ${True}    src_ip_port_set
+    ssh login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    SCP_File_From_H1_To_H2    guangzhou    &{nanjing_pc}[inner_ip]    DontDelete.o    target.o
+    [Teardown]    teardown_saas_group    guangzhou    ${test_tag_id}    ${test_tag_name}
+
+Saas_Link_Broken_Series_Switch_to_Passthrough
+    [Tags]    SDWANDEV-2629    SDWANDEV-3254    SDWANDEV-2632
+    [Setup]
+    wait until keyword succeeds    10s    500ms    Check Cpe Cache Info    local    &{internet_host}[ip]    ${True}
+    ...    ${False}    1    0    0    0
+    check_SAAS_ping_OK    &{remote_pop}[ip]    local
+    ssh_pc    local    sync_sess_local_pc
+    Write    dig &{internet_host}[saas_dns]
+    Read Until Prompt
+    write    ping &{internet_host}[saas_dns] -i 0.2 > saas_ping1.log &
+    Read Until Prompt
+    ${bond_local}    get_e2e_dest_site_bond    &{local_cpe}[chassis_id]    &{Saas_Service1}[ne_id]
+    Check Cpe Cache Info    local    &{internet_host}[ip]    ${False}    ${True}    1    2
+    ...    2    ${bond_local[0]['portNumber']}
+    # block direct link
+    Block_Saas_Direct_Link    Service1    local
+    sleep    7
+    switch connection    sync_sess_local_pc
+    Check Outage Time    saas_ping1.log    6    ${True}
+    write    killall ping
+    read until prompt
+    write    ping &{internet_host}[saas_dns] -i 0.2 > saas_ping2.log &
+    Read Until Prompt
+    # stop saas service
+    ssh_pop    remote    sess_remote_pop
+    write sudo cmd    systemctl stop aiwan-saas.service    &{remote_pop}[passwd]
+    sleep    7
+    switch connection    sync_sess_local_pc
+    Check Outage Time    saas_ping2.log    7
+    Check Cpe Cache Info    local    &{internet_host}[ip]    ${True}    ${False}    1    0
+    ...    1    8
+    # when the link restored, cpe saas should switch back
+    switch connection    sess_remote_pop
+    write sudo cmd    systemctl start aiwan-saas.service    &{remote_pop}[passwd]
+    UnBlock_Saas_Direct_Link    Service1    local
+    ${score_d}    ${pkts_d}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets    local
+    ...    Service1
+    ${score}    ${pkts}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets Non Direct    local
+    ...    Service1
+    wait until keyword succeeds    5s    500ms    Check CPE Saas Packets Update    local    Service1    ${pkts_d}
+    ...    ${pkts}
+    Check Cpe Cache Info    local    &{internet_host}[ip]    ${True}    ${False}    1    0
+    ...    0    0
+    [Teardown]    run keywords    switch connection    sess_remote_pop
+    ...    AND    write sudo cmd    systemctl start aiwan-saas.service    &{remote_pop}[passwd]
+    ...    AND    close connection
+    ...    AND    UnBlock_Saas_Direct_Link    Service1    local
+    ...    AND    switch connection    sync_sess_local_pc
+    ...    AND    close connection
+    ...    AND    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets    local
+    ...    Service1
+
+Kernel Saas Service Series Check
+    [Tags]    SDWANDEV-2627
+    [Setup]    Refresh Default SAAS SPI Dispatch    local
+    # check the services
+    Check CPE Saas Bond And Links    local    Service1
+    wait until keyword succeeds    ${domain_wait}    200ms    Get CPE Saas Bond Link Score and Packets    local    Service1    1
+    ...    ${False}
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Wait Until Keyword Succeeds    ${flow_ttl}    200ms    SSH_Write_Command_And_Check_String    dig samba.systemtest.com    &{salt-master}[internet_ip]    1s
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+    wait until keyword succeeds    ${domain_wait}    200ms    Get CPE Saas Bond Link Score and Packets    local    Service1
+    delete_all_agent_pattern
+    Check No Saas Bond Or Links    local    &{remote_pop}[ne_id]
+    [Teardown]    run keywords    Create_Pop_Agent_Search_Pattern
+    ...    AND    Apply Default Saas SPI To CPEs    local    ${suite_saas_tag_id}
+
+Kernel Saas Service Gateway Check Should Choose Better Wan and Bettr Link
+    [Tags]    SDWANDEV-2627    SDWANDEV-2628
+    [Setup]    Changsha Add Delay To POP    &{changsha_cpe}[wan_if]    &{Saas_Service1}[tunnel_port]
+    # check the services
+    Wait Until Keyword Succeeds    ${domain_wait}    500ms    Check CPE Saas Bond And Links    changsha    Service1
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    changsha    samba.systemtest.com    &{dns_server}[ip]
+    ...    1
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_CPE_NAT_Flow    ${local_code}    ${True}    changsha
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}=    Get CPE Saas Metrics    &{changsha_cpe}[minion_id]
+    wait until keyword succeeds    ${domain_wait}    200ms    Confirm Saas Choosing Better Link    changsha    &{Saas_Service1}[ne_id]    samba.systemtest.com
+    wait until keyword succeeds    22s    1s    Check Saas Metrics    &{changsha_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    ${exec_time}    ${exec_time}
+    [Teardown]    Changsha Clear Delay To POP    &{changsha_cpe}[wan_if]
+
+Quic_TCP_Speed_UP_Check_MSS_Connection
+    [Tags]    SDWANDEV-2654    SDWANDEV-2655
+    [Setup]
+    ssh_pc    local
+    Write    dig &{internet_host}[saas_dns]
+    Write Sudo Cmd    sudo nping --udp -c 5 --delay 1s samba.systemtest.com -g 1000 -p 22 \ > nping_u.log &    &{local_pc}[passwd]
+    close connection
+    Wait Until Keyword Succeeds    5s    1s    PC_MSS_Check    local    &{internet_host}[saas_dns]    1260
+    ${ret}    ${r_res}=    Get_CPE_Nuwa_Connection_Number    local    Service1    saas
+    should be true    ${ret} >=1
+    [Teardown]
+
+Quic_SAAS_Speed_UP_Loss_5%
+    [Tags]    SDWANDEV-2653
+    [Setup]    run keywords    init_iperf_server
+    ...    AND    Block_Saas_Direct_Link    Service1    local
+    Add_Loss_Between_Sip_Dip_On_TC    10.0.0.0/8    10.0.0.0/8    5%
+    Check CPE Saas Bond And Links    local    Service1
+    ssh_pc    local
+    Write    dig &{internet_host}[saas_dns]
+    close connection
+    Iperf3_loss_From_PC_With_Parallel Sessions    &{internet_host}[saas_dns]    3M    local    5201    512    5
+    ...    5    ${True}
+    wait until keyword succeeds    6s    1s    check_paralled_sessions_iperf_loss_result_in_pc    0.1    local
+    Iperf3_loss_From_PC_With_Parallel Sessions    &{internet_host}[saas_dns]    3M    local    5201    512    5
+    ...    5
+    wait until keyword succeeds    10s    1s    check_paralled_sessions_iperf_loss_result_in_pc    0.1    local
+    [Teardown]    run keywords    Teardown_TC_config
+    ...    AND    teardown_iperf_server
+    ...    AND    UnBlock_Saas_Direct_Link    Service1    local
+
+Quic_SAAS_Speed_UP_Loss_10%_rtt_less_30ms
+    [Tags]    SDWANDEV-4481    debug
+    [Setup]    run keywords    Start_Nping_Server_in_PC    dns_server    ${dns_server}[ip]    udp
+    ...    AND    Block_Saas_Direct_Link    Service1    local
+    Add_Loss_Between_Sip_Dip_On_TC    10.0.0.0/8    10.0.0.0/8    10%
+    Check CPE Saas Bond And Links    local    Service1
+    ssh_pc    local
+    Write    dig &{internet_host}[saas_dns]
+    close connection
+    Nping_From_PC_with_Echo    local    ${dns_server}[ip]
+    wait until keyword succeeds    6s    1s    check_nping_loss_rtt_result_in_pc    0.1    30    local
+    [Teardown]    run keywords    Teardown_TC_config
+    ...    AND    Kill_Nping_Server_in_PC    dns_server
+    ...    AND    UnBlock_Saas_Direct_Link    Service1    local
+
+Quic_SAAS_Speed_UP_jitter_14ms
+    [Tags]    debug
+    [Setup]    init_iperf_server
+    Add_Delay_Range_Between_Sip_Dip_On_TC    10.0.0.0/8    10.0.0.0/8    40ms    50ms    50%
+    ssh_pc    local
+    Write    dig &{internet_host}[saas_dns]
+    close connection
+    Iperf3_loss_From_PC_With_Parallel Sessions    &{internet_host}[saas_dns]    3M    local    5201    512    5
+    ...    5
+    ${jitter}=    wait until keyword succeeds    6s    1s    check_paralled_sessions_iperf_loss_result_in_pc    0    local
+    [Teardown]    run keywords    Teardown_TC_config
+    ...    AND    teardown_iperf_server
+
+Gw_Icmp_Speed_Up_Windows
+    [Tags]    SDWANDEV-2870    SDWANDEV-2404    SDWANDEV-2872
+    [Setup]
+    Check CPE Saas Bond And Links    guangzhou    Service1
+    ssh_pc    guangzhou
+    Write Sudo Cmd    dig &{internet_host}[saas_dns]    &{guangzhou_pc}[passwd]
+    ssh cpe    guangzhou
+    Wait Until Keyword Succeeds    2s    200ms    gw_cpe_ip_in_ipset    &{internet_host}[ip]
+    Check_Nat_Ping_OK    &{remote_pop}[ip]    guangzhou
+    close connection
+    ssh pc    guangzhou
+    run keyword and continue On Failure    Check_Nat_Ping_Log_No_Loss_No_DUP    ping_p.log
+    run keyword and continue On Failure    Start windows Ping in Parallel    &{guangzhou_pc}[inner_ip]    &{internet_host}[saas_dns]    ping_w.log    200    &{guangzhou_pc}[passwd]
+    run keyword and continue On Failure    Start windows Ping in Parallel    &{guangzhou_pc}[inner_ip2]    &{internet_host}[saas_dns]    ping_p_ip2.log    500    &{guangzhou_pc}[passwd]
+    run keyword and continue On Failure    Start windows Ping in Parallel    &{guangzhou_pc}[inner_ip]    &{internet_host}[saas_dns]    ping_w.log    200    &{guangzhou_pc}[passwd]
+    close connection
+    [Teardown]
+
+Saas_Metrics_Check_When_office_saas_passthrough
+    [Tags]    SDWANDEV-2432
+    [Setup]
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}    Get CPE Saas Metrics    &{local_cpe}[minion_id]
+    ${init_saas_pkts_r_g}    ${init_saas_byts_r_g}    ${init_saas_pkts_s_g}    ${init_saas_byts_s_g}    Get CPE Saas Metrics    &{guangzhou_cpe}[minion_id]
+    ${cpe_list}    create list    local    guangzhou
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ssh_pc    ${cpe}
+    \    Write    sudo nping --udp -c 10 --delay 1s 10.192.20.16 -g 1000 -p 22 \ > nping_u2.log &
+    \    ${r_cpe}=    set variable if    '${cpe}'=='local'    remote    nanjing
+    \    Write    sudo nping --udp -c 10 --delay 1s &{${r_cpe}_pc}[inner_ip] \ -g 1000 -p 22 \ > nping_office.log &
+    \    Write    dig &{internet_host}[saas_dns]
+    \    close connection
+    \    SCP_File_From_H1_To_H2    ${cpe}    &{internet_host}[saas_dns]    DontDelete.o    target.o
+    wait until keyword succeeds    11    200ms    Check Saas Metrics    &{local_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    10    10
+    wait until keyword succeeds    11    200ms    Check Saas Metrics    &{guangzhou_cpe}[minion_id]    ${init_saas_pkts_r_g}    ${init_saas_pkts_s_g}
+    ...    10    10
+    [Teardown]
+
+kernal_SAAS_iperf_band
+    [Tags]    SDWANDEV-2377
+    [Setup]    init_iperf_server
+    Iperf3_band_From_PC_With_Port    &{internet_host}[saas_dns]    local    ${r_iperf_s_port}
+    Comment    Iperf3_band_From_PC_With_Port    samba.systemtest.com    guangzhou    ${r_iperf_s_port}
+    Iperf3_band_From_PC_With_Port    &{dns_server}[ip]    chongqing    ${r_iperf_s_port}
+    ${b}=    run keyword and continue on failure    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    200
+    ...    local
+    Comment    run keyword and continue on failure    wait until keyword succeeds    3s    1s    check_iperf_band_result_in_pc    300
+    ...    guangzhou
+    ${b_c}=    check_iperf_band_result_in_pc    50    chongqing
+    ${sum}=    evaluate    int(${b_c})+${b}
+    should be true    ${sum}>=360
+    [Teardown]    teardown_iperf_server
+
+Saas Code Mask Test
+    [Tags]    SDWANDEV-3049
+    ssh_cpe    local
+    #${primary_pattern}=    get_code_agent_pattern
+    ${pop_list}=    create list    &{Saas_Service1}[ne_id]
+    # 4160749568 + 11
+    create_code_agent_pattern    ${pop_list}    31
+    Update IP2POP And Take Effect    4160749579    4160749568    ${496}
+    # 1480851456 + 12
+    create_code_agent_pattern    ${pop_list}    11    17
+    Update IP2POP And Take Effect    1480851468    1480851456    ${497}
+    # 134529024 + 13
+    create_code_agent_pattern    ${pop_list}    1    1    3
+    Update IP2POP And Take Effect    134529037    134529024    ${498}
+    # 134561856 + 11
+    create_code_agent_pattern    ${pop_list}    1    1    5    1
+    Update IP2POP And Take Effect    134561867    134561856    ${499}
+    # 134561868
+    create_code_agent_pattern    ${pop_list}    1    1    5    1    saas
+    ...    12
+    Update IP2POP And Take Effect    134561868    134561868    ${500}
+    [Teardown]    Saas Code Teardown
+
+GW IPS Speed Up
+    [Tags]    SDWANDEV-3262    SDWANDEV-4297
+    ${sig_code}=    evaluate    ${singapore_code} + 11
+    ${tag_name}=    set variable    saas_ip_tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    192.168.0.220/31    ${tag_name}
+    ${agent_codes}=    create list    ${sig_code}
+    ${indexes}=    create list    0
+    ${ttls}=    create list    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${tag_id}    1100    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    guangzhou    192.168.0.220/31    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}
+    ssh_cpe    guangzhou    sess_gw
+    wait until keyword succeeds    45s    500ms    Check GW Ipset List    192.168.0.220/31
+    ssh login guangzhou
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}    guangzhou
+    ${ne_id}=    get_cpe_chassis_id    guangzhou
+    Check_CPE_NAT_Flow    ${singapore_code}    ${True}    guangzhou
+    ${singapore_pkgs}=    get_cpe_internet_table_2_flows_packets    ${ne_id}    ${singapore_code}
+    Write    ping -M do -s 1360 192.168.0.220 -c ${exec_time} -i 0.2 > ping_p.log
+    Wait Until Keyword Succeeds    8s    1s    check_flow_code_pkg_num_increase    ${ne_id}    ${singapore_code}    ${singapore_pkgs}
+    ...    ${exec_time}
+    Write    ping -M do -s 1360 192.168.0.199 -c ${exec_time} -i 0.2 > ping_p.log
+    sleep    6s
+    check_flow_code_pkg_num_increase    ${ne_id}    ${singapore_code}    ${singapore_pkgs}    ${exec_time}    ${exec_time}
+    ${pwd}=    ssh_cpe    guangzhou
+    ${openwrt}=    evaluate    'guangzhou' in ${opwrt_list}
+    ${sDay}=    Get CPE Location Statistics    ${openwrt}    ${pwd}
+    should be true    ${sDay['location'][0]['counter']} >= ${sDay['location'][1]['counter']}
+    ${s5Mins}=    Get CPE Location Statistics    ${openwrt}    ${pwd}    last5min
+    should be true    ${s5Mins['location'][0]['counter']} >= ${s5Mins['location'][1]['counter']}
+    [Teardown]    teardown_site_saas_rule    guangzhou    192.168.0.220/31    ${tag_id}    ${tag_name}    ${agent_codes}
+    ...    ${indexes}
+
+IPS Speed Up Code 0
+    [Tags]    SDWANDEV-3543
+    ${sig_code}=    evaluate    ${singapore_code} + 11
+    ${tag_name}=    set variable    saas_ip_tag2
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    append_company_spi_tag_rules    ${suite_company_id}    192.168.0.0/17    ${tag_name}
+    ${agent_codes}=    create list    ${sig_code}
+    ${indexes}=    create list    0
+    ${ttls}=    create list    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    ${tag_id}    900    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    192.168.0.0/17    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}
+    ssh_cpe    local    sess_gw
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+    ${ne_id}=    get_cpe_chassis_id    local
+    Check_CPE_NAT_Flow    ${singapore_code}    ${True}    local
+    ${singapore_pkgs}=    get_cpe_internet_table_2_flows_packets    ${ne_id}    ${singapore_code}
+    ${local_pkgs}=    get_cpe_internet_table_2_flows_packets    ${ne_id}    ${local_code}
+    ssh pc    local
+    Write    ping -M do -s 1360 192.168.0.220 -c ${exec_time} -i 0.2 > ping_p.log
+    ${num}=    evaluate    ${exec_time}/2
+    Wait Until Keyword Succeeds    12s    1s    check_flow_code_pkg_num_increase    ${ne_id}    ${singapore_code}    ${singapore_pkgs}
+    ...    ${num}
+    close connection
+    check_flow_code_pkg_num_increase    ${ne_id}    ${local_code}    ${local_pkgs}    ${0}    ${1}
+    ${agent_codes}=    create list    ${0}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    ${tag_id}    1100    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    local    192.168.0.0/17    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}
+    ssh pc    local
+    Write    sudo nping --tcp-connect -c ${num} --delay 1s 192.168.0.220 -p 22 > nping_u_3543.log &
+    Wait Until Keyword Succeeds    12s    1s    check_flow_code_pkg_num_increase    ${ne_id}    ${local_code}    ${local_pkgs}
+    ...    4
+    close connection
+    [Teardown]    teardown_site_saas_rule    local    192.168.0.0/17    ${tag_id}    ${tag_name}    ${agent_codes}
+    ...    ${indexes}
+
+NatNet_DNS_Check
+    [Tags]    SDWANDEV-3398
+    ${cpe}=    set variable    @{opwrt_list}[1]
+    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ${res}=    Write Sudo Cmd    dig +short samba.systemtest.com    &{${cpe}_pc}[passwd]
+    should contain    ${res}    100.64.
+    ${res2}=    Write Sudo Cmd    nslookup samba.systemtest.com 172.19.45.1    &{${cpe}_pc}[passwd]
+    ${ip}=    get line    ${res}    -2
+    ${ip2}=    get line    ${res2}    -3
+    should contain    ${ip2}    ${ip}
+    [Teardown]    close connection
+
+NatNet_DNS_Reply_IP_Change
+    [Tags]    SDWANDEV-3399
+    ${cpe}=    set variable    @{opwrt_list}[1]
+    ${pc_c}    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ${res}=    Write Sudo Cmd    dig +short samba.systemtest.com    &{${cpe}_pc}[passwd]
+    should contain    ${res}    100.64.
+    Change_DNS_Server_Config_To_MultiIp
+    switch connection    ${pc_c}
+    ${res2}=    Write Sudo Cmd    nslookup samba.systemtest.com 172.19.45.1    &{${cpe}_pc}[passwd]
+    should contain    ${res2}    100.64.
+    ${ip}=    get line    ${res}    -2
+    ${ip2}=    get line    ${res2}    -3
+    should not contain    ${ip2}    ${ip}
+    [Teardown]    run keywords    switch connection    ${pc_c}
+    ...    AND    close connection
+    ...    AND    Teardown_DNS_Server_Config
+
+GW_TCP_Speed_UP_Check_Nuwa_Connection
+    [Tags]    SDWANDEV-3078
+    [Setup]
+    ssh_pc    guangzhou
+    Write    dig &{dns_server}[ip]
+    Write Sudo Cmd    sudo nping --udp -c 5 --delay 1s &{dns_server}[ip] -g 1000 -p 22 \ > nping_u.log &    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    sudo nping --tcp-connect -c 5 --delay 1s &{dns_server}[ip] -g 1000 -p 22 \ > nping_t.log &    &{guangzhou_pc}[passwd]
+    close connection
+    ${ret}    ${r_ret}=    Get_CPE_Nuwa_Connection_Number    guangzhou    Service1    saas
+    should be true    ${ret} ==2
+    should be true    ${r_ret} ==1
+    [Teardown]
+
+Gw_traceroute_icmp_windows
+    [Tags]    SDWANDEV-2871    SDWANDEV-3639
+    [Setup]
+    Check CPE Saas Bond And Links    guangzhou    Service1
+    Check CPE Saas Bond And Links    changsha    Service1
+    ssh cpe    guangzhou
+    Wait Until Keyword Succeeds    2s    200ms    gw_cpe_ip_in_ipset    &{dns_server}[ip]    dst_ip_set
+    close connection
+    ssh cpe    changsha
+    Wait Until Keyword Succeeds    2s    200ms    gw_cpe_ip_in_ipset    &{dns_server}[ip]    dst_ip_set
+    close connection
+    ssh_pc    guangzhou
+    Write    ping -M do -s 1360 &{dns_server}[ip] -c ${exec_time} -i 0.2 > ping_p.log &
+    ${avg}    ${max}    ${loss}    ping_from_windows_pc    changsha    &{dns_server}[ip]    3
+    should be equal    ${loss}    0
+    traceroute from windows pc    changsha    &{dns_server}[ip]
+    ${avg}    ${max}    ${loss}    ping_from_windows_pc    changsha    &{dns_server}[ip]    3
+    should be equal    ${loss}    0
+    ssh pc    guangzhou
+    run keyword and continue On Failure    Check_Nat_Ping_Log_No_Loss_No_DUP    ping_p.log
+    close connection
+    [Teardown]
+
+Serise_NatNet_DNS_Check
+    [Tags]    SDWANDEV-3676
+    ${cpe}=    set variable    remote
+    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ${res}=    Write Sudo Cmd    dig +short samba.systemtest.com    &{${cpe}_pc}[passwd]
+    should contain    ${res}    100.64.
+    ${res2}=    Write Sudo Cmd    nslookup samba.systemtest.com 172.19.45.1    &{${cpe}_pc}[passwd]
+    ${ip}=    get line    ${res}    -2
+    ${ip2}=    get line    ${res2}    -3
+    should contain    ${ip2}    ${ip}
+    [Teardown]    close connection
+
+Serise Natnet TCP Speed UP
+    [Tags]    SDWANDEV-3400
+    ${cpe}=    set variable    remote
+    ${init_saas_pkts_r}    ${init_saas_byts_r}    ${init_saas_pkts_s}    ${init_saas_byts_s}=    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{${cpe}_cpe}[minion_id]    samba.systemtest.com
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ssh login    &{${cpe}_pc}[ctrl_ip]    &{${cpe}_pc}[ctrl_port]    &{${cpe}_pc}[user]    &{${cpe}_pc}[passwd]
+    ${res}=    Write Sudo Cmd    dig samba.systemtest.com    &{${cpe}_pc}[passwd]
+    should contain    ${res}    100.64.
+    Write Sudo Cmd    nping --tcp-connect -c 8 --delay 1s samba.systemtest.com -p 22 > nping_u.log    &{${cpe}_pc}[passwd]
+    wait until keyword succeeds    40    200ms    Check Saas Metrics    &{${cpe}_cpe}[minion_id]    ${init_saas_pkts_r}    ${init_saas_pkts_s}
+    ...    16    32
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{${cpe}_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    16    32    samba.systemtest.com
+    [Teardown]    run keywords    switch connection    sess_${cpe}_cpe
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{${cpe}_cpe}[passwd]
+    ...    AND    close connection
+
+Saas Assign Wan
+    [Tags]    SDWANDEV-3984
+    [Setup]    run keywords    config_wan_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_&{changsha_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000
+    ...    assign    &{changsha_cpe}[saas_spi_assign_wan]
+    ...    AND    Add Delay on Changsha    &{changsha_cpe}[wan2_if]    100
+    ...    AND    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_prefer_dispatch_from_cpe    changsha
+    ...    ${suite_saas_tag_id}    1000    assign    &{changsha_cpe}[saas_spi_assign_wan]
+    ${init_num}=    Get CPE Links Pkts by Src Wan    changsha    &{Saas_Service1}[ne_id]    ${2}
+    ssh_pc    changsha
+    write    ping samba.systemtest.com -i 0.2 -c ${exec_time}
+    read until prompt
+    close connection
+    ${cur_num}=    Get CPE Links Pkts by Src Wan    changsha    &{Saas_Service1}[ne_id]    ${2}
+    should be true    ${cur_num} >= ${init_num} + ${exec_time}
+    [Teardown]    run keywords    Clear Delay on Changsha    &{changsha_cpe}[wan2_if]
+    ...    AND    Refresh Default SAAS SPI Dispatch    changsha
+
+Saas Prefer Wan
+    [Tags]    SDWANDEV-3985
+    [Setup]    run keywords    config_wan_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_&{changsha_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000
+    ...    prefer    &{changsha_cpe}[saas_spi_prefer_wan]
+    ...    AND    Add Delay on Changsha    &{changsha_cpe}[wan2_if]    100
+    ...    AND    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_prefer_dispatch_from_cpe    changsha
+    ...    ${suite_saas_tag_id}    1000    prefer    &{changsha_cpe}[saas_spi_prefer_wan]
+    ${init_num}=    Get CPE Links Pkts by Src Wan    changsha    &{Saas_Service1}[ne_id]    ${2}
+    ssh_pc    changsha
+    write    ping samba.systemtest.com -i 0.2 -c ${exec_time}
+    read until prompt
+    close connection
+    ${cur_num}=    Get CPE Links Pkts by Src Wan    changsha    &{Saas_Service1}[ne_id]    ${2}
+    should be true    ${cur_num} >= ${init_num} + ${exec_time}
+    [Teardown]    run keywords    Clear Delay on Changsha    &{changsha_cpe}[wan2_if]
+    ...    AND    Refresh Default SAAS SPI Dispatch    changsha
+
+Saas Auto Wan
+    [Tags]    SDWANDEV-3986
+    [Setup]    run keywords    config_wan_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_&{changsha_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000
+    ...    auto
+    ...    AND    Add Delay on Changsha    &{changsha_cpe}[wan_if]    100
+    ...    AND    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_prefer_dispatch_from_cpe    changsha
+    ...    ${suite_saas_tag_id}    1000    auto    ${None}
+    ...    AND    wait until keyword succeeds    12s    1s    Confirm Better Wan    changsha
+    ...    &{Saas_Service1}[ne_id]    ${2}
+    ${init_num}=    Get CPE Links Pkts by Src Wan    changsha    &{Saas_Service1}[ne_id]    ${2}
+    ssh_pc    changsha
+    write    ping samba.systemtest.com -i 0.2 -c ${exec_time}
+    read until prompt
+    close connection
+    ${cur_num}=    Get CPE Links Pkts by Src Wan    changsha    &{Saas_Service1}[ne_id]    ${2}
+    should be true    ${cur_num} >= ${init_num} + ${exec_time}
+    [Teardown]    run keywords    Clear Delay on Changsha    &{changsha_cpe}[wan_if]
+    ...    AND    Refresh Default SAAS SPI Dispatch    changsha
+
+GW TCP UDP Saas
+    [Tags]    SDWANDEV-3983
+    [Setup]    run keywords    update_company_spi_tag_rule    ${suite_company_id}    ${suite_saas_tag_id}    ${0}    l4proto
+    ...    6,17
+    ...    AND    init_iperf_server
+    ${cpe}=    set variable    guangzhou
+    ssh_pc    ${cpe}    sess_${cpe}_pc
+    wait until keyword succeeds    3x    200ms    check_ip_in_dns_result    &{internet_host}[saas_dns]    &{internet_host}[ip]
+    ${score_d}    ${pkts_d}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets    ${cpe}
+    ...    Service1    1    ${False}
+    ${score}    ${pkts}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets Non Direct    ${cpe}
+    ...    Service1    1    ${False}
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${cpe}    ${r_iperf_s_port}    ${False}    5M    512
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    should be true    ${spi_pkts2} > ${spi_pkts}
+    ${score_d2}    ${pkts_d2}=    Get CPE Saas Bond Link Score and Packets    ${cpe}    Service1    1    ${False}
+    ${score2}    ${pkts2}=    Get CPE Saas Bond Link Score and Packets Non Direct    ${cpe}    Service1    1    ${False}
+    ${res}=    evaluate    ${pkts2}+${pkts_d2}> ${pkts} +${pkts_d}
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${cpe}    ${r_iperf_s_port}    ${True}    5M    512
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts3}    ${spi_r_pkts3}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    should be true    ${spi_pkts3} > ${spi_pkts2}
+    ${score_d3}    ${pkts_d3}=    Get CPE Saas Bond Link Score and Packets    ${cpe}    Service1    1    ${False}
+    ${score3}    ${pkts3}=    Get CPE Saas Bond Link Score and Packets Non Direct    ${cpe}    Service1    1    ${False}
+    ${res}=    evaluate    ${pkts3}+${pkts_d3}> ${pkts2} +${pkts_d2}
+    switch connection    sess_${cpe}_pc
+    write    ping &{internet_host}[saas_dns] -c 5 -i 0.2 -w 1
+    ${ping_res}=    read until prompt
+    should contain    ${ping_res}    100% packet loss
+    [Teardown]    run keywords    update_company_spi_tag_rule    ${suite_company_id}    ${suite_saas_tag_id}    ${0}    l4proto
+    ...    ${None}
+    ...    AND    teardown_iperf_server
+
+Series UDP Saas
+    [Tags]    SDWANDEV-3982
+    [Setup]    run keywords    Add Saas High SPI with Protocol    local    17
+    ...    AND    init_iperf_server
+    ${cpe}=    set variable    local
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ssh_pc    ${cpe}    sess_${cpe}_pc
+    Write    dig &{internet_host}[saas_dns]
+    read until prompt
+    ${score_d}    ${pkts_d}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets    ${cpe}
+    ...    Service1    1    ${False}
+    ${score}    ${pkts}=    wait until keyword succeeds    15    200ms    Get CPE Saas Bond Link Score and Packets Non Direct    ${cpe}
+    ...    Service1    1    ${False}
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_high_tag_id}
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${cpe}    ${r_iperf_s_port}    ${True}    5M    512
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_high_tag_id}
+    should be true    ${spi_pkts2} - ${spi_pkts} > 6000
+    should be true    ${spi_r_pkts2} > ${spi_r_pkts}
+    ${score_d2}    ${pkts_d2}=    Get CPE Saas Bond Link Score and Packets    ${cpe}    Service1    1    ${False}
+    ${score2}    ${pkts2}=    Get CPE Saas Bond Link Score and Packets Non Direct    ${cpe}    Service1    1    ${False}
+    ${res}=    evaluate    ${pkts2}+ ${pkts_d2} - (${pkts} + ${pkts_d}) > 6000
+    switch connection    sess_${cpe}_pc
+    write    ping &{internet_host}[saas_dns] -c 5 -i 0.2 -w 1
+    ${ping_res}=    read until prompt
+    should contain    ${ping_res}    5 received
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts3}    ${spi_r_pkts3}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_high_tag_id}
+    should be true    ${spi_pkts3} - ${spi_pkts2} <= 2
+    should be true    ${spi_r_pkts3} - ${spi_r_pkts2} <= 2
+    switch connection    sess_${cpe}_pc
+    ${nping_res}=    Write Sudo Cmd    nping --tcp-connect -c 10 --delay 10ms &{internet_host}[saas_dns] -p 22    &{${cpe}_pc}[passwd]
+    should contain    ${nping_res}    Failed: 0
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts4}    ${spi_r_pkts4}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_high_tag_id}
+    should be true    ${spi_pkts4} - ${spi_pkts3} <= 2
+    should be true    ${spi_pkts4} - ${spi_pkts3} <= 2
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_high_tag_id}
+    ...    AND    delete_company_spi_tag    ${suite_company_id}    ${suite_saas_high_tag_id}
+    ...    AND    teardown_iperf_server
+
+Saas IP Via Data Center
+    [Tags]    SDWANDEV-3990
+    [Setup]    run keywords    Add Sass SPI Via DC    guangzhou    ${None}    nanjing    192.168.0.8/32
+    ...    AND    init_iperf_server
+    ${cpe}=    set variable    guangzhou
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${link_pkts_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    Iperf3 From PC With Protocol    &{internet_host}[ip]    ${cpe}    ${r_iperf_s_port}    ${False}    5M    512
+    switch connection    sess_${cpe}_cpe
+    ${link_pkts2_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts2_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${link_pkts2_wan1} + ${link_pkts2_wan2} > ${link_pkts_wan1} + ${link_pkts_wan2}
+    should be true    ${spi_pkts2} > ${spi_pkts}
+    should be true    ${spi_r_pkts2} > ${spi_r_pkts}
+    ssh_pc    ${cpe}    sess_${cpe}_pc
+    write    ping &{internet_host}[ip] -c 5 -i 0.2 -w 1
+    ${ping_res}=    read until prompt
+    should contain    ${ping_res}    5 received
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts3}    ${spi_r_pkts3}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${spi_pkts3} > ${spi_pkts2}
+    should be true    ${spi_r_pkts3} > ${spi_r_pkts2}
+    switch connection    sess_${cpe}_pc
+    ${nping_res}=    Write Sudo Cmd    nping --udp -c 10 --delay 10ms &{internet_host}[ip] -p 22    &{${cpe}_pc}[passwd]
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts4}    ${spi_r_pkts4}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${spi_pkts4} > ${spi_pkts3}
+    should be true    ${spi_pkts4} > ${spi_pkts3}
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    delete_company_spi_tag    ${suite_company_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    teardown_iperf_server
+
+Saas Domain Via Data Center
+    [Tags]    SDWANDEV-3991
+    [Setup]    run keywords    Add Sass SPI Via DC    guangzhou    ${None}    nanjing
+    ...    AND    init_iperf_server
+    ${cpe}=    set variable    guangzhou
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ssh_pc    ${cpe}    sess_${cpe}_pc
+    Write    dig &{internet_host}[saas_dns]
+    read until prompt
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${link_pkts_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${cpe}    ${r_iperf_s_port}    ${False}    5M    512
+    switch connection    sess_${cpe}_cpe
+    ${link_pkts2_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts2_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${link_pkts2_wan1} + ${link_pkts2_wan2} > ${link_pkts_wan1} + ${link_pkts_wan2}
+    should be true    ${spi_pkts2} > ${spi_pkts}
+    should be true    ${spi_r_pkts2} > ${spi_r_pkts}
+    switch connection    sess_${cpe}_pc
+    write    ping &{internet_host}[saas_dns] -c 5 -i 0.2 -w 1
+    ${ping_res}=    read until prompt
+    should contain    ${ping_res}    5 received
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts3}    ${spi_r_pkts3}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${spi_pkts3} > ${spi_pkts2}
+    should be true    ${spi_r_pkts3} > ${spi_r_pkts2}
+    switch connection    sess_${cpe}_pc
+    ${nping_res}=    Write Sudo Cmd    nping --udp -c 10 --delay 10ms &{internet_host}[saas_dns] -p 22    &{${cpe}_pc}[passwd]
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts4}    ${spi_r_pkts4}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${spi_pkts4} > ${spi_pkts3}
+    should be true    ${spi_pkts4} > ${spi_pkts3}
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    delete_company_spi_tag    ${suite_company_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    teardown_iperf_server
+
+Saas Domain Via Data Center Only Tcp
+    [Tags]    SDWANDEV-4002
+    [Setup]    run keywords    Add Sass SPI Via DC    guangzhou    6    nanjing
+    ...    AND    init_iperf_server
+    ${cpe}=    set variable    guangzhou
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ssh_pc    ${cpe}    sess_${cpe}_pc
+    Write    dig &{internet_host}[saas_dns]
+    read until prompt
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${link_pkts_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    wait until keyword succeeds    2x    1    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${cpe}    ${r_iperf_s_port}
+    ...    ${False}    5M    512
+    switch connection    sess_${cpe}_cpe
+    ${link_pkts2_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts2_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${link_pkts2_wan1} + ${link_pkts2_wan2} > ${link_pkts_wan1} + ${link_pkts_wan2}
+    should be true    ${spi_pkts2} > ${spi_pkts}
+    should be true    ${spi_r_pkts2} > ${spi_r_pkts}
+    switch connection    sess_${cpe}_pc
+    write    ping &{internet_host}[saas_dns] -c 5 -i 0.2 -w 1
+    ${ping_res}=    read until prompt
+    should contain    ${ping_res}    5 received
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts3}    ${spi_r_pkts3}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    ${spi_pkts_spi1}    ${spi_r_pkts_spi1}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    should be true    ${spi_pkts3} == ${spi_pkts2}+1
+    should be true    ${spi_r_pkts3} == ${spi_r_pkts2}+1
+    switch connection    sess_${cpe}_pc
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${cpe}    ${r_iperf_s_port}    ${True}    1M    512
+    write    cat iperf_test.log
+    ${res}=    read until prompt
+    check_iperf_loss_result_in_pc    0.2    ${cpe}    iperf_test.log
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts4}    ${spi_r_pkts4}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    should be true    ${spi_pkts4} - ${spi_pkts3} == 19
+    ${spi_pkts2_spi1}    ${spi_r_pkts2_spi1}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    should be true    ${spi_pkts2_spi1} - ${spi_pkts_spi1} > 1000
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    delete_company_spi_tag    ${suite_company_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    teardown_iperf_server
+
+Saas IP TCP Via Data Center
+    [Tags]    SDWANDEV-3987
+    [Setup]    run keywords    Add Sass SPI Via DC    guangzhou    6    nanjing
+    ...    AND    init_iperf_server
+    ${cpe}=    set variable    guangzhou
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ssh_pc    ${cpe}    sess_${cpe}_pc
+    Write    dig &{internet_host}[saas_dns]
+    read until prompt
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${link_pkts_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    Wait Until Keyword Succeeds    2x    1    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${cpe}    ${r_iperf_s_port}
+    ...    ${False}    5M    512
+    switch connection    sess_${cpe}_cpe
+    ${link_pkts2_wan1}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${1}
+    ${link_pkts2_wan2}=    Get CPE Links Pkts by Src Wan    ${cpe}    &{nanjing_cpe}[chassis_id]    ${2}
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    ${spi_default_pkts2}    ${spi_default_r_pkts2}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    should be true    ${link_pkts2_wan1} + ${link_pkts2_wan2} > ${link_pkts_wan1} + ${link_pkts_wan2}
+    should be true    ${spi_pkts2} > ${spi_pkts}
+    should be true    ${spi_r_pkts2} > ${spi_r_pkts}
+    switch connection    sess_${cpe}_pc
+    write    ping &{internet_host}[saas_dns] -c 5 -i 0.2 -w 1
+    ${ping_res}=    read until prompt
+    should contain    ${ping_res}    5 received
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts3}    ${spi_r_pkts3}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    ${spi_default_pkts3}    ${spi_default_r_pkts3}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    should be true    ${spi_pkts3} == ${spi_pkts2}+1
+    should be true    ${spi_r_pkts3} == ${spi_r_pkts2}+1
+    should be true    ${spi_default_pkts3} > ${spi_default_pkts2}
+    should be true    ${spi_default_r_pkts3} > ${spi_default_r_pkts2}
+    switch connection    sess_${cpe}_pc
+    ${nping_res}=    Write Sudo Cmd    nping --udp -c 10 --delay 10ms &{internet_host}[saas_dns] -p 22    &{${cpe}_pc}[passwd]
+    switch connection    sess_${cpe}_cpe
+    ${spi_pkts4}    ${spi_r_pkts4}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_via_dc_tag_id}
+    ${spi_default_pkts4}    ${spi_default_r_pkts4}=    Get CPE SPI Pkts    ${cpe}    ${suite_saas_tag_id}
+    should be true    ${spi_pkts4} == ${spi_pkts3}
+    should be true    ${spi_pkts4} == ${spi_pkts3}
+    should be true    ${spi_default_pkts4} > ${spi_default_pkts3}
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    delete_company_spi_tag    ${suite_company_id}    ${suite_saas_via_dc_tag_id}
+    ...    AND    teardown_iperf_server
+
+SAAS_Nuwa_CLI_Test
+    [Tags]    SDWANDEV-3956
+    wait until keyword succeeds    10    200ms    check_cpe_cache_info    local    192.168.0.8    ${False}
+    ...    ${True}    ${17}    ${0}    ${0}    ${0}
+    wait until keyword succeeds    10    200ms    check_cpe_cache_info    local    192.168.0.8    ${False}
+    ...    ${True}    ${6}    ${0}    ${0}    ${0}
+    wait until keyword succeeds    10    200ms    check_cpe_cache_info    guangzhou    &{dns_server}[ip]    ${False}
+    ...    ${True}    ${6}    ${0}    ${0}    ${0}
+    ${saas_r_connect_info_local}    ${saas_ur_connect_info_local}=    Get_Saas_Nuwa_from_CLI    Saas_Service1    &{local_cpe}[chassis_id]
+    ${saas_r_connect_info_gz}    ${saas_ur_connect_info_gz}=    Get_Saas_Nuwa_from_CLI    Saas_Service1    &{guangzhou_cpe}[chassis_id]
+    ssh pc    local
+    Write    dig &{internet_host}[saas_dns2]
+    Write    nping --tcp-connect -c 10 --delay 1s \ &{internet_host}[saas_dns2] \ -p 99 > nping_u_3956.log &
+    ssh pc    guangzhou
+    Write    nping --tcp-connect -c 10 --delay 1s &{dns_server}[ip] --data-length 512 -p 998 > nping_u.log &
+    run keyword and continue on Failure    wait until keyword succeeds    10    200ms    check saas cli    Saas_Service1    local
+    ...    ${saas_r_connect_info_local}    ${saas_ur_connect_info_local}    20    20    1    r
+    wait until keyword succeeds    10    200ms    check saas cli    Saas_Service1    guangzhou    ${saas_r_connect_info_gz}
+    ...    ${saas_ur_connect_info_gz}    80    80    1    r
+    [Teardown]    close all connections
+
+CPE_SpeedUp_Nuwa_CLI_Test
+    [Tags]    SDWANDEV-3953
+    ${init_stream_num}    ${init_r_send_pkgs}    ${init_r_send_bytes}    ${init_r_recv_pkgs}    ${init_r_recv_bytes}    ${init_r_resend_pkgs}    ${init_r_resend_bytes}=
+    ...    Get_CPE_Nuwa_Connection_StreamNum_Pkgs    local    service1    ${1}    saas
+    ${init_stream_num}    ${init_r_send_pkgs}    ${init_r_send_bytes}    ${init_r_recv_pkgs}    ${init_r_recv_bytes}    ${init_r_resend_pkgs}    ${init_r_resend_bytes}=
+    ...    Get_CPE_Nuwa_Connection_StreamNum_Pkgs    guangzhou    service1    ${1}    saas
+    ssh pc    local
+    Write    dig &{internet_host}[saas_dns]
+    Write    nping --tcp-connect -c 10 --delay 1s \ &{internet_host}[saas_dns2 \ -p 22 > nping_u_3296.log &
+    ssh pc    guangzhou
+    Write Sudo Cmd    ps    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    nping --tcp-connect -c 10 --delay 1s &{dns_server}[ip] \ --data-length 512 -p 22 \ > nping_u.log &    &{guangzhou_pc}[passwd]
+    wait until keyword succeeds    10    200ms    Check CPE Saas Cli Normal Pkgs    local    ${1}    ${init_r_send_pkgs}
+    ...    ${init_r_send_bytes}    ${init_r_recv_pkgs}    ${init_r_recv_bytes}    ${60}
+    wait until keyword succeeds    10    200ms    Check CPE Saas Cli Normal Pkgs    guangzhou    ${1}    ${init_r_send_pkgs}
+    ...    ${init_r_send_bytes}    ${init_r_recv_pkgs}    ${init_r_recv_bytes}    ${60}
+    [Teardown]
+
+CPE_Cache_CLI_Test
+    [Tags]    SDWANDEV-3961
+    ssh pc    local
+    Write    dig &{internet_host}[saas_dns]
+    Write    sudo nping --tcp-connect -c 10 --delay 1s \ &{internet_host}[saas_dns] \ -p 22 > nping_u_3296.log &
+    Write    sudo nping --tcp-connect -c 10 --delay 1s &{remote_pc}[inner_ip] \ -p 22 > nping_u_3296.log &
+    ${bond_local}    get_e2e_dest_site_bond    &{local_cpe}[chassis_id]    &{Saas_Service1}[ne_id]
+    wait until keyword succeeds    5    200ms    Check CPE Cache Info    local    &{internet_host}[ip]    ${False}
+    ...    ${True}    6    1    1    ${bond_local[0]['portNumber']}
+    ${bond_local}    get_e2e_dest_site_bond    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    Check CPE Cache Info    local    &{remote_switch}[ip]    ${False}    ${False}    50    1
+    ...    1    ${bond_local[0]['portNumber']}    ${False}
+    [Teardown]
+
+CPE_WAN_loss10%_SpeedUp_Nuwa_CLI_Test
+    [Tags]    SDWANDEV-3954
+    [Setup]    add_loss_on_cpe_wan    guangzhou    2
+    ${init_stream_num}    ${init_r_send_pkgs}    ${init_r_send_bytes}    ${init_r_recv_pkgs}    ${init_r_recv_bytes}    ${init_r_resend_pkgs}    ${init_r_resend_bytes}=
+    ...    Get_CPE_Nuwa_Connection_StreamNum_Pkgs    guangzhou    service1    ${1}    saas
+    ssh pc    guangzhou
+    Write Sudo Cmd    ps    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    nping --tcp-connect -c 10 --delay 1s &{dns_server}[ip] \ --data-length 512 -p 22 \ > nping_u.log &    &{guangzhou_pc}[passwd]
+    close connection
+    wait until keyword succeeds    10    200ms    Check CPE Saas Cli resend Pkgs    guangzhou    ${1}    ${init_r_send_pkgs}
+    ...    ${init_r_send_bytes}    ${init_r_resend_pkgs}    ${init_r_resend_bytes}    ${1}
+    [Teardown]    del_loss_on_cpe_wan    guangzhou    2
+
+Series 5-Tuple Saas SPI
+    [Tags]    SDWANDEV-4032
+    [Setup]    Add 5-Tuple SPI    remote    &{remote_switch}[ip]/32    1000-65535    &{internet_host}[saas_dns]    10-50000
+    ...    6
+    ssh_cpe    remote    sess_remote_cpe
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    remote    ${suite_saas_5_tuple_tag_id}
+    ssh login remote
+    ${res}=    Write Sudo Cmd    nping --tcp-connect -c 20 --delay 30ms &{internet_host}[saas_dns] -p 22    &{remote_pc}[passwd]
+    close connection
+    should contain    ${res}    Failed: 0 (0.00%)
+    switch connection    sess_remote_cpe
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    remote    ${suite_saas_5_tuple_tag_id}
+    should be true    ${spi_pkts2} - ${spi_pkts} >= 20
+    should be true    ${spi_r_pkts2} - ${spi_r_pkts} >= 20
+    close connection
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_saas_5_tuple_tag_id}
+    ...    AND    Delete Company SPI Tag    ${suite_company_id}    ${suite_saas_5_tuple_tag_id}
+
+GW 5-Tuple Saas SPI
+    [Tags]    SDWANDEV-4029
+    [Setup]    Add 5-Tuple SPI    guangzhou    &{guangzhou_pc}[inner_ip]/32    1000-65535    &{internet_host}[saas_dns]    10-50000
+    ...    6
+    ssh_cpe    guangzhou    sess_guangzhou_cpe
+    ${spi_pkts}    ${spi_r_pkts}=    Get CPE SPI Pkts    guangzhou    ${suite_saas_5_tuple_tag_id}
+    write openwrt cmd    /etc/init.d/dnsmasq restart
+    ssh login guangzhou
+    write    nslookup &{internet_host}[saas_dns]
+    read until prompt
+    ${res}=    Write Sudo Cmd    nping --tcp-connect -c 20 --delay 30ms &{internet_host}[saas_dns] -p 22    &{guangzhou_pc}[passwd]
+    close connection
+    should contain    ${res}    Failed: 0 (0.00%)
+    switch connection    sess_guangzhou_cpe
+    ${spi_pkts2}    ${spi_r_pkts2}=    Get CPE SPI Pkts    guangzhou    ${suite_saas_5_tuple_tag_id}
+    should be true    ${spi_pkts2} - ${spi_pkts} >= 20
+    should be true    ${spi_r_pkts2} - ${spi_r_pkts} >= 20
+    close connection
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${suite_saas_5_tuple_tag_id}
+    ...    AND    Delete Company SPI Tag    ${suite_company_id}    ${suite_saas_5_tuple_tag_id}
+
+CPE_SAAS_Udp_Long_Conection
+    [Tags]    SDWANDEV-4483
+    ssh pc    dns_server
+    Write    sh startnc.sh &{dns_server}[ip] 5555 67
+    ssh pc    guangzhou
+    Write Sudo Cmd    ps    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    rm out.txt;echo hello|nc -u \ &{dns_server}[ip] 5555 -s &{guangzhou_pc}[inner_ip]&>out.txt&    &{guangzhou_pc}[passwd]
+    wait until keyword succeeds    3x    25    ssh_write_command_and_check_string    cat out.txt|grep back|wc -l    2
+    [Teardown]    teardown_nc
+
+*** Keywords ***
+internet_Setup
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Salt download and reload ip2pop    &{${cpe}_cpe}[minion_id]
+    \    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}
+    \    ...    ${cpe}
+    \    Check CPE Saas Bond And Links    ${cpe}    Service1
+
+Check_Nat_Ping_OK
+    [Arguments]    ${nat_s_ip}    ${cpe}
+    ssh_pc    ${cpe}
+    Write Sudo Cmd    dig &{internet_host}[saas_dns]    &{${cpe}_pc}[passwd]
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}    ${cpe}
+    Write    ping -M do -s 1360 &{internet_host}[saas_dns] -c ${exec_time} -i 0.5 > ping_p.log &
+    sleep    1
+    run keyword and ignore error    Get_CPE_Cache_Info    local    &{internet_host}[ip]    ${False}    ${True}    ${1}
+    Start_Tcpdump_With_From_Internet_Host    &{internet_host}[nat_phy_port]    tcpdump.log    icmp    ${nat_s_ip}
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep ICMP tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}
+
+Check_Saas_Ping_OK
+    [Arguments]    ${nat_s_ip}    ${cpe}    ${loss}=${0}
+    ssh_pc    ${cpe}    cpe_conneciton
+    Write Sudo Cmd    dig &{internet_host}[saas_dns]    &{${cpe}_pc}[passwd]
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}    ${cpe}
+    Write    ping -M do -s 1360 &{internet_host}[saas_dns] -c ${exec_time} -i 0.2 > ping_p.log &
+    sleep    1
+    ${dst_cache}    ${src_cache}=    Get_CPE_Cache_Info    local    &{internet_host}[ip]    ${False}    ${True}
+    ...    ${1}
+    ${len_dst}=    get length    ${dst_cache}
+    ${len_src}=    get length    ${src_cache}
+    should be true    ${len_src}>=1
+    should be true    ${len_dst}>=1
+    sleep    1
+    switch connection    cpe_conneciton
+    ${stdout}    ${stderr}=    Execute Command    cat \ ping_p.log    return_stderr=True
+    Should Be Empty    ${stderr}
+    ${cmd}    Set Variable    grep 'loss' ping_p.log|awk -F '[ %]' '{print $6}'
+    ${res}    ${stderr}=    Execute Command    ${cmd}    return_stderr=True
+    Should Be True    ${res} <= ${loss}    The package should be less than ${loss}%
+
+Check_Pop_Nat_Port
+    ${ports}=    get_device_port_from_ne    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]    &{local_pop}[passwd]
+    Length Should Be    ${ports}    2
+
+Check_CPE_NAT_Flow_Table0
+    [Arguments]    ${code}    ${result}    ${chassis_id}    ${pri_range}=${None}
+    ${ret}=    run keyword if    '${pri_range}'=='${None}'    check_cpe_internet_table_2_flows    ${chassis_id}    ${code}
+    ...    ELSE    check_cpe_internet_table_2_flows    ${chassis_id}    ${code}    ${pri_range}
+    should be equal    ${ret}    ${result}
+
+Check_Pop_Nat_Timeout
+    [Arguments]    ${timeout}
+    ${agent_config}=    get_nat_agent_config_from_pop    &{local_pop}[ctrl_ip]    &{local_pop}[ssh_port]    &{local_pop}[user]    &{local_pop}[passwd]
+    should be true    '${agent_config["nat-session-timeout"]["tcpTimeout"]}' == '${timeout}'
+
+Nat_Agent_Pattern_TearDown
+    delete_all_nat_agent_search_pattern
+    delete_pop_saas_with_service_id    &{local_pop}[ne_id]    11
+    create_nat_agent_pattern    &{local_pop}[ne_id]    10    *    *    *
+    Delete_Domain_Pattern_On_Company1
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_NAT_Flow_Table0    &{internet_host}[ip]    ${False}    &{local_cpe}[chassis_id]
+
+Delete_Check_CPE_Nat_Pattern
+    [Arguments]    ${CPE}    ${domain}
+    Delete_Domain_Pattern_On_Company1
+    Wait Until Keyword Succeeds    2s    200ms    Check_Domain_Info_From_Cpe    local    ${domain}    0
+
+Check_CPE_NAT_Flow_Table0_IP
+    [Arguments]    ${ip}    ${result}    ${chassis_id}
+    ${ret}=    check_cpe_internet_table_0_ip_flows    ${chassis_id}    ${ip}
+    should be equal    ${ret}    ${result}
+
+DNS_Sperf_result_Check
+    [Arguments]    ${q_num}    ${t}    ${avg}
+    ${p}=    evaluate    ${t} * ${q_num}
+    Write    cd ~/dnsperf-src-2.0.0.0-1; ./dnsperf -d baidu.txt -c 100 -Q ${q_num} -l ${t} -s 114.114.114.114
+    ${res}=    wait until keyword succeeds    ${t}    1s    read until    StdDev
+    Should Contain    ${res}    NOERROR ${p}
+    ${r}=    get line    ${res}    -2
+    ${sec}=    evaluate    float('${r}'.split(' ')[6])
+    should be true    ${sec}<=${avg}
+
+init_iperf_server
+    ${internet_server_connect} =    Start Iperf Internet Server    ${r_iperf_s_port}
+    ${dns_server_connect}=    Init_Iperfs_Server_In_PC    dns_server
+    ${salt-master_connect}=    Init_Iperfs_Server_In_PC    salt-master
+    ${server_list}=    create list    ${internet_server_connect}    ${dns_server_connect}    ${salt-master_connect}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+teardown_iperf_server
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+
+Teardown_beijing_Site
+    Set_Site_Bandwidth    local    ${suite_&{local_pc}[site_name]_site_id}    400000    5    10
+
+dns_server_nanjing
+    [Arguments]    ${command}
+    ssh_pc    nanjing
+    Write Sudo Cmd    service bind9 ${command}    &{nanjing_pc}[passwd]
+    close connection
+
+Get CPE Saas Metrics
+    [Arguments]    ${ne_id}    ${name}=${None}
+    ${pkts_r}    ${bytes_r}    ${pkts_s}    ${bytes_s}=    run keyword if    '${name}' == '${None}'    Get Saas Metrics
+    ...    ${ne_id}
+    ...    ELSE    Get Saas Metrics with Name    ${ne_id}    ${name}
+    [Return]    ${pkts_r}    ${bytes_r}    ${pkts_s}    ${bytes_s}
+
+Get Saas Metrics with Name
+    [Arguments]    ${ne_id}    ${name}
+    ${label_name}=    create list    saas_pattern
+    ${lable_value}=    create list    ${name}
+    ${bytes_r}=    Get NE Metric Value    ${ne_id}    collectd_saas_pattern_receive_bytes    ${label_name}    ${lable_value}
+    ${pkts_r}=    Get NE Metric Value    ${ne_id}    collectd_saas_pattern_receive_packets    ${label_name}    ${lable_value}
+    ${bytes_s}    Get NE Metric Value    ${ne_id}    collectd_saas_pattern_transmit_bytes    ${label_name}    ${lable_value}
+    ${pkts_s}    Get NE Metric Value    ${ne_id}    collectd_saas_pattern_transmit_packets    ${label_name}    ${lable_value}
+    [Return]    ${pkts_r}    ${bytes_r}    ${pkts_s}    ${bytes_s}
+
+Get Saas Metrics
+    [Arguments]    ${ne_id}
+    ${bytes_r}=    Get NE Metric Value    ${ne_id}    collectd_saas_receive_bytes
+    ${pkts_r}=    Get NE Metric Value    ${ne_id}    collectd_saas_receive_packets
+    ${bytes_s}    Get NE Metric Value    ${ne_id}    collectd_saas_transmit_bytes
+    ${pkts_s}    Get NE Metric Value    ${ne_id}    collectd_saas_transmit_packets
+    [Return]    ${pkts_r}    ${bytes_r}    ${pkts_s}    ${bytes_s}
+
+Check Saas Metrics
+    [Arguments]    ${ne_id}    ${init_pkts_r}    ${init_pkts_s}    ${expected_incr_r}    ${expected_incr_s}
+    ${cur_saas_pkts_r}    ${cur_saas_byts_r}    ${cur_saas_pkts_s}    ${cur_saas_byts_s}    Get CPE Saas Metrics    ${ne_id}
+    should be true    ${cur_saas_pkts_r}-${init_pkts_r}>=${expected_incr_r}
+    should be true    ${cur_saas_pkts_s}-${init_pkts_s}>=${expected_incr_s}
+
+Check Saas Metrics with Name
+    [Arguments]    ${ne_id}    ${init_pkts_r}    ${init_pkts_s}    ${expected_incr_r}    ${expected_incr_s}    ${name}
+    ...    ${rec_equal}=${True}
+    ${cur_saas_pkts_r}    ${cur_saas_byts_r}    ${cur_saas_pkts_s}    ${cur_saas_byts_s}    Get CPE Saas Metrics    ${ne_id}    ${name}
+    run keyword if    '${rec_equal}' == '${True}`'    should be true    ${cur_saas_pkts_r}-${init_pkts_r}==${expected_incr_r}
+    ...    ELSE    should be true    ${cur_saas_pkts_r}-${init_pkts_r}>=${expected_incr_r}
+    should be true    ${cur_saas_pkts_s}-${init_pkts_s}>=${expected_incr_s}
+
+Check_Nat_Ping_Log_No_Loss_No_DUP
+    [Arguments]    ${ping_log}
+    # judgement for case
+    wait until keyword succeeds    ${exec_time}x    0.2    Check Packet Loss    ${ping_log}
+    Write    tail -n 10 ${ping_log}
+    ${res}=    read until prompt
+    should not contain    ${res}    DUP
+    should not contain    ${res}    Unreachable
+
+Check_All_CPE_NAT_Flow_Table0
+    [Arguments]    ${exist}
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    \    Wait Until Keyword Succeeds    10x    200ms    Check_CPE_NAT_Flow_Table0    ${local_code}    ${exist}
+    \    ...    ${ne_id}
+
+teardown_search_pattern
+    delete_code_agent_pattern_by_code    1    2    0    0
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_CPE_NAT_Flow    ${japan_code}    ${False}    local
+    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+
+Saas Code Teardown
+    close connection
+    delete_code_agent_pattern_by_code    31
+    delete_code_agent_pattern_by_code    11    17
+    delete_code_agent_pattern_by_code    1    1    3
+    delete_code_agent_pattern_by_code    1    1    5    1
+    delete_code_agent_pattern_by_code    1    1    5    1    12
+    Salt download and reload ip2pop    &{local_cpe}[minion_id]
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${local_code}    ${True}    local
+    Check CPE Saas Bond And Links    local    Service1
+
+Update IP2POP And Take Effect
+    [Arguments]    ${code}    ${code_wo_carrier}    ${priority}
+    write sudo cmd    echo "192.168.0.0/24 ${code}" > /opt/aiwan/config/ip2pop.db    &{local_cpe}[passwd]
+    Salt reload ip2pop    &{local_cpe}[minion_id]
+    Wait Until Keyword Succeeds    10s    1s    Check_CPE_NAT_Flow    ${code_wo_carrier}    ${True}    local
+    ...    ${priority}
+    Check CPE Saas Bond And Links    local    Service1
+    Get CPE Saas Bond Link Score and Packets Non Direct    local    Service1    1    ${False}
+    ${init_saas_name_pkts_r}    ${init_saas_name_byts_r}    ${init_saas_name_pkts_s}    ${init_saas_name_byts_s}    Get CPE Saas Metrics    &{local_cpe}[minion_id]    samba.systemtest.com
+    ssh_pc    local
+    Write Sudo Cmd    ping -M do -s 1360 samba.systemtest.com -c ${exec_time} -i 0.2 > ping_p.log    &{local_pc}[passwd]
+    wait until keyword succeeds    11    200ms    Check Saas Metrics with Name    &{local_cpe}[minion_id]    ${init_saas_name_pkts_r}    ${init_saas_name_pkts_s}
+    ...    ${exec_time}    ${exec_time}    samba.systemtest.com
+
+netcat_udp_test
+    [Arguments]    ${pc}
+    ${sess_server_pc}    ssh login    &{salt-master}[ctl_ip]    &{salt-master}[ssh_port]    &{salt-master}[user]    &{salt-master}[passwd]
+    start command    echo hello|nc -u -s &{salt-master}[internet_ip] -l 5203 >nc_out.txt&
+    ssh_pc    ${pc}
+    SSH_Write_Command_And_Check_String    echo helloback|nc -u samba.systemtest.com 5203    hello
+    close connection
+    switch connection    ${sess_server_pc}
+    SSH_Write_Command_And_Check_String    cat nc_out.txt    helloback
+    SSH_Write_Command_And_Check_String    pkill -9 nc    pkill -9 nc
+    close connection
+
+Check CPE Saas Packets Update
+    [Arguments]    ${cpe}    ${saas_service}    ${pkts_d}    ${pkts}
+    ${update_score_d}    ${update_pkts_d}=    Get CPE Saas Bond Link Score and Packets    ${cpe}    ${saas_service}
+    ${update_score}    ${update_pkts}=    Get CPE Saas Bond Link Score and Packets    ${cpe}    ${saas_service}
+    should be true    ${update_pkts_d} > ${pkts_d} or ${update_pkts} > ${pkts}
+
+Check_link_pkg_num_increase
+    [Arguments]    ${cpe}    ${saas}    ${pkts}    ${pkts_d}    ${pkts_4g}    ${pkts_4g_d}
+    ssh pc    ${cpe}
+    Write Sudo Cmd    nping --tcp-connect -c 5 --delay 1s \ &{internet_host}[saas_dns] \ -p 22 > nping_u.log    &{${cpe}_pc}[passwd]
+    close connection
+    ${score_d2}    ${pkts_d2}=    Get CPE Saas Bond Link Score and Packets    ${cpe}    ${saas}    1    ${False}
+    ${score2}    ${pkts2}=    Get CPE Saas Bond Link Score and Packets Non Direct    ${cpe}    ${saas}    1    ${False}
+    ${score_4g_d2}    ${pkts_4g_d2}=    Get CPE Saas Bond Link Score and Packets    ${cpe}    ${saas}    2    ${False}
+    ${score_4g2}    ${pkts_4g2}=    Get CPE Saas Bond Link Score and Packets Non Direct    ${cpe}    ${saas}    2    ${False}
+    ${res}=    evaluate    ${pkts2}+${pkts_d2}> ${pkts} +${pkts_d}
+    should be true    ${res}
+    should be equal    ${pkts_4g}    ${pkts_4g2}
+    should be equal    ${pkts_4g_d}    ${pkts_4g_d2}
+
+Check_flow_code_pkg_num_increase
+    [Arguments]    ${cpe}    ${code}    ${pkts}    ${num}    ${b_num}=500
+    ${pkts2}    get_cpe_internet_table_2_flows_packets    ${cpe}    ${code}
+    ${res}=    evaluate    ${pkts2} >= ${pkts} +${num}
+    should be true    ${res}
+    ${res}=    evaluate    ${pkts2} <=${pkts} +${b_num}
+    should be true    ${res}
+
+teardown_site_saas_rule
+    [Arguments]    ${cpe}    ${ips}    ${tag_id}    ${tag_name}    ${agent_codes}    ${indexes}
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}
+    delete_company_spi_tag    ${suite_company_id}    ${tag_name}
+    Apply Default Saas SPI To CPEs    ${cpe}    ${suite_saas_tag_id}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    ${cpe}    ${ips}    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}    0
+    ${openwrt}    evaluate    '${cpe}' in ${opwrt_list}
+    run keyword if    ${openwrt}    switch connection    sess_gw
+    run keyword if    ${openwrt}    wait until keyword succeeds    45s    500ms    Check GW Ipset List    ${ips}
+    ...    ${False}
+    run keyword if    ${openwrt}    close connection
+
+teardown_saas_group
+    [Arguments]    ${cpe}    ${tag_id}    ${tag_name}
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}
+    delete_company_spi_tag    ${suite_company_id}    ${tag_name}
+
+Changsha Add Delay To POP
+    [Arguments]    ${wan_if}    ${dport}    ${delay}=${500}
+    ssh_cpe    changsha
+    write openwrt cmd    tc qdisc del dev ${wan_if} root
+    write openwrt cmd    tc qdisc add dev ${wan_if} root handle 1: prio
+    write openwrt cmd    tc qdisc add dev ${wan_if} parent 1:1 handle 30: netem delay ${delay}ms
+    write openwrt cmd    tc filter add dev ${wan_if} parent 1:0 prio 1 u32 match ip dport ${dport} 0xffff match ip dst 10.194.20.3 flowid 1:1
+    close connection
+    sleep    5s
+
+Changsha Clear Delay To POP
+    [Arguments]    ${wan_if}
+    ssh_cpe    changsha
+    write openwrt cmd    tc qdisc del dev ${wan_if} root
+    close connection
+
+Add Delay on Changsha
+    [Arguments]    ${port}    ${m_seconds}
+    ${if_list}=    create list    ${port}
+    ${if_delay}=    create list    ${m_seconds}
+    Add_Delay_on_Gateway_Interface    changsha    ${if_list}    ${if_delay}
+
+Clear Delay on Changsha
+    [Arguments]    ${port}
+    ${if_list}=    create list    ${port}
+    clear_Delay_on_Gateway_Interface    changsha    ${if_list}
+
+Get CPE Links Pkts by Src Wan
+    [Arguments]    ${cpe}    ${dstId}    ${src_wan}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${links}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}    ${dstId}
+    ${res}=    evaluate    sum(map(lambda y: y['tx_packets'], filter(lambda x: x['src_wan_id'] == ${src_wan}, ${links})))
+    [Return]    ${res}
+
+Check Saas Cli
+    [Arguments]    ${saas}    ${cpe}    ${init_r_c}    ${init_ur_c}    ${expected_incr_r}    ${expected_incr_s}
+    ...    ${expect_stream}    ${t}
+    ${saas_r_connect_info}    ${saas_ur_connect_info}=    Get_Saas_Nuwa_from_CLI    saas_service1    &{${cpe}_cpe}[chassis_id]
+    should be true    ${saas_${t}_connect_info[0]}-${init_${t}_c[0]}>=${expected_incr_s}
+    should be true    ${saas_${t}_connect_info[2]}-${init_${t}_c[2]}>=${expected_incr_r}
+    should be true    ${saas_${t}_connect_info[6]}-${init_${t}_c[6]}>=${expect_stream}
+
+Check CPE Saas Cli Normal Pkgs
+    [Arguments]    ${cpe}    ${reliable}    ${init_r_send_pkgs}    ${init_r_send_bytes}    ${init_r_recv_pkgs}    ${init_r_recv_bytes}
+    ...    ${expect_num}
+    ${stream_num}    ${r_send_pkgs}    ${r_send_bytes}    ${r_recv_pkgs}    ${r_recv_bytes}    ${r_resend_pkgs}    ${r_resend_bytes}=
+    ...    Get_CPE_Nuwa_Connection_StreamNum_Pkgs    ${cpe}    service1    ${reliable}    saas
+    should be true    ${stream_num}>=1
+    should be true    ${r_send_pkgs}-${init_r_send_pkgs}>=${expect_num}
+    should be true    ${r_recv_pkgs}-${init_r_recv_pkgs}>=${expect_num}
+    should be true    ${r_send_bytes}-${init_r_send_bytes}>=${expect_num}*64
+    should be true    ${r_recv_bytes}-${init_r_recv_bytes}>=${expect_num}*64
+
+Check CPE Saas Cli resend Pkgs
+    [Arguments]    ${cpe}    ${reliable}    ${init_r_send_pkgs}    ${init_r_send_bytes}    ${init_r_resend_pkgs}    ${init_r_resend_bytes}
+    ...    ${expect_num}
+    ${stream_num}    ${r_send_pkgs}    ${r_send_bytes}    ${r_recv_pkgs}    ${r_recv_bytes}    ${r_resend_pkgs}    ${r_resend_bytes}=
+    ...    Get_CPE_Nuwa_Connection_StreamNum_Pkgs    ${cpe}    service1    ${reliable}    saas
+    should be true    ${stream_num}>=1
+    should be true    ${r_send_pkgs}-${init_r_send_pkgs}>=${expect_num}
+    should be true    ${r_resend_pkgs}-${init_r_resend_pkgs}>=${expect_num}
+    should be true    ${r_send_bytes}-${init_r_send_bytes}>=${expect_num}*64
+    should be true    ${r_resend_bytes}-${init_r_resend_bytes}>=${expect_num}*64
+
+Config_SPI_Skype_Tag_Dispatch
+    [Arguments]    ${cpe}    ${site}    ${src_ip}=*    ${proto}=17    ${d_port}=3480
+    ${tag_name}=    set variable    saas_skype_tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    append_company_spi_Qos_tag_rules    ${suite_company_id}    ${proto}    ${src_ip}    *    0.0.0.0/0    ${d_port}
+    ...    ${tag_name}
+    ${agent_codes}=    create list    0
+    ${indexes}=    create list    0
+    ${ttl}=    create list    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_${site}_site_id}    ${tag_id}    1200    ${agent_codes}    ${indexes}
+    ...    ${ttl}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    ${cpe}    *    @{agent_codes}[0]
+    ...    @{indexes}[0]    ${tag_id}    1    ${False}    3480
+    set test variable    ${test_tag_id}    ${tag_id}
+    set test variable    ${test_tag_name}    ${tag_name}
+    [Return]    ${tag_id}
+
+Confirm Better Wan
+    [Arguments]    ${cpe}    ${dstId}    ${better_wan}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${links}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}    ${dstId}
+    ${direct_b_wan_score}=    evaluate    filter(lambda x: x['src_wan_id'] == ${better_wan} and x['direct'] == True, ${links})[0]['score']
+    ${indirect_b_wan_score}=    evaluate    filter(lambda x: x['src_wan_id'] == ${better_wan} and x['direct'] == False, ${links})[0]['score']
+    ${direct_o_wan_score}=    evaluate    filter(lambda x: x['src_wan_id'] != ${better_wan} and x['direct'] == True, ${links})[0]['score']
+    ${indirect_o_wan_score}=    evaluate    filter(lambda x: x['src_wan_id'] != ${better_wan} and x['direct'] == False, ${links})[0]['score']
+    should be true    ${direct_b_wan_score} < ${direct_o_wan_score}
+    should be true    ${direct_b_wan_score} < ${indirect_o_wan_score}
+    should be true    ${indirect_b_wan_score} < ${direct_o_wan_score}
+    should be true    ${indirect_b_wan_score} < ${indirect_o_wan_score}
+
+Add Saas High SPI with Protocol
+    [Arguments]    ${cpe}    ${protocol}
+    ${tag_name}=    set variable    saas_high_tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    Set global Variable    ${suite_saas_high_tag_id}    ${tag_id}
+    append_company_spi_tag_rules    ${suite_company_id}    .*.sh.wsdashi.com    ${tag_name}
+    update_company_spi_tag_rule    ${suite_company_id}    ${suite_saas_high_tag_id}    ${0}    l4proto    ${protocol}
+    ${agent_codes}=    create list    &{default_dns}[ip]
+    ${indexes}=    create list    0
+    ${ttls}=    create list    ${flow_ttl}
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    900    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    ${cpe}    .*.sh.wsdashi.com    @{agent_codes}[0]
+    ...    @{indexes}[0]
+
+Add Sass SPI Via DC
+    [Arguments]    ${cpe}    ${protocol}    ${next_hop_cpe}    ${destination}=.*.sh.wsdashi.com
+    ${tag_name}=    set variable    saas_via_dc_tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    Set global Variable    ${suite_saas_via_dc_tag_id}    ${tag_id}
+    ${f_domain}=    run keyword and ignore error    should match regexp    ${destination}    [a-zA-Z]
+    append_company_spi_tag_rules    ${suite_company_id}    ${destination}    ${tag_name}
+    update_company_spi_tag_rule    ${suite_company_id}    ${suite_saas_via_dc_tag_id}    ${0}    l4proto    ${protocol}
+    run keyword if    '@{f_domain}[0]' == 'PASS'    append_office_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    900
+    ...    ${suite_&{${next_hop_cpe}_pc}[site_name]_site_id}    &{default_dns}[ip]    0    ${flow_ttl}
+    ...    ELSE    append_office_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${tag_id}    900
+    ...    ${suite_&{${next_hop_cpe}_pc}[site_name]_site_id}
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Saas_Rule_Dispatch_From_Cpe    ${cpe}    ${destination}    &{default_dns}[ip]
+    ...    0    ${suite_saas_via_dc_tag_id}    1    ${True}
+
+Get CPE SPI Pkts
+    [Arguments]    ${cpe}    ${tag_id}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${spi_stats}=    Get_CPE_Spi_Json_Result    ${openwrt}    &{${cpe}_cpe}[passwd]
+    ${spi_pkts}=    evaluate    filter(lambda x:x['spi_tag']==${tag_id}, ${spi_stats})[0]['tx_packets']
+    ${spi_r_pkts}=    evaluate    filter(lambda x:x['spi_tag']==${tag_id}, ${spi_stats})[0]['rx_packets']
+    [Return]    ${spi_pkts}    ${spi_r_pkts}
+
+teardown_nc
+    ${pcs}=    create_list    dns_server    guangzhou
+    : FOR    ${p}    IN    @{pcs}
+    \    ${pwd}=    ssh_pc    ${p}
+    \    write sudo cmd    pkill -9 nc    ${pwd}
+    \    write sudo cmd    pkill -f startnc.sh    ${pwd}
+
+check_ip_in_dns_result
+    [Arguments]    ${dns}    ${ip}
+    write    dig ${dns}
+    ${res}=    read until    $
+    should contain    ${res}    ${ip}
+
+check_tcp_nping_OK
+    [Arguments]    ${cpe}
+    Write    sudo nping --tcp-connect -c 20 --delay 1s \ &{internet_host}[saas_dns] \ -p 22 > nping_u.log &
+    sleep    1
+    run keyword and ignore error    Get_CPE_Cache_Info    ${cpe}    &{internet_host}[ip]    ${False}    ${True}    ${6}
+    Start_Tcpdump_With_From_Internet_Host    &{internet_host}[nat_phy_port]    tcpdump.log    tcp    &{remote_pop}[ip]
+    ${rc}    ${stderr}=    execute command    cat tcpdump.log    return_stderr=True
+    should be empty    ${stderr}
+    ${rc}    ${stderr}=    execute command    grep win \ tcpdump.log | wc -l    return_stderr=True
+    Should Be True    ${rc}>0
+    should be empty    ${stderr}

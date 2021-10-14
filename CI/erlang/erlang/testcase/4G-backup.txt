@@ -1,0 +1,35 @@
+*** Settings ***
+Suite Setup       setup
+Suite Teardown    teardown
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+
+*** Variables ***
+${r_iperf_s_port}    5201
+${loss}           0.1
+
+*** Test Cases ***
+4G_backup_check_measure_fill
+    [Tags]    SDWANDEV-4013
+    wait until keyword succeeds    30    1s    check_if_measure_fill    guangzhou    ${1}
+    [Teardown]    run keywords    Change_cpe_4G_usage    guangzhou    ${True}
+    ...    AND    wait until keyword succeeds    20s    2s    Check_CPE_Status    guangzhou
+    ...    state    stable
+    
+4G_normal_check_measure_normal
+    [Tags]    SDWANDEV-4015
+    Change_cpe_4G_usage    guangzhou    ${False}
+    wait until keyword succeeds    30    1s    check_if_measure_fill    guangzhou    ${0}
+    [Teardown]    run keywords    Change_cpe_4G_usage    guangzhou    ${True}
+    ...    AND    wait until keyword succeeds    20s    2s    Check_CPE_Status    guangzhou
+    ...    state    stable
+
+*** Keywords ***
+setup
+    ssh_cpe  guangzhou   sess_guangzhou_cpe
+    set suite variable   ${sess_guangzhou_cpe}    sess_guangzhou_cpe
+    Change_cpe_collectd_log_level    guangzhou    ${True}
+    Add_or_update_Aiwan_env_key_value    guangzhou    measure_fill    true
+
+teardown
+    Change_cpe_collectd_log_level    guangzhou    ${False}

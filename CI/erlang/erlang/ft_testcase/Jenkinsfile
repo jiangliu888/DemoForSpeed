@@ -1,0 +1,310 @@
+#!groovy
+
+pipeline {
+    agent { label 'master' }
+    environment {
+        GITREPO = '192.168.0.100:8011'
+        USER = "dev"
+        CREDENTIALSID = "aac47fba-17c9-4426-9f2d-868eaebdc92c"
+        VER = '21.02.0-RC1'
+    }
+    stages {
+        stage ('Build') {
+            parallel {
+
+              stage('Build gaea') {
+
+                    agent { label 'Controller-IT-71' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/gaea
+                        '''
+                        dir('src/gaea') {
+                            git(url: "ssh://${USER}@${GITREPO}/gaea", branch: 'aiwan-v21.06', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                            set -ex
+                            echo "Start to build gaea"
+                            ret=`sudo docker ps -a | grep gaea_deb | wc -l`
+                            if [ $ret -eq 1 ];then
+                                sudo docker rm -vf gaea_deb
+                            fi
+                            sudo docker run -itd --name gaea_deb -v $WORKSPACE/src/gaea:/root/gaea -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+                            sudo docker exec -w /root/gaea -i gaea_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+                            sudo docker rm -vf gaea_deb
+                            sudo cp $WORKSPACE/src/gaea/ci/aiwan-gaea*.deb $WORKSPACE/src/gaea/ci/docker/
+                            sudo cp $WORKSPACE/src/gaea/ci/upgrade/notes $WORKSPACE/src/gaea/ci/docker/RELEASENOTES
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/gaea/ci/docker/*', fingerprint: true
+                    }
+                }
+
+                stage('Build pontus') {
+                    agent { label 'Controller-IT-71' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/pontus
+                        '''
+                        dir('src/pontus') {
+                            git(url: "ssh://${USER}@${GITREPO}/pontus", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                           set -ex
+                           echo "Start to build pontus"
+                           ret=`sudo docker ps -a | grep pontus_deb | wc -l`
+                           if [ $ret -eq 1 ];then
+                             sudo docker rm -vf pontus_deb
+                           fi
+                           sudo docker run -itd --name pontus_deb -v $WORKSPACE/src/pontus:/root/pontus -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+                           sudo docker exec -w /root/pontus -i pontus_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+                           sudo docker rm -vf pontus_deb
+                           sudo cp $WORKSPACE/src/pontus/ci/*.deb $WORKSPACE/src/pontus/ci/docker/
+                           #sudo cp $WORKSPACE/src/pontus/ci/upgrade/notes $WORKSPACE/src/pontus/ci/docker/RELEASENOTES
+                            '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/pontus/ci/docker/*', fingerprint: true
+                    }
+                }
+
+                stage('Build ourea') {
+                    agent { label 'Controller-IT-71' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/ourea
+                        '''
+                        dir('src/ourea') {
+                            git(url: "ssh://${USER}@${GITREPO}/ourea", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                           set -ex
+                           echo "Start to build ourea"
+                           ret=`sudo docker ps -a | grep ourea_deb | wc -l`
+                           if [ $ret -eq 1 ];then
+                             sudo docker rm -vf ourea_deb
+                           fi
+                           sudo docker run -itd --name ourea_deb -v $WORKSPACE/src/ourea:/root/ourea -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+                           sudo docker exec -w /root/ourea -i ourea_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+                           sudo docker rm -vf ourea_deb
+                           sudo cp $WORKSPACE/src/ourea/ci/aiwan-ourea*.deb $WORKSPACE/src/ourea/ci/docker/
+                           sudo cp $WORKSPACE/src/ourea/ci/upgrade/notes $WORKSPACE/src/ourea/ci/docker/RELEASENOTES
+                            '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/ourea/ci/docker/*', fingerprint: true
+                    }
+                }
+
+                stage('Build cronus') {
+                    agent { label 'Controller-IT-71' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/cronus
+                        '''
+                        dir('src/cronus') {
+                            git(url: "ssh://${USER}@${GITREPO}/cronus", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                             set -ex
+                             echo "Start to build cronus"
+                             ret=`sudo docker ps -a | grep cronus_deb | wc -l`
+                             if [ $ret -eq 1 ];then
+                                sudo docker rm -vf cronus_deb
+                            fi
+                             sudo docker run -itd --name cronus_deb -v $WORKSPACE/src/cronus:/root/cronus -v /home/sdn/repo/.gradle:/root/.gradle controller_ci:v1
+                             sudo docker exec -w /root/cronus -i cronus_deb /bin/bash -c ./build.sh ${VER}-${verdate}
+                             sudo docker rm -vf cronus_deb
+                             sudo cp $WORKSPACE/src/cronus/ci/upgrade/notes $WORKSPACE/src/cronus/ci/RELEASENOTES
+                            '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/cronus/ci/*', fingerprint: true
+                    }
+                }
+
+                stage('build uranus') {
+                    agent { label 'Controller-IT-71' }
+                    steps {
+                        sh '''
+                        sudo rm -rf ${WORKSPACE}/src/uranus
+                        '''
+                        dir('src/mnemosyne'){
+                            git(url: "ssh://${USER}@${GITREPO}/mnemosyne", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                        }
+                        dir('src/uranus') {
+                            git(url: "ssh://${USER}@${GITREPO}/uranus", branch: 'aiwan-v21.06', credentialsId: "${CREDENTIALSID}")
+                        }
+                        sh '''#!/bin/bash -l
+                        verdate=`date +%Y.%m.%d.%H%M%S`
+                        verpath="aiwan-uranus_${VER}-${verdate}"
+                        sudo rm -rf ${WORKSPACE}/src/pkg/aiwan-uranus_*
+                        sudo rm -rf ${WORKSPACE}/src/uranus/ci/*.deb
+                        sudo mkdir  -p ${WORKSPACE}/src/pkg/${verpath}
+                        cp ${WORKSPACE}/src/mnemosyne/libs/openflowj-3.2.1.onos.jar /home/jenkins/.m2/repository/org/onosproject/openflowj/3.2.1.onos/
+                        echo "Start build aiwan uranus"
+                        cd $WORKSPACE/src/uranus
+                        ret=`sudo docker ps -a | grep uranus_deb | wc -l`
+                        if [ $ret -eq 1 ];then
+                            sudo docker rm -vf uranus_deb
+                        fi
+                        sudo docker run -itd --name uranus_deb -v $WORKSPACE/src/uranus:/root/uranus -v $WORKSPACE/src/mnemosyne:/root/mnemosyne -v /home/sdn/repo/.m2:/root/.m2 uranus_ci_jdk11:v1
+                        sudo docker exec -w /root/uranus -i uranus_deb ./build ${VER}-${verdate}
+                        sudo docker rm -vf uranus_deb
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/uranus/ci/aiwan-uranus*.deb,src/uranus/ci/controller/Dockerfile', fingerprint: true
+                    }
+                }
+            }
+        }
+
+        stage ('Deploy Uranus and gaea') {
+            parallel {
+                stage('deploy gaea') {
+                    agent { label 'uranus_ft_new' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/gaea/*
+                        '''
+                        copyArtifacts filter: 'src/gaea/ci/docker/aiwan-gaea*.deb', target: 'deb/gaea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: 'src/gaea/ci/docker/Dockerfile', target: 'deb/gaea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                            cd ${WORKSPACE}/deb/gaea
+                            ret=`sudo docker ps -a | grep gaea_instance | wc -l`
+                            if [ $ret -eq 1 ];then
+                                sudo docker rm -vf gaea_instance
+                            fi
+                            sudo docker build -t gaea:test .
+                            docker image prune -f
+                            gaea_port=6126
+                            gaea_metric_port=9090
+                            sudo docker run -itd --name gaea_instance -p $gaea_port:6126 -p $gaea_metric_port:9090 -v /var/log/gaea:/var/log/gaea -v /opt/aiwan/gaea/config:/opt/aiwan/gaea/config/ gaea:test
+                        '''
+                    }
+                }
+                stage('deploy pontus') {
+                    agent { label 'uranus_ft_new' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/pontus/*
+                        '''
+                        copyArtifacts filter: '**/aiwan-pontus*.deb', target: 'deb/pontus', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: 'src/pontus/ci/docker/Dockerfile', target: 'deb/pontus', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                            cd ${WORKSPACE}/deb/pontus
+                            ret=`sudo docker ps -a | grep pontus_instance | wc -l`
+                            if [ $ret -eq 1 ];then
+                                sudo docker rm -vf pontus_instance
+                            fi
+                            sudo docker build -t pontus:test .
+                            docker image prune -f
+                            pontus_port=6226
+                            pontus_metric_port=9091
+                            sudo docker run -itd --name pontus_instance -p $pontus_port:6226 -p $pontus_metric_port:9091 -v /var/log/pontus:/var/log/pontus -v /opt/aiwan/pontus/config:/opt/aiwan/pontus/config/ pontus:test
+                        '''
+                    }
+                }
+                stage('deploy ourea') {
+                    agent { label 'uranus_ft_new' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/ourea/*
+                        '''
+                        copyArtifacts filter: 'src/ourea/ci/docker/aiwan-ourea*.deb', target: 'deb/ourea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: 'src/ourea/ci/docker/Dockerfile', target: 'deb/ourea', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        sh '''#!/bin/bash
+                            cd ${WORKSPACE}/deb/ourea
+                            ret=`sudo docker ps -a | grep ourea_instance | wc -l`
+                            if [ $ret -eq 1 ];then
+                                sudo docker rm -vf ourea_instance
+                            fi
+                            sudo docker build -t ourea:test .
+                            docker image prune -f
+                            ourea_port=6326
+                            ourea_metric_port=9095
+                            sudo cp -r /home/sdn/backup/ourea/ /opt/aiwan/
+                            sudo docker run -itd --name ourea_instance -p $ourea_port:6326 -p $ourea_metric_port:9095  -v /var/log/ourea:/var/log/ourea -v /opt/aiwan/ourea/config:/opt/aiwan/ourea/config ourea:test
+                        '''
+                    }
+                }
+                stage('deploy controller') {
+                    agent { label 'uranus_ft_new' }
+                    steps {
+                        sh '''
+                        rm -rf ${WORKSPACE}/deb/controller/*
+                        '''
+                        copyArtifacts filter: '**/aiwan-cronus*.deb', target: 'deb/controller', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: '**/aiwan-uranus*.deb', target: 'deb/controller', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+                        copyArtifacts filter: 'src/uranus/ci/controller/Dockerfile', target: 'deb/controller', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb/controller
+                        ret=`sudo docker ps -a | grep controller_instance | wc -l`
+                        if [ $ret -eq 1 ];then
+                            sudo docker rm -vf controller_instance
+                        fi
+                        sudo sed -i 's/aiwan-uranus_2.0.0-alpha./aiwan-uranus_/g' Dockerfile
+                        sudo sed -i 's/4335/4335 6061/g' Dockerfile
+                        sudo docker build -t controller_instance:test .
+                        docker image prune -f
+                        sudo cp /opt/aiwan/ca/controller/controller_keystore.jks /opt/aiwan/uranus/config/certs/keystore.jks
+                        sudo cp /opt/aiwan/ca/controller/controller_truststore.jks /opt/aiwan/uranus/config/certs/truststore.jks
+                        sudo docker run --cap-add=SYS_ADMIN -itd --name controller_instance -v /var/log/controller_instance:/var/log/   \
+                         -v /opt/aiwan/cronus/config:/opt/aiwan/cronus/config/   \
+                         -v /opt/aiwan/uranus/config:/opt/aiwan/uranus/config/ -v /opt/aiwan/config:/opt/aiwan/config/ \
+                         -p 6653:6653 -p 6633:6633 -p 8181:8181 -p 8101:8101 -p 4335:4335 -p 6061:6061  \
+                         -p 9092:9092 -p 5005:5005 -p 6116:6116 controller_instance:test
+                         sleep 120s
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage ('test') {
+            agent { label 'uranus_ft_new' }
+            steps {
+                sh '''
+                sudo rm -rf ${WORKSPACE}/src/erlang
+                sudo rm -rf ${WORKSPACE}/output
+                '''
+                dir('src/erlang') {
+                    git(url: "ssh://${USER}@${GITREPO}/erlang", branch: 'master', credentialsId: "${CREDENTIALSID}")
+                }
+                sh '''#!/bin/sh
+                echo "prepare netconf and openflow"
+                sudo pkill -f ConfigurationCenter.py
+                sudo pkill -f tool-1.0-SNAPSHOT.jar
+                sudo pkill -f AuthServer.py
+                sudo docker rm -f $(sudo docker ps -aq -f 'name=uranus_pt_ofswitch')
+                sudo java -Dorg.apache.sshd.registerBouncyCastle=false -jar ${WORKSPACE}/uranus/ci/tool-1.0-SNAPSHOT.jar --http-port 7006 --device-count 900 --callhome-flag true --callhome-ip 127.0.0.1 --starting-port 17830 > ${WORKSPACE}/uranus/ci/popnetconf.log 2>&1 &
+                # sudo java -Xms1024m -Xmx4096m -Dorg.apache.sshd.registerBouncyCastle=false -jar ${WORKSPACE}/uranus/ci/tool-1.0-SNAPSHOT.jar --http-port 7007 --device-count 800 --callhome-flag true --callhome-ip 127.0.0.1 > /dev/null 2>&1 &
+                sudo java -Xms1024m -Xmx4096m -Dorg.apache.sshd.registerBouncyCastle=false -jar ${WORKSPACE}/uranus/ci/tool-1.0-SNAPSHOT.jar --http-port 7007 --device-count 800 --callhome-flag true --callhome-ip 127.0.0.1 > ${WORKSPACE}/uranus/ci/cpenetconf.log 2>&1 &
+                sudo python2 ${WORKSPACE}/uranus/ci/pt/aiwan-master/fake/ConfigurationCenter.py > ${WORKSPACE}/uranus/ci/configcenter.log 2>&1 &
+                sudo python2 ${WORKSPACE}/uranus/ci/pt/aiwan-master/fake/AuthServer.py > ${WORKSPACE}/uranus/ci/authServer.log 2>&1 &
+                sudo docker run -itd --name uranus_pt_ofswitch -p 6007:6007 uranus_pt_ofswitch
+                cd $WORKSPACE/src/erlang/third-party/aiwan-master/
+                if [ $(cmp -s client/controller.py $WORKSPACE/uranus/ci/pt/aiwan-master/client/controller.py) -o $(cmp -s client/device.py $WORKSPACE/uranus/ci/pt/aiwan-master/client/device.py) -o $(cmp -s client/rest.py $WORKSPACE/uranus/ci/pt/aiwan-master/client/rest.py) -o $(cmp -s core/settings.py $WORKSPACE/uranus/ci/pt/aiwan-master/core/settings.py) -o $(cmp -s fake/ConfigurationCenter.py $WORKSPACE/uranus/ci/pt/aiwan-master/fake/ConfigurationCenter.py) ];then 
+                   sudo cp client/controller.py $WORKSPACE/uranus/ci/pt/aiwan-master/client/; 
+                   sudo cp client/device.py $WORKSPACE/uranus/ci/pt/aiwan-master/client/;
+                   sudo cp client/rest.py $WORKSPACE/uranus/ci/pt/aiwan-master/client/;
+                   sudo cp core/settings.py $WORKSPACE/uranus/ci/pt/aiwan-master/core/;
+                   sudo cp fake/ConfigurationCenter.py $WORKSPACE/uranus/ci/pt/aiwan-master/fake/;
+                fi
+                sed -i "s/ed80e266-d085-7fb5-0381-ce5fc818b71f/74b509cf-b46e-0744-9521-6c1b5f1b4f8e/g" $WORKSPACE/src/erlang/erlang/config/ft_uranus.yaml
+                sed -i "s/10.192.20.18:/10.192.20.16:/g" $WORKSPACE/src/erlang/erlang/libs/variables/InterfacePathVariables.py
+                sed -i 's/9673f18a-6ebc-cab6-e78f-6a343114ef52/74b509cf-b46e-0744-9521-6c1b5f1b4f8e/g' $WORKSPACE/src/erlang/erlang/libs/variables/InterfacePathVariables.py
+                sed -i "s/CONTROLLER_SEVER =.*/CONTROLLER_SEVER='10.192.20.16'/g" $WORKSPACE/uranus/ci/pt/aiwan-master/core/settings.py
+                sed -i "s/TEST_SEVER =.*/TEST_SEVER='10.192.20.16'/g" $WORKSPACE/uranus/ci/pt/aiwan-master/core/settings.py
+                export PYTHONPATH=$WORKSPACE/uranus/ci/pt/aiwan-master:$WORKSPACE/src/erlang
+                env |grep PYTHONPATH
+                cd $WORKSPACE/src/erlang;pwd
+                robot -L trace --include NOTdebug --outputdir $WORKSPACE/output  --variablefile $WORKSPACE/src/erlang/erlang/config/ft_uranus.yaml --variable repo_path:$WORKSPACE/src/erlang --variable aiwan_master_path:$WORKSPACE/uranus/ci/pt/aiwan-master:$WORKSPACE/src/erlang erlang/ft_testcase
+                #robot -L trace --include NOTdebug --outputdir $WORKSPACE/output  --variablefile $WORKSPACE/src/erlang/erlang/config/ft_uranus.yaml --variable repo_path:$WORKSPACE/src/erlang --variable aiwan_master_path:$WORKSPACE/uranus/ci/pt/aiwan-master:$WORKSPACE/src/erlang -t CPE_Select_CR_Add_Delete erlang/ft_testcase  
+                '''
+            }
+        }
+
+    }
+
+    post {
+        always {
+            node ('uranus_ft_new') {
+                archiveArtifacts 'output/*'
+            }
+        }
+    }
+}

@@ -1,0 +1,146 @@
+*** Settings ***
+Suite Setup
+Suite Teardown
+Resource          resource/PingKeyword.txt
+Resource          resource/SshKeyword.txt
+Library           ../libs/uranus/UranusKeyword.py
+Library           ../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+@{none_list}
+${switch_timeout}    120
+
+*** Test Cases ***
+Windowns PC Saas Tracert ICMP
+    [Tags]   SDWANDEV-4437
+    ${ips}=     set variable    &{changsha_cpe}[prefer_port]
+    ${lan_gw_ip}=   set variable  &{changsha_cpe}[lan_gw]
+    ${res}=    traceroute from windows pc    changsha    &{dns_server}[ip]
+    ${should_contain}=  create list   &{changsha_cpe}[minion_id].lan \[${lan_gw_ip}\]   @{ips}[1]  10.194.20.1  10.194.0.3  10.192.0.2
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}  ms.*&{dns_server}[ip]
+    ${res}=    traceroute from windows pc    changsha    &{dns_server}[ip]   ${3}
+    ${should_contain}=  create list   &{changsha_cpe}[minion_id].lan \[${lan_gw_ip}\]   @{ips}[1]  10.194.20.1
+    ${should_not_contain}=  create list  10.194.0.3   10.192.0.2
+    Check TraceRoute Res   ${res}   ${should_contain}    ${should_not_contain}
+    should not match regexp  ${res}  ms.*&{dns_server}[ip]
+
+Windowns PC Office Tracert ICMP
+    [Tags]   SDWANDEV-4438   SDWANDEV-4472
+    ${lan_gw_ip}=   set variable  &{changsha_cpe}[lan_gw]
+    ${res}=    traceroute from windows pc    changsha    &{nanjing_pc}[inner_ip]
+    should contain  ${res}  &{changsha_cpe}[minion_id].lan \[${lan_gw_ip}\]
+    should contain  ${res}  &{nanjing_cpe}[lan_ip]
+    should contain  ${res}  &{nanjing_cpe}[lan_gw]
+    should match regexp  ${res}  ms.*&{nanjing_pc}[inner_ip]
+    ${res}=    traceroute from windows pc    changsha    &{nanjing_pc}[inner_ip]   ${2}
+    should contain  ${res}  &{changsha_cpe}[minion_id].lan \[${lan_gw_ip}\]
+    should contain  ${res}  &{nanjing_cpe}[lan_ip]
+    should not match regexp  ${res}  ms.*&{nanjing_pc}[inner_ip]
+
+Linux PC Saas Tracert ICMP UDP
+    [Tags]   SDWANDEV-4439
+    ${ips}=     set variable    &{changsha_cpe}[prefer_port]
+    ${lan_gw_ip}=   set variable  &{changsha_cpe}[lan_gw]
+    ${res}=    traceroute from linux pc  changsha    &{dns_server}[ip]  --icmp
+    ${should_contain}=  create list   ${lan_gw_ip}  @{ips}[1]  10.194.20.1  10.194.0.3  10.192.0.2
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}  \ \ &{dns_server}[ip]
+    ${res}=    traceroute from linux pc  changsha    &{dns_server}[ip]
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}   \ \ &{dns_server}[ip]
+
+Linux PC Office Tracert ICMP UDP
+    [Tags]   SDWANDEV-4440   SDWANDEV-4472
+    ${lan_gw_ip}=   set variable  &{changsha_cpe}[lan_gw]
+    ${res}=    traceroute from linux pc  changsha    &{nanjing_pc}[inner_ip]  --icmp
+    ${should_contain}=  create list   ${lan_gw_ip}  &{nanjing_cpe}[lan_ip]  &{nanjing_cpe}[lan_gw]
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}  \ \ &{nanjing_pc}[inner_ip]
+    ${res}=    traceroute from linux pc  changsha    &{nanjing_pc}[inner_ip]
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}   \ \ &{nanjing_pc}[inner_ip]
+
+Linux PC DC2GW Tracert ICMP UDP
+    [Tags]   SDWANDEV-4525
+    [Setup]  Add Route Dev Tun1   guangzhou   &{nanjing_cpe}[lan_network]
+    ${lan_gw_ip}=   set variable  &{nanjing_cpe}[inner_gw]
+    ${should_contain}=  create list   ${lan_gw_ip}  &{nanjing_cpe}[lan_ip]   &{guangzhou_cpe}[br_lan_ip]  &{guangzhou_pc}[inner_ip]
+    ${res}=    traceroute from linux pc  nanjing    &{guangzhou_pc}[inner_ip]  --icmp
+    Check TraceRoute Res   ${res}   ${should_contain}
+    ${res}=    traceroute from linux pc  nanjing    &{guangzhou_pc}[inner_ip]
+    Check TraceRoute Res   ${res}   ${should_contain}
+    [Teardown]  Del Route Dev Tun1   guangzhou   &{nanjing_cpe}[lan_network]
+
+Linux PC Tracert with Params
+    [Tags]   SDWANDEV-4441
+    ${ips}=     set variable    &{changsha_cpe}[prefer_port]
+    ${lan_gw_ip}=   set variable  &{changsha_cpe}[lan_gw]
+    ${res}=    traceroute from linux pc  changsha    &{dns_server}[ip]  -f 3
+    ${should_contain}=  create list   10.194.20.1  10.194.0.3  10.192.0.2
+    ${should_not_contain}=  create list  ${lan_gw_ip}  @{ips}[1]
+    Check TraceRoute Res   ${res}   ${should_contain}    ${should_not_contain}
+    should match regexp  ${res}  \ \ &{dns_server}[ip]
+    ${res}=    traceroute from linux pc  changsha    &{dns_server}[ip]  -m 3
+    ${should_contain}=  create list   ${lan_gw_ip}  @{ips}[1]   10.194.20.1
+    ${should_not_contain}=  create list  10.194.0.3  10.192.0.2
+    Check TraceRoute Res   ${res}   ${should_contain}    ${should_not_contain}
+    should not match regexp  ${res}  \ \ &{dns_server}[ip]
+    ${res}=    traceroute from linux pc  changsha    &{dns_server}[ip]  -p 357
+    ${should_contain}=  create list   ${lan_gw_ip}  @{ips}[1]  10.194.20.1  10.194.0.3  10.192.0.2
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}  \ \ &{dns_server}[ip]
+    ${res}=    traceroute from linux pc  changsha    &{dns_server}[ip]  -q 5
+    ${should_contain}=  create list   ${lan_gw_ip}  @{ips}[1]  10.194.20.1  10.194.0.3  10.192.0.2
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}  \ \ &{dns_server}[ip]
+    ${lines}=    get lines containing string  ${res}  ms
+    ${list}=    split string   ${lines}  \n
+    :FOR    ${line}  IN  @{list}
+    \   ${len}=     evaluate   len('${line}'.split())
+
+NAT Linux PC Office and Saas Domain Mtr
+    [Tags]  SDWANDEV-4442   SDWANDEV-4472
+    ${ips}=     set variable    &{chongqing_cpe}[prefer_port]
+    ${lan_gw_ip}=   set variable  &{chongqing_cpe}[lan_gw]
+    ${res}=    mtr from linux pc  chongqing    &{internet_host}[saas_dns]
+    ${should_contain}=  create list   ${lan_gw_ip}  @{ips}[0]  10.194.20.1  10.194.0.1  10.194.0.3
+    Check TraceRoute Res   ${res}   ${should_contain}
+    should match regexp  ${res}   &{internet_host}[ip]
+    ${lan_gw_ip}=   set variable  &{changsha_cpe}[lan_gw]
+    ${res}=    mtr from linux pc  changsha    &{nanjing_pc}[inner_ip]
+    should contain  ${res}  ${lan_gw_ip}
+    should contain  ${res}  &{nanjing_cpe}[lan_ip]
+    should contain  ${res}  &{nanjing_cpe}[lan_gw]
+    should match regexp  ${res}   &{nanjing_pc}[inner_ip]
+
+Sideway Linux PC Office Tracert
+    [Tags]  SDWANDEV-4471   SDWANDEV-4472
+    ${res}=    traceroute from linux pc  wuhan    &{nanjing_pc}[inner_ip]
+    ${should_contain}=  create list   &{wuhan_cpe}[inner_gw]   &{wuhan_cpe}[lan_ip]  &{nanjing_cpe}[lan_ip]  &{nanjing_cpe}[lan_gw]  &{nanjing_pc}[inner_ip]
+    Check TraceRoute Res   ${res}   ${should_contain}
+    ${res}=    traceroute from linux pc  nanjing    &{wuhan_pc}[inner_ip]  --icmp
+    ${should_contain}=  create list   &{nanjing_cpe}[inner_gw]  &{nanjing_cpe}[lan_ip]  &{wuhan_cpe}[lan_ip]  &{wuhan_cpe}[lan_gw]  &{wuhan_pc}[inner_ip]
+    Check TraceRoute Res   ${res}   ${should_contain}
+
+*** Keywords ***
+Check TraceRoute Res
+    [Arguments]  ${res}  ${contains}    ${not_contains}=${none_list}
+    :FOR    ${contain}  IN   @{contains}
+    \   should contain   ${res}  ${contain}
+    :FOR    ${not_contain}  IN   @{not_contains}
+    \   should not contain   ${res}   ${not_contain}
+
+Add Route Dev Tun1
+    [Arguments]   ${cpe}    ${peer_network}
+    ssh_cpe  ${cpe}
+    write openwrt cmd  ip r add ${peer_network} dev tun1
+    ${res}  write openwrt cmd  ip r
+    should contain  ${res}  ${peer_network}
+    close connection
+
+Del Route Dev Tun1
+    [Arguments]  ${cpe}    ${peer_network}
+    ssh_cpe  ${cpe}
+    write openwrt cmd  ip r del ${peer_network}
+    close connection

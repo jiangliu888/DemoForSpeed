@@ -1,0 +1,107 @@
+*** Settings ***
+Suite Setup       Iperf Setup
+Suite Teardown    Iperf Teardown
+Test Timeout      2 minutes
+Resource          ../../resource/UranusKeyword.txt
+Resource          ../../resource/SshKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+
+*** Variables ***
+${l_iperf_s_port}    5201
+${r_iperf_s_port}    5500
+
+*** Test Cases ***
+Check_Nuwa_RTT
+    [Tags]    SDWANDEV-4343
+    ${link_ids}    ${links}=    Check End2End Links    changsha    &{nanjing_cpe}[chassis_id]    8
+    : FOR    ${link}    IN    @{links}
+    \    ${bandwidth}    ${rtt}=    get_cpe_nuwa_path_info    changsha    nanjing    cpe
+    \    ...    ${link['number']}
+    \    ${ret}=    run keyword if    '${link["local-wan-id"]}'=='1'    evaluate    8000<=${rtt} <= 25000
+    \    ...    ELSE    evaluate    40000<=${rtt} <= 60000
+    \    should be true    ${ret}
+    [Teardown]
+
+Check_Nuwa_BandWidth
+    [Tags]    debug    SDWANDEV-4344
+    ${link_ids}    ${links}=    Check End2End Links    changsha    &{nanjing_cpe}[chassis_id]    8
+    : FOR    ${link}    IN    @{links}
+    \    ${bandwidth}    ${rtt}=    get_cpe_nuwa_path_info    changsha    nanjing    cpe
+    \    ...    ${link['number']}
+    \    ${ret}=    run keyword if    '${link["local-wan-id"]}'=='1'    evaluate    1800000<=${bandwidth} <= 3000000
+    \    ...    ELSE    evaluate    1000000<=${bandwidth} <= 1500000
+    \    should be true    ${ret}
+    [Teardown]
+
+Iperf_Band
+    [Tags]    SDWANDEV-4356
+    [Setup]
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    changsha    ${l_iperf_s_port}    20
+    wait until keyword succeeds    22s    1s    check_iperf_band_result_in_pc    25    changsha
+    Iperf3_band_From_PC_With_Parallel Sessions    &{nanjing_pc}[inner_ip]    changsha    ${l_iperf_s_port}    8
+    wait until keyword succeeds    13s    1s    check_iperf_band_re_trans_in_pc    25    remote    500
+    ...    ${False}    600
+    [Teardown]
+
+*** Keywords ***
+Iperf Setup
+    add_differnet_delay_on_changsha
+    ${server_list}=    Parallel_Iperf Setup
+    set suite variable    ${iperf_server_list}    ${server_list}
+    wait until keyword succeeds    21s    1s    check_undirect_score_greater_than    &{nanjing_cpe}[chassis_id]    1    5
+    wait until keyword succeeds    11s    1s    check_undirect_score_greater_than    &{nanjing_cpe}[chassis_id]    2    25
+    set_changsha_wan_bandwidth
+    Iperf3_band_From_PC_With_Parallel Sessions    &{nanjing_pc}[inner_ip]    changsha    ${l_iperf_s_port}    10
+    sleep    5
+
+Iperf Teardown
+    Set_CPE_Interface_Bandwith    changsha    1024000    100    10    0
+    teardown_differnet_delay_on_changsha
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    wait until keyword succeeds    21s    1s    check_undirect_score_less_than    &{changsha_cpe}[chassis_id]    1    8
+    wait until keyword succeeds    6s    1s    check_undirect_score_less_than    &{changsha_cpe}[chassis_id]    2    8
+    close all connections
+
+Parallel_Iperf Setup
+    ${nanjing_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    ${s_list}    create list    ${nanjing_server_connect}
+    [Return]    ${s_list}
+
+check_undirect_score_less_than
+    [Arguments]    ${ne_id}    ${wan_id}    ${expect_s}
+    ${link_ids}    Get End2End undirect Links with wanId    changsha    ${ne_id}    ${wan_id}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    changsha    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} < ${expect_s}
+
+check_undirect_score_greater_than
+    [Arguments]    ${ne_id}    ${wan_id}    ${expect_s}
+    ${link_ids}    Get End2End undirect Links with WanId    changsha    ${ne_id}    ${wan_id}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    changsha    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} > ${expect_s}
+
+add_differnet_delay_on_changsha
+    ssh_cpe    changsha
+    write openwrt cmd    tc qdisc del dev pppoe-wan2 root
+    write openwrt cmd    tc qdisc add dev wan root netem delay 10ms
+    write openwrt cmd    tc qdisc add dev pppoe-wan2 root netem delay 50ms
+    close connection
+
+teardown_differnet_delay_on_changsha
+    ssh_cpe    changsha
+    write openwrt cmd    tc qdisc del dev pppoe-wan2 root
+    write openwrt cmd    tc qdisc del dev wan root
+    write openwrt cmd    tc qdisc add dev pppoe-wan2 root netem delay 2ms
+    close connection
+
+set_changsha_wan_bandwidth
+    put_cpe_wan_bandwidth    &{changsha_cpe}[chassis_id]    &{changsha_cpe}[internet_if]    0    20480    10    10
+    ...    80
+    Wait Until Keyword Succeeds    10s    200ms    Check_VPort_Bandwidth_From_Ne    changsha    &{changsha_cpe}[internet_if]    ${0}
+    ...    20480    10    10    80
+    put_cpe_wan_bandwidth    &{changsha_cpe}[chassis_id]    &{changsha_cpe}[internet_if2]    0    10240    10    10
+    ...    80
+    Wait Until Keyword Succeeds    10s    200ms    Check_VPort_Bandwidth_From_Ne    changsha    &{changsha_cpe}[internet_if2]    ${0}
+    ...    10240    10    10    80

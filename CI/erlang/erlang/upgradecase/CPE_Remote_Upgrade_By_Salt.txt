@@ -1,0 +1,564 @@
+*** Settings ***
+Suite Setup       run keywords    Init Current Version
+...               AND    Start Port6633 Capture
+...               AND    Prepare Salt
+...               AND    Add_Private_Company_Relation_To_Series_Group
+Suite Teardown    Teardown
+Resource          ../testcase/resource/SshKeyword.txt
+Resource          ../testcase/resource/SaltKeyword.txt
+Library           DateTime
+Library           String
+
+*** Variables ***
+${cur_cpe_ver}    3.0.0-RC3
+${up_cpe_ver}     3.0.0-RC3
+${cur_config_ver}    1.5.0-RC1
+${up_config_ver}    1.5.0-RC10
+${reg_timeout}    60
+${internet_log}    upgradePing_Internet.log
+${intranet_log}    upgradePing_Office.log
+${private_log}    upgradePing_Private.log
+${expected_max_time_series}    15
+${expected_max_time_sideway}    16
+${cpe_path}    /var/www/aiwan-repo/stenv/${repo_ver}/aiwan-cpe
+${config_path}    /var/www/aiwan-repo/stenv/${repo_ver}/aiwan-config
+${wrong_deb_ver}   30.30.0-RC1-2020.10.27
+
+*** Test Cases ***
+Get Config File by Salt
+    [Tags]    CPE    Nightly    SDWANDEV-1985
+    ${series_items}=    create list    internet_if    intranet_if   lan_if
+    ${sideway_items}=    create list    internet_if   lan_if
+    ${gateway_items}=    create list    internet_if    intranet_if     internet_if2
+    switch connection  ${salt_master_ssh}
+    Check Startup Config       local    ${series_items}
+    Check Startup Config       nanjing    ${sideway_items}
+    Check Startup Config       guangzhou    ${gateway_items}
+
+Salt Restart !GW CPE Service
+    [Tags]   CPE    Nightly    SDWANDEV-2969
+    [Setup]   ssh_cpe  wuhan   sess_wuhan_cpe
+    ${pre_pid}=    Get Process ID   wuhan   aiwan-cpe
+    switch connection  ${salt_master_ssh}
+    Salt Restart CPE Service     &{wuhan_cpe}[minion_id]    aiwan-cpe
+    switch connection   sess_wuhan_cpe
+    wait until keyword succeeds  10s   200ms    Check Service Restarted   wuhan   aiwan-cpe    ${pre_pid}
+    [Teardown]   run keywords   switch connection   sess_wuhan_cpe
+    ...   AND    close connection
+
+Salt Restart GW CPE Service
+    [Tags]   CPE    Nightly    SDWANDEV-1976
+    [Setup]   ssh_cpe  guangzhou   sess_guangzhou_cpe
+    ${pre_pid}=    Get Process ID   guangzhou   aiwan-cpe
+    switch connection  ${salt_master_ssh}
+    Salt Restart CPE Service     &{guangzhou_cpe}[minion_id]    aiwan-cpe
+    switch connection   sess_guangzhou_cpe
+    wait until keyword succeeds  10s   200ms    Check Service Restarted   guangzhou   aiwan-cpe    ${pre_pid}
+    [Teardown]   run keywords   switch connection   sess_guangzhou_cpe
+    ...   AND    close connection
+
+Salt Restart GW Collectd Service
+    [Tags]   CPE    Nightly    SDWANDEV-2972
+    ${cpe}=    set variable   guangzhou
+    ssh_cpe  ${cpe}   sess_${cpe}_cpe
+    ${pre_pid}=    Get Process ID   ${cpe}   collectd
+    switch connection  ${salt_master_ssh}
+    Salt Restart CPE Service    &{${cpe}_cpe}[minion_id]    collectd
+    switch connection   sess_${cpe}_cpe
+    wait until keyword succeeds  10s   200ms    Check Service Restarted   ${cpe}   collectd    ${pre_pid}
+    [Teardown]   run keywords   switch connection   sess_${cpe}_cpe
+    ...   AND    close connection
+
+Salt Restart !GW Collectd Service
+    [Tags]   CPE    Nightly    SDWANDEV-3664
+    ${cpe}=    set variable    wuhan
+    ssh_cpe  ${cpe}   sess_${cpe}_cpe
+    ${pre_pid}=    Get Process ID   ${cpe}   collectd
+    switch connection  ${salt_master_ssh}
+    Salt Restart CPE Service    &{${cpe}_cpe}[minion_id]    collectd
+    switch connection   sess_${cpe}_cpe
+    wait until keyword succeeds  10s   200ms    Check Service Restarted   ${cpe}   collectd    ${pre_pid}
+    [Teardown]   run keywords   switch connection   sess_${cpe}_cpe
+    ...   AND    close connection
+
+Check CPE Version Before Upgrade
+    [Tags]    CPE    Nightly    SDWANDEV-2416
+    switch connection  ${salt_master_ssh}
+    ${local_cpe_ver}    ${local_config_ver}=    Salt Get CPE Version    &{local_cpe}[minion_id]
+    should contain    ${local_cpe_ver}    ${cur_cpe_ver}
+    should contain    ${local_config_ver}    ${cur_config_ver}
+    ${wuhan_cpe_ver}    ${wuhan_config_ver}=    Salt Get CPE Version    &{wuhan_cpe}[minion_id]
+    should contain    ${wuhan_cpe_ver}    ${cur_cpe_ver}
+    should contain    ${wuhan_config_ver}    ${cur_config_ver}
+    ${guangzhou_cpe_ver}    ${guangzhou_config_ver}=    Salt Get CPE Version    &{guangzhou_cpe}[minion_id]
+    should contain    ${guangzhou_cpe_ver}    ${cur_cpe_ver}
+
+Install Package with Wrong Md5
+    [Tags]  CPE    Nightly    SDWANDEV-2258
+    [Setup]   Echo Extra Words to Deb   aiwan-cpe_${cur_cpe_ver}
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe  ${cur_cpe_ver}
+    Pre Download From Repo   &{wuhan_cpe}[minion_id]   cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions  aiwan-cpe   ${wrong_deb_ver}
+    Update Target Versions  aiwan-config   ${cur_config_ver}
+    ${status}   ${res}=     run keyword and ignore error  Pre Download From Repo    &{wuhan_cpe}[minion_id]    cpe
+    should be equal  ${status}  PASS
+    ${status}   ${res}=     run keyword and ignore error  Pre Download From Repo    &{wuhan_cpe}[minion_id]    config
+    should be equal  ${status}  PASS
+    ${res}=    Salt upgrade cpe    &{wuhan_cpe}[minion_id]    ${reg_timeout}    ${wrong_deb_ver}    ${cur_config_ver}
+    should match regexp   ${res}   Error MD5
+    [Teardown]  Remove Wrong Deb
+
+Upgrade Local CPE With Register Timeout
+    [Tags]    CPE    Nightly    SDWANDEV-788    SDWANDEV-2259   SDWANDEV-2039   SDWANDEV-2260
+    [Setup]     Tail CPE Log    local
+    # predownload
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe   ${cur_cpe_ver}
+    Pre Download From Repo   &{local_cpe}[minion_id]    cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-config   ${cur_config_ver}
+    Pre Download From Repo    &{local_cpe}[minion_id]    config
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe   ${up_cpe_ver}
+    Pre Download From Repo    &{local_cpe}[minion_id]    cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-config   ${up_config_ver}
+    Pre Download From Repo    &{local_cpe}[minion_id]    config
+    ssh login local
+    Write Sudo Cmd    tcpdump -n -i &{local_pc}[inner_nic] -w upgradeNPing.pcap &    &{local_pc}[passwd]
+    Write Sudo Cmd    tcpdump -n -i &{local_pc}[cpe_wan_mirror_if] -w upgradeNPingWan.pcap &    &{local_pc}[passwd]
+    Write Sudo Cmd    tcpdump -n -i &{local_pc}[cpe_lan_mirror_if] -w upgradeNPingLan.pcap &    &{local_pc}[passwd]
+    Write Sudo Cmd    nping --tcp-connect -c 4000 --delay 10ms &{internet_host}[ip] -p 22 > upgradeNPing.log &    &{local_pc}[passwd]
+    WRITE    ping -i 0.2 &{internet_host}[ip] > ${internet_log} &
+    WRITE    ping -i 0.2 &{remote_pc}[inner_ip] > ${intranet_log} &
+    WRITE    ping -i 0.2 &{remote_pc}[intranet_ip] > ${private_log} &
+    ${bj_sess}  Start Check BJ Cache Info
+    #close connection
+    ${res}=    Salt upgrade cpe    &{local_cpe}[minion_id]    ${reg_timeout}    ${up_cpe_ver}    ${up_config_ver}
+    switch connection  ${salt_master_ssh}
+    wait until keyword succeeds    6x    10    Check Upgrade Status    &{local_cpe}[minion_id]
+    wait until keyword succeeds    20x    1    Check_CPE_Status    local
+    ${res}=    Salt upgrade cpe    &{local_cpe}[minion_id]    ${reg_timeout}    ${up_cpe_ver}    ${up_config_ver}
+    should contain  ${res}  same version of aiwan-cpe
+    should contain  ${res}  same version of aiwan-config
+    should contain  ${res}  Failed:    0
+    should contain  ${res}  Succeeded: 4
+    [Teardown]    run keywords    ssh login local
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{local_pc}[passwd]
+    ...    AND    close connection
+    ...    AND    Print Upgrade Log TimeStamp   local
+    ...    AND    switch connection    ${bj_sess}
+    ...    AND    close connection
+    ...    AND    Print BJ Cache Info
+
+Check Local Internet Upgrade Outage
+    [Tags]    CPE    Nightly    SDWANDEV-169
+    ${r_p_len}=    evaluate    len(&{remote_pc}[intranet_range])
+    ${l_p_len}=    evaluate    len(&{local_pc}[intranet_range])
+    wait until keyword succeeds    ${union_timer}    2s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ...    &{remote_cpe}[chassis_id]    2    1    ${r_p_len}
+    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{remote_cpe}[chassis_id]    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    2    1    ${l_p_len}
+    ${local_pc_connect}=    SSH Login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Write    killall ping
+    read until prompt
+    Check Outage Time    ${internet_log}    ${expected_max_time_series}
+    close connection
+
+Check Local Office Upgrade Outage
+    [Tags]    CPE    Nightly    SDWANDEV-170
+    ${local_pc_connect}=    SSH Login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Check Outage Time    ${intranet_log}    ${expected_max_time_series}
+    close connection
+
+Check Local Private Upgrade Outage
+    [Tags]    CPE    Nightly    SDWANDEV-1055
+    ${local_pc_connect}=    SSH Login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Check Outage Time    ${private_log}    ${expected_max_time_series}
+    close connection
+
+Upgrade Sideway CPE With Register Timeout
+    [Tags]    CPE    Nightly    SDWANDEV-2257    SDWANDEV-2039    Sideway
+    [Setup]     Tail CPE Log    wuhan
+    Sideway Pingable Check
+    ssh login wuhan
+    Write Sudo Cmd    tcpdump -n -i &{wuhan_pc}[inner_nic] -w upgradeWH_PC.pcap &    &{wuhan_pc}[passwd]
+    Write Sudo Cmd    tcpdump -n -i &{wuhan_pc}[cpe_wan_mirror_if] -w upgradeWH_Wan.pcap &    &{wuhan_pc}[passwd]
+    Write Sudo Cmd    tcpdump -n -i &{wuhan_pc}[cpe_lan_mirror_if] -w upgradeWH_Lan.pcap &    &{wuhan_pc}[passwd]
+    WRITE    ping -i 0.2 &{nanjing_pc}[inner_ip] > ${intranet_log} &
+    #close connection
+    # predownload
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe  ${cur_cpe_ver}
+    Pre Download From Repo   &{wuhan_cpe}[minion_id]   cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-config   ${cur_config_ver}
+    Pre Download From Repo    &{wuhan_cpe}[minion_id]   config
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe   ${up_cpe_ver}
+    Pre Download From Repo    &{wuhan_cpe}[minion_id]   cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-config   ${up_config_ver}
+    Pre Download From Repo    &{wuhan_cpe}[minion_id]   config
+    # upgrade cpe
+    salt upgrade cpe    &{wuhan_cpe}[minion_id]    ${reg_timeout}    ${up_cpe_ver}    ${up_config_ver}
+    switch connection  ${salt_master_ssh}
+    wait until keyword succeeds    30x    3    Check Sideway CPE Status
+    wait until keyword succeeds    20x    1    Check_CPE_Status    wuhan
+    [Teardown]    run keywords    ssh login wuhan
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{wuhan_pc}[passwd]
+    ...    AND    close connection
+    ...    AND    Print Upgrade Log TimeStamp   wuhan
+
+Check Sideway Intranet Upgrade Outage
+    [Tags]    CPE    Nightly    SDWANDEV-832    Sideway
+    wait until keyword succeeds    ${union_timer}    500ms    check_e2e_match_route    &{wuhan_cpe}[chassis_id]    ${suite_&{wuhan_pc}[site_name]_site_id}    ${suite_&{nanjing_pc}[site_name]_site_id}
+    ...    &{nanjing_cpe}[chassis_id]    1    1    0    &{nanjing_cpe}[nets]
+    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{nanjing_cpe}[chassis_id]    ${suite_&{nanjing_pc}[site_name]_site_id}    ${suite_&{wuhan_pc}[site_name]_site_id}
+    ...    &{wuhan_cpe}[chassis_id]    1    1    0    &{wuhan_cpe}[nets]
+    wait until keyword succeeds    10    200ms    Sideway Pingable Check
+    ${wuhan_pc_connect}=    SSH Login    &{wuhan_pc}[ctrl_ip]    &{wuhan_pc}[ctrl_port]    &{wuhan_pc}[user]    &{wuhan_pc}[passwd]
+    Write    killall ping
+    read until prompt
+    Check Outage Time    ${intranet_log}    ${expected_max_time_sideway}
+    close connection
+
+Upgrade Gateway CPE Intranet Outage
+    [Tags]    GatewayCPE    Nightly    SDWANDEV-1564    SDWANDEV-2016    SDWANDEV-2421    SDWANDEV-2196
+    [Setup]     Tail CPE Log    guangzhou
+    wait until keyword succeeds  10s   500ms    Gateway Pingable Check
+    ssh login guangzhou
+    #Write Sudo Cmd    tcpdump -n -i &{guangzhou_pc}[inner_nic] -w upgradeNJ_PC.pcap &    &{guangzhou_pc}[passwd]
+    #Write Sudo Cmd    tcpdump -n -i &{guangzhou_pc}[cpe_wan_mirror_if] -w upgradeNJ_Wan.pcap &    &{guangzhou_pc}[passwd]
+    #Write Sudo Cmd    tcpdump -n -i &{guangzhou_pc}[cpe_lan_mirror_if] -w upgradeNJ_Lan.pcap &    &{guangzhou_pc}[passwd]
+    Write    ping -i 0.2 &{nanjing_pc}[inner_ip] > ${intranet_log} &
+    #close connection
+    # predownload
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe   ${cur_cpe_ver}
+    Pre Download From Repo    &{guangzhou_cpe}[minion_id]   cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe   ${up_cpe_ver}
+    Pre Download From Repo    &{guangzhou_cpe}[minion_id]   cpe
+    # upgrade cpe
+    salt upgrade cpe    &{guangzhou_cpe}[minion_id]    ${reg_timeout}    ${up_cpe_ver}
+    switch connection  ${salt_master_ssh}
+    wait until keyword succeeds    30x    3    Check Gateway Upgrade Status    &{guangzhou_cpe}[minion_id]
+    wait until keyword succeeds    20x    1    Check_CPE_Status    guangzhou
+    wait until keyword succeeds    ${union_timer}    500ms    check_e2e_match_route    &{guangzhou_cpe}[chassis_id]    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${suite_&{nanjing_pc}[site_name]_site_id}
+    ...    &{nanjing_cpe}[chassis_id]    1    1    0    &{nanjing_cpe}[nets]
+    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{nanjing_cpe}[chassis_id]    ${suite_&{nanjing_pc}[site_name]_site_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}
+    ...    &{guangzhou_cpe}[chassis_id]    1    1    0    &{guangzhou_cpe}[nets]
+    wait until keyword succeeds    10    200ms    Gateway Pingable Check
+    ${guangzhou_pc_connect}=    SSH Login    &{guangzhou_pc}[ctrl_ip]    &{guangzhou_pc}[ctrl_port]    &{guangzhou_pc}[user]    &{guangzhou_pc}[passwd]
+    Write    killall ping
+    read until prompt
+    Check Outage Time    ${intranet_log}    ${expected_max_time_sideway}
+    close connection
+    [Teardown]    Print Upgrade Log TimeStamp    guangzhou
+
+Upgrade to the Same GW CPE Version
+    [Tags]  Nightly    SDWANDEV-2569
+    switch connection  ${salt_master_ssh}
+    ${guangzhou_cpe_ver}    ${guangzhou_config_ver}=    wait until keyword succeeds  10   1   Salt Get CPE Version    &{guangzhou_cpe}[minion_id]
+    ${res}=     salt upgrade cpe    &{guangzhou_cpe}[minion_id]    ${reg_timeout}    ${guangzhou_cpe_ver}
+    should contain  ${res}  same version of aiwan-cpe
+    should contain  ${res}  Failed:    0
+    should match regexp  ${res}  Succeeded: [1-9]
+
+Upgrade to the Same Sideway CPE Version
+    [Tags]  Nightly    SDWANDEV-2569
+    switch connection  ${salt_master_ssh}
+    ${wuhan_cpe_ver}    ${wuhan_config_ver}=    wait until keyword succeeds  10   1    Salt Get CPE Version    &{wuhan_cpe}[minion_id]
+    ${res}=     salt upgrade cpe    &{wuhan_cpe}[minion_id]    ${reg_timeout}    ${wuhan_cpe_ver}
+    ...    aiwan-config_${wuhan_config_ver}_amd64.deb
+    should contain  ${res}  same version of aiwan-cpe
+    #should contain  ${res}  same version of aiwan-config
+    should contain  ${res}  Failed:    0
+    should match regexp  ${res}  Succeeded: [1-9]
+
+Upgrade Mips Gateway CPE Intranet Outage
+    [Tags]    CPE    Nightly    SDWANDEV-2421    GatewayCPE     debug
+    [Setup]     Tail CPE Log    changsha
+    wait until keyword succeeds  10s   500ms    Mips Pingable Check
+    ssh_pc   changsha
+    Write    ping -i 0.2 &{guangzhou_pc}[inner_ip] > ${intranet_log} &
+    # predownload
+    switch connection  ${salt_master_ssh}
+    Update Target Versions  aiwan-cpe   ${cur_cpe_ver}
+    Pre Download From Repo    &{changsha_cpe}[minion_id]   cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions  aiwan-cpe   ${up_cpe_ver}
+    Pre Download From Repo    &{changsha_cpe}[minion_id]   cpe
+    # upgrade cpe
+    salt upgrade cpe    &{guangzhou_cpe}[minion_id]    ${reg_timeout}    ${up_cpe_ver}
+    switch connection  ${salt_master_ssh}
+    wait until keyword succeeds    30x    3    Check Gateway Upgrade Status    &{changsha_cpe}[minion_id]
+    wait until keyword succeeds    20x    1    Check_CPE_Status    changsha
+    wait until keyword succeeds    ${union_timer}    500ms    check_e2e_match_route    &{changsha_cpe}[chassis_id]    ${suite_&{changsha_pc}[site_name]_site_id}    ${suite_&{guangzhou_pc}[site_name]_site_id}
+    ...    &{nanjing_cpe}[chassis_id]    1    1    0    &{guangzhou_cpe}[nets]
+    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{guangzhou_cpe}[chassis_id]    ${suite_&{guangzhou_pc}[site_name]_site_id}    ${suite_&{changsha_pc}[site_name]_site_id}
+    ...    &{changsha_cpe}[chassis_id]    1    1    0    &{changsha_cpe}[nets]
+    wait until keyword succeeds    10    200ms    Mips Pingable Check
+    ${changsha_pc_connect}=    SSH Login    &{changsha_pc}[ctrl_ip]    &{changsha_pc}[ctrl_port]    &{changsha_pc}[user]    &{changsha_pc}[passwd]
+    Write    killall ping
+    read until prompt
+    Check Outage Time    ${intranet_log}    ${expected_max_time_sideway}
+    [Teardown]    run keywords    close connection
+    ...    AND    Print Upgrade Log TimeStamp    changsha
+
+Remote Upgrade Rollback When Register Failed
+    [Tags]    CPE    Nightly    SDWANDEV-2038
+    # predownload
+    switch connection  ${salt_master_ssh}
+    ${cur_local_cpe_version}     ${cur_local_config_version}=    Salt Get CPE Version    &{local_cpe}[minion_id]
+    Update Target Versions   aiwan-cpe  ${cur_cpe_ver}
+    Pre Download From Repo    &{local_cpe}[minion_id]    cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-config  ${cur_config_ver}
+    Pre Download From Repo    &{local_cpe}[minion_id]    config
+    switch connection  ${salt_master_ssh}
+    Update Target Versions   aiwan-cpe  ${up_cpe_ver}
+    Pre Download From Repo    &{local_cpe}[minion_id]    cpe
+    switch connection  ${salt_master_ssh}
+    Update Target Versions  aiwan-config    ${up_config_ver}
+    Pre Download From Repo    &{local_cpe}[minion_id]    config
+    ${tmp_up_cpe_ver}=  set variable if     '${cur_local_cpe_version}' == '${cur_cpe_ver}'  ${up_cpe_ver}   ${cur_cpe_ver}
+    ${tmp_up_config_ver}=   set variable if    '${cur_local_config_version}' == '${cur_config_ver}'    ${up_config_ver}     ${cur_config_ver}
+    ${res}=    Salt upgrade cpe    &{local_cpe}[minion_id]    ${30}    ${tmp_up_cpe_ver}   ${tmp_up_config_ver}
+    #should contain  ${res}   Minions returned with non-zero exit code
+    Check_CPE_Version    local      ${tmp_up_cpe_ver}
+    wait until keyword succeeds   50    1    Check_CPE_Version    local     ${cur_local_cpe_version}
+    ssh login local
+    Write Sudo Cmd    nping --tcp-connect -c 4000 --delay 10ms &{internet_host}[ip] -p 22 > upgradeNPing.log &    &{local_pc}[passwd]
+    switch connection  ${salt_master_ssh}
+    wait until keyword succeeds  10x   1   Check Upgrade Status    &{local_cpe}[minion_id]     ${cur_local_cpe_version}     ${cur_local_config_version}
+
+*** Keywords ***
+Init Current Version
+    #ssh login    &{manager_server}[ctrl_ip]    &{manager_server}[ctrl_port]    &{manager_server}[user]    &{manager_server}[passwd]
+    #SSH Login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    ${con}=    SSH Login With Key    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[key]
+    # last cpe file
+    write    ls -ltr ${cpe_path}/aiwan-cpe*.deb | tail -n 1 | awk -F '/' '{print $NF}'
+    ${cur_cpe_file}=    read until prompt
+    @{ver}    split string    ${cur_cpe_file}    _
+    ${cpe_ver}=    Evaluate    ${ver}[-2]
+    set suite variable    ${cur_cpe_ver}    ${cpe_ver}
+    # lower cpe version
+    write    ls -ltr ${cpe_path}/aiwan-cpe*.deb | tail -n 2 | head -n 1 | awk -F '/' '{print $NF}'
+    ${up_cpe_file}=    read until prompt
+    @{ver}    split string    ${up_cpe_file}    _
+    ${cpe_ver}=    Evaluate    ${ver}[-2]
+    set suite variable    ${up_cpe_ver}    ${cpe_ver}
+    # last config version
+    write    ls -ltr ${config_path}/aiwan-config*.deb | tail -n 1 | awk -F '/' '{print $NF}'
+    ${cur_config_file}=    read until prompt
+    @{ver}    split string    ${cur_config_file}    _
+    ${config_ver}=    Evaluate    ${ver}[-2]
+    set suite variable    ${cur_config_ver}    ${config_ver}
+    # lower config version
+    write    ls -ltr ${config_path}/aiwan-config*.deb | tail -n 2 | head -n 1 | awk -F '/' '{print $NF}'
+    ${up_config_file}=    read until prompt
+    @{ver}    split string    ${up_config_file}    _
+    ${config_ver}=    Evaluate    ${ver}[-2]
+    set suite variable    ${up_config_ver}    ${config_ver}
+
+Start Port6633 Capture
+    ${time}=    Get Current Date
+    ${time}=    Replace String Using Regexp    ${time}    \\s    _
+    ssh login wuhan
+    write sudo cmd    ls    &{wuhan_pc}[passwd]
+    write sudo cmd    tcpdump -n -i &{wuhan_pc}[cpe_wan_mirror_if] port 6633 -w port6633_wh.pcap &    &{wuhan_pc}[passwd]
+    SSH Login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    write sudo cmd    ls    &{uranus_host}[ssh_passwd]
+    write sudo cmd    tcpdump -n -i &{uranus_host}[nic] port 6633 -w port6633_ctr.pcap &    &{uranus_host}[ssh_passwd]
+    ssh_cpe    wuhan
+    write    ./ctr6633check.sh > /tmp/ncPort6633.log.${time} 2>&1 &
+    ${res}=    read until prompt
+    ${pid}=    get line    ${res}    -2
+    ${pid}=    split string    ${pid}
+    set suite variable    ${wh_pid}    @{pid}[1]
+    ssh_cpe    local
+    write    ./ctr6633check.sh > /tmp/ncPort6633.log.${time} 2>&1 &
+    ${res}=    read until prompt
+    ${pid}=    get line    ${res}    -2
+    ${pid}=    split string    ${pid}
+    set suite variable    ${bj_pid}    @{pid}[1]
+
+Stop Port6633 Capture
+    SSH Login    &{uranus_host}[ip]    &{uranus_host}[ssh_port]    &{uranus_host}[ssh_user]    &{uranus_host}[ssh_passwd]
+    write sudo cmd    killall tcpdump    &{uranus_host}[ssh_passwd]
+    close connection
+    ssh login wuhan
+    write sudo cmd    killall tcpdump    &{wuhan_pc}[passwd]
+    close connection
+    ssh_cpe    wuhan
+    write    kill -9 ${wh_pid}
+    read until prompt
+    close connection
+    ssh_cpe    local
+    write    kill -9 ${bj_pid}
+    read until prompt
+    close connection
+
+Teardown
+    # roll back to master branch
+    ${salt_master_ssh}=     SSH Login Salt Master
+    write sudo cmd   cp /srv/reclass/classes/env/${env_name}/aiwan_release.yml.bak /srv/reclass/classes/env/${env_name}/aiwan_release.yml    &{salt-master}[passwd]
+    ${local_cpe_ver}    ${local_config_ver}=    wait until keyword succeeds  10x   1s   Salt Get CPE Version    &{local_cpe}[minion_id]
+    ${salt_master_ssh}=     SSH Login Salt Master
+    ${wuhan_cpe_ver}    ${wuhan_config_ver}=    Salt Get CPE Version    &{wuhan_cpe}[minion_id]
+    ${guangzhou_cpe_ver}    ${guangzhou_config_ver}=    Salt Get CPE Version    &{guangzhou_cpe}[minion_id]
+    run keyword if    '${local_cpe_ver}' != '${cur_cpe_ver}' and '${local_cpe_ver}' != '${None}'    run keywords    switch connection     ${salt_master_ssh}
+    ...    AND    salt upgrade cpe    &{local_cpe}[minion_id]    ${reg_timeout}    ${cur_cpe_ver}   ${cur_config_ver}
+    ...    AND    ssh login local
+    ...    AND    Write Sudo Cmd    nping --tcp-connect -c 4000 --delay 10ms 192.168.0.8 -p 22 &    &{local_pc}[passwd]
+    ...    AND    switch connection   ${salt_master_ssh}
+    ...    AND    wait until keyword succeeds    10x    10    Check Upgrade Status    &{local_cpe}[minion_id]
+    ...    ${cur_cpe_ver}    ${cur_config_ver}
+    run keyword if    '${wuhan_cpe_ver}' != '${cur_cpe_ver}' and '${wuhan_cpe_ver}' != '${None}'    run keywords    switch connection     ${salt_master_ssh}
+    ...    AND    salt upgrade cpe    &{wuhan_cpe}[minion_id]    ${reg_timeout}    ${cur_cpe_ver}   ${cur_config_ver}
+    ...    AND    switch connection     ${salt_master_ssh}
+    ...    AND    wait until keyword succeeds    20x    5    Check Upgrade Status    &{wuhan_cpe}[minion_id]    ${cur_cpe_ver}    ${cur_config_ver}
+    run keyword if    '${guangzhou_cpe_ver}' != '${cur_cpe_ver}'    run keywords    switch connection     ${salt_master_ssh}
+    ...    AND    salt upgrade cpe    &{guangzhou_cpe}[minion_id]    ${reg_timeout}    ${cur_cpe_ver}
+    ...    AND    switch connection     ${salt_master_ssh}
+    ...    AND    wait until keyword succeeds    20x    5    Check Gateway Upgrade Status    &{guangzhou_cpe}[minion_id]    ${cur_cpe_ver}
+    switch connection     ${salt_master_ssh}
+    Clear Pkg Versions
+    Stop Port6633 Capture
+    Delete_Private_Company_Relation_To_Series_Group
+    close all connections
+
+Check Upgrade Status
+    [Arguments]    ${minion_id}    ${expected_cpe_ver}=${up_cpe_ver}    ${expected_config_ver}=${up_config_ver}
+    ${local_cpe_ver}    ${local_config_ver}=    Salt Get CPE Version    ${minion_id}
+    should contain    ${local_cpe_ver}    ${expected_cpe_ver}
+    should contain    ${local_config_ver}    ${expected_config_ver}
+
+Check Gateway Upgrade Status
+    [Arguments]    ${minion_id}    ${expected_cpe_ver}=${up_cpe_ver}
+    ${local_cpe_ver}    ${local_config_ver}=    Salt Get CPE Version    ${minion_id}
+    should contain    ${local_cpe_ver}    ${expected_cpe_ver}
+
+Check Controller Port from CPE
+    [Arguments]    ${cpe}    ${port}
+    ssh_cpe    ${cpe}
+    write    nc -v -z -w 2 &{uranus_host}[ip] ${port}
+    ${res}=    read until prompt
+    should contain    ${res}    succeeded!
+
+Check Sideway CPE Status
+    #Check Controller Port from CPE    wuhan    &{uranus_host}[netconf_port]
+    Check Upgrade Status    &{wuhan_cpe}[minion_id]
+
+Check TaskStatus
+    [Arguments]   ${task_id}
+    ${status}   ${step}=    get task current status   ${task_id}
+    should be equal  ${status}      ${0}
+    should be equal  ${step}    end
+
+Tail CPE Log
+    [Arguments]  ${cpe}
+    ssh_cpe  ${cpe}
+    write    tail -f /opt/aiwan/logs/cpe.log > cpe_upgrade.log &
+
+Print Upgrade Log TimeStamp
+    [Arguments]  ${cpe}
+    ssh_cpe   ${cpe}
+    write   grep "satellite exit" cpe_upgrade.log | head -1
+    ${res1}=    read until prompt
+    write   grep "satellite data init ok" cpe_upgrade.log | head -1
+    ${res2}=    read until prompt
+    write   grep "REGISTER_SUCCEED" cpe_upgrade.log | head -1
+    ${res3}=    read until prompt
+    write   grep "add controller success" cpe_upgrade.log | head -1
+    ${res4}=    read until prompt
+    write   grep "3: connecting..." cpe_upgrade.log | head -1
+    ${res5}=    read until prompt
+    write   grep "3: connected" cpe_upgrade.log | head -1
+    ${res6}=    read until prompt
+    write   grep "flow_mod" cpe_upgrade.log | head -1
+    ${res7}=    read until prompt
+    close connection
+    log  ${res1}\n${res2}\n${res3}\n${res4}\n${res5}\n${res6}\n${res7}
+
+Prepare Salt
+    ${session}=     SSH Login Salt Master
+    #Sync All CPE Salt Module
+    set suite variable  ${salt_master_ssh}  ${session}
+    Init Target Versions   ${repo_ver}   ${up_cpe_ver}   ${up_cpe_ver}    ${env_name}
+    write sudo cmd   cp /srv/reclass/classes/env/${env_name}/aiwan_release.yml /srv/reclass/classes/env/${env_name}/aiwan_release.yml.bak    &{salt-master}[passwd]
+
+Echo Extra Words to Deb
+    [Arguments]   ${file}
+    SSH Login With Key    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[key]
+    write    cp /var/www/aiwan-repo/${repo_ver}/aiwan-cpe/${file}*.deb /var/www/aiwan-repo/${repo_ver}/aiwan-cpe/aiwan-cpe_${wrong_deb_ver}_amd64.deb
+    read until prompt
+    write    md5sum /var/www/aiwan-repo/${repo_ver}/aiwan-cpe/aiwan-cpe_${wrong_deb_ver}_amd64.deb > /var/www/aiwan-repo/${repo_ver}/aiwan-cpe/aiwan-cpe_${wrong_deb_ver}_amd64.deb.md5
+    read until prompt
+    write    echo "hello" >> /var/www/aiwan-repo/${repo_ver}/aiwan-cpe/aiwan-cpe_${wrong_deb_ver}_amd64.deb
+    read until prompt
+    write   ls -ltr /var/www/aiwan-repo/${repo_ver}/aiwan-cpe/aiwan-cpe*.deb* | tail -n 2
+    read until prompt
+    close connection
+
+Remove Wrong Deb
+    SSH Login With Key    &{internet_host}[ip]    &{internet_host}[ssh_port]    &{internet_host}[user]    &{internet_host}[key]
+    write sudo cmd    rm -rf /var/www/aiwan-repo/${repo_ver}/aiwan-cpe/aiwan-cpe_${wrong_deb_ver}*    &{internet_host}[passwd]
+    close connection
+
+Check Startup Config
+    [Arguments]   ${cpe}  ${item_list}
+    ${cpe_startup}=     Salt Run Cmd       &{${cpe}_cpe}[minion_id]    cat /opt/aiwan/config/startup_cpe.json
+    :FOR    ${item}   IN    @{item_list}
+    \   should contain    ${cpe_startup}   &{${cpe}_cpe}[${item}]
+
+Get Process ID
+    [Arguments]  ${cpe}     ${service_keyword}
+    ${res}=     Write CPE CMD   ${cpe}   ps -ef | grep ${service_keyword} | grep usr | grep -v grep | awk '{print $2}'
+    ...    ps w | grep ${service_keyword} | grep -v grep | awk '{print $1}'    &{${cpe}_cpe}[passwd]
+    ${pid}=    get line    ${res}    -2
+    should be equal as integers   ${pid}   ${pid}
+    [Return]  ${pid}
+
+Check Service Restarted
+    [Arguments]   ${cpe}    ${service_keyword}   ${pre_pid}
+    ${cur_pid}=    Get Process ID   ${cpe}  ${service_keyword}
+    should not be equal  ${pre_pid}    ${cur_pid}
+
+Start Check BJ Cache Info
+    ssh_cpe  local   sess_cache
+    write    sudo su
+    ${res}=    wait until keyword succeeds    1s    1s    read until    :
+    #Set Default Configuration    prompt=$
+    #Set Default Configuration    timeout=3
+    ${status}    ${value}=    Run Keyword And Ignore Error    Should Contain    ${res}    [sudo] password
+    Run Keyword If    '${status}' == 'PASS'    write    &{local_cpe}[passwd]
+    Set Client Configuration    prompt=#
+    ${res}=    set variable if    '${status}' == 'PASS'    ${res}\n    ${res}
+    ${res2}=    wait until keyword succeeds    1s    1s    read until prompt
+    write     echo "" > /home/sdn/cacheInfo.txt
+    read until prompt
+    write     /home/sdn/checkCache.sh > /home/sdn/cacheInfo.txt
+    [Return]  sess_cache
+
+Print BJ Cache Info
+    ssh_cpe   local
+    write    tail -n 20 /home/sdn/cacheInfo.txt
+    read until prompt
+    close connection
+
+Check_CPE_Version
+    [Arguments]    ${cpe}    ${expected_ver}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${res}=    run keyword if    ${openwrt}    Write OpenWrt Cmd    aiwan-ctl --version    ${pwd}
+    ...    ELSE    Write Sudo Cmd    aiwan-ctl --version    ${pwd}
+    close connection
+    ${r}=    get lines Containing String    ${res}    ${expected_ver}
+    should contain    ${r}    ${expected_ver}
+    [Return]    ${res}

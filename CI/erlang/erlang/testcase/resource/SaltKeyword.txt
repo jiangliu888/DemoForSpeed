@@ -1,0 +1,225 @@
+*** Settings ***
+Library           SSHLibrary
+Library           String
+Library           ../../libs/uranus/UranusKeyword.py
+Library           Collections
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${default_to}     ${15}
+
+*** Keywords ***
+SSH Login Salt Master
+    ${host}=    ssh login    &{salt-master}[ctl_ip]    &{salt-master}[ssh_port]    &{salt-master}[user]    &{salt-master}[passwd]
+    Set Client Configuration    timeout=${default_to}
+    [Return]    ${host}
+
+Check Accepted Salt Key
+    [Arguments]    ${minion_id}
+    ${res}=    write sudo cmd    salt-key -l acc    &{salt-master}[passwd]
+    should contain    ${res}    ${minion_id}
+
+Start CPE Tcpdump Sync
+    [Arguments]    ${minion_id}    ${ifnames}    ${timeout}=${None}    ${size}=${None}    ${options}=${None}
+    ${cmd}=    set variable    salt ${minion_id} tcpdump.run port=${ifnames}
+    ${cmd}=    set variable if    '${options}' != ${None}    ${cmd} options="${options}"    ${cmd}
+    ${cmd}=    set variable if    ${timeout} != ${None}    ${cmd} timeout=${timeout}    ${cmd}
+    ${cmd}=    set variable if    ${size} != ${None}    ${cmd} size=${size}    ${cmd}
+    ${to}=    set variable if    ${timeout} != ${None}    ${timeout}    ${60}
+    ${to}=    evaluate    ${to} + ${20}
+    Set Client Configuration    timeout=${to}
+    ${res}=    write sudo cmd    ${cmd}    &{salt-master}[passwd]
+    Set Client Configuration    timeout=${default_to}
+    [Return]    ${res}
+
+Start CPE Tcpdump Async
+    [Arguments]    ${minion_id}    ${ifnames}    ${timeout}=${None}    ${size}=${None}    ${options}=${None}
+    ${cmd}=    set variable    salt ${minion_id} tcpdump.run port=${ifnames}
+    ${cmd}=    set variable if    '${options}' != ${None}    ${cmd} options="${options}"    ${cmd}
+    ${cmd}=    set variable if    ${timeout} != ${None}    ${cmd} timeout=${timeout}    ${cmd}
+    ${cmd}=    set variable if    ${size} != ${None}    ${cmd} size=${size}    ${cmd}
+    ${res}=    write sudo cmd    ${cmd} &    &{salt-master}[passwd]
+    should not contain    ${res}    non-zero exit code
+    sleep    1
+
+Get Captured File
+    [Arguments]    ${minion_id}    ${ifname}
+    ${res}=    write sudo cmd    salt ${minion_id} tcpdump.get_file ${ifname}    &{salt-master}[passwd]
+    [Return]    ${res}
+
+Check Tcpdump Done
+    [Arguments]    ${minion_id}    ${ifname}
+    ${res}=    write sudo cmd    salt ${minion_id} tcpdump.status ${ifname}    &{salt-master}[passwd]
+    should contain    ${res}    Done
+
+Start PCap
+    [Arguments]    ${minion_id}    ${interface}    ${iseth}=${0}    ${bytes}=${1024000000}    ${seconds}=${600}
+    ${res}=    write sudo cmd    salt ${minion_id} cmd.run "aiwan-ctl --pcapStart ${interface} --pcapIsEth ${iseth} --pcapBytes ${bytes} --pcapSeconds ${seconds}"    &{salt-master}[passwd]
+    should not contain    ${res}    error
+    [Return]    ${res}
+
+Query PCap Status
+    [Arguments]    ${minion_id}    ${interface}
+    ${res}=    write sudo cmd    salt ${minion_id} cmd.run "aiwan-ctl --pcapQuery ${interface}"    &{salt-master}[passwd]
+    [Return]    ${res}
+
+Fetch PCapture File
+    [Arguments]    ${minion_id}    ${interface}
+    ${res}=    write sudo cmd    salt ${minion_id} cp.push /dev/shm/${interface}.pcap    &{salt-master}[passwd]
+    [Return]    ${res}
+
+Get CPE Interfaces
+    [Arguments]    ${minion_id}
+    ${res}=    write sudo cmd    salt ${minion_id} tcpdump.get_port    &{salt-master}[passwd]
+    [Return]    ${res}
+
+Get CPE Ports
+    [Arguments]    ${minion_id}
+    ${res}=    write sudo cmd    salt ${minion_id} tcpdump.get_port | grep '^ \ \ \ ' | grep -v '^ \ \ \ \ '| awk '{print $1}' | grep -v ^$    &{salt-master}[passwd]
+    [Return]    ${res}
+
+Salt Upgrade CPE
+    [Arguments]    ${minion_id}    ${timeout}    ${cpe_ver}    ${config_ver}=${None}
+    SSH Login Salt Master
+    # update the timeout in /srv/pillar/cpe_upgrade.sls
+    write sudo cmd    sed -i -e 's/aiwan-cpe-check-time:.*$/aiwan-cpe-check-time: ${timeout}/' /srv/pillar/cpe_upgrade.sls    &{salt-master}[passwd]
+    # update the version info in /srv/salt/sd-wan/default_cpe_version.yaml for gw cpe or /srv/salt/sd-wan/default_version.yaml for ubuntu cpe
+    ${to}=    evaluate    ${timeout} + ${15}
+    Set Client Configuration    timeout=${to}
+    Update Target Versions    aiwan-cpe    ${cpe_ver}
+    run keyword if    '${config_ver}' != '${None}'  Update Target Versions    aiwan-config    ${config_ver}
+    Salt Connection Test    ${minion_id}
+    ${status}    ${res}=    run keyword and ignore error    write sudo cmd    salt ${minion_id} state.sls aiwan-cpe.pkgs.cpe    &{salt-master}[passwd]
+    close connection
+    [Return]    ${res}
+
+Init Target Versions
+    [Arguments]    ${repo_ver}  ${cpe_ver}    ${config_ver}   ${env_name}=st
+    ${file}=    set variable    /srv/reclass/classes/env/${env_name}/aiwan_release.yml
+    write sudo cmd    echo "---" > ${file}    &{salt-master}[passwd]
+    write sudo cmd    echo "parameters:" >> ${file}    &{salt-master}[passwd]
+    write sudo cmd    echo " \ aiwan_release:" >> ${file}    &{salt-master}[passwd]
+    write sudo cmd    echo " \ \ \ repo_url: \"http://192.168.0.8:9900/stenv\"" >> ${file}    &{salt-master}[passwd]
+    write sudo cmd    echo " \ \ \ repo_version: ${repo_ver}" >> ${file}    &{salt-master}[passwd]
+    write sudo cmd    echo " \ \ \ pkg_version: ${cpe_ver}" >> ${file}    &{salt-master}[passwd]
+    write sudo cmd    echo " \ \ \ aiwan-cpe: ${cpe_ver}" >> ${file}    &{salt-master}[passwd]
+    write sudo cmd    echo " \ \ \ aiwan-config: ${config_ver}" >> ${file}    &{salt-master}[passwd]
+
+Update Target Versions
+    [Arguments]    ${pkg_name}    ${target_ver}   ${env_name}=st
+    ${file}=    set variable    /srv/reclass/classes/env/${env_name}/aiwan_release.yml
+    write sudo cmd   sed -i "s/${pkg_name}:.*$/${pkg_name}: ${target_ver}/g" ${file}   &{salt-master}[passwd]
+
+Clear Pkg Versions
+    [Arguments]
+    ${file}=    set variable    /srv/reclass/classes/env/${env_name}/aiwan_release.yml
+    write sudo cmd   sed -i "/aiwan-cpe/d" ${file}   &{salt-master}[passwd]
+    write sudo cmd   sed -i "/aiwan-config/d" ${file}   &{salt-master}[passwd]
+
+Salt Restart CPE Service
+    [Arguments]    ${minion_id}    ${service_name}
+    Set Client Configuration    timeout=${100}
+    ${res}=    write sudo cmd    salt ${minion_id} service_cpe.restart ${service_name}    &{salt-master}[passwd]
+    Set Client Configuration    timeout=${default_to}
+    [Return]    ${res}
+
+Sync CPE Salt Modules
+    [Arguments]    ${minion_id}
+    Set Client Configuration    timeout=${30}
+    ${res}=    write sudo cmd    salt ${minion_id} saltutil.sync_all    &{salt-master}[passwd]
+    Set Client Configuration    timeout=${default_to}
+    [Return]    ${res}
+
+Get All Available Minion
+    [Arguments]    ${minion_num}=20
+    Set Client Configuration    timeout=${120}
+    ${res}=    write sudo cmd    salt-run manage.status| grep up -A ${minion_num} | grep '^ ' | awk '{print $2}'    &{salt-master}[passwd]
+    Set Client Configuration    timeout=${default_to}
+    [Return]    ${res}
+
+Sync CPE Salt Pillar
+    [Arguments]    ${minion_id}
+    ${res}=    write sudo cmd    salt ${minion_id} saltutil.refresh_pillar    &{salt-master}[passwd]
+
+Pre Download From Repo
+    [Arguments]   ${minion_id}  ${pkg_name}
+    SSH Login Salt Master
+    # pkg_name should be: cpe, config, agent, or exporter
+    ${res}=    write sudo cmd    salt ${minion_id} state.sls aiwan-cpe.files.${pkg_name}    &{salt-master}[passwd]
+    should not contain    ${res}    file not exist
+    should not contain    ${res}    No response
+    should contain    ${res}    Succeeded
+    should not contain    ${res}    Result: False
+    close connection
+
+Salt Get CPE Version
+    [Arguments]    ${minion_id}
+    ${res_cpe}=    Write Sudo Cmd    salt ${minion_id} service_cpe.version aiwan-cpe    &{salt-master}[passwd]
+    ${ver}=    get lines containing string    ${res_cpe}    .
+    ${match}    ${cpe_ver}    ${date}=    should match regexp    ${ver}    ([0-9]{1,}.[0-9]{1,}.[0-9]{1,}-RC[0-9]{1,}(-[0-9]{4}.[0-9]{2}.[0-9]{2})?)
+    ${res_config}=    Write Sudo Cmd    salt ${minion_id} service_cpe.version aiwan-config    &{salt-master}[passwd]
+    ${ver}=    get lines containing string    ${res_config}    .
+    ${status}    ${result}=    run keyword and ignore error    should match regexp    ${ver}    ([0-9]{1,}.[0-9]{1,}.[0-9]{1,}-RC[0-9]{1,}(-[0-9]{4}.[0-9]{2}.[0-9]{2})?)
+    ${config_ver}=    set variable if    '${status}' == 'PASS'    @{result}[1]
+    [Return]    ${cpe_ver}    ${config_ver}
+
+Salt Connection Test
+    [Arguments]    ${minion_id}
+    Set Client Configuration    timeout=${30}
+    ${res}=    Write Sudo Cmd    salt ${minion_id} test.ping    &{salt-master}[passwd]
+    should contain    ${res}    True
+    Set Client Configuration    timeout=${default_to}
+
+Salt Get CPE Status
+    [Arguments]    ${minion_id}
+    SSH Login Salt Master
+    ${res}=    Write Sudo Cmd    salt ${minion_id} service_cpe.status aiwan-cpe    &{salt-master}[passwd]
+    close connection
+    [Return]    ${res}
+
+Salt Config Saas Speedup Collectd
+    [Arguments]    ${minion_id}
+    ${res}=    Write Sudo Cmd    salt ${minion_id} state.sls aiwan-cpe.config.saas_speed    &{salt-master}[passwd]
+
+Salt Run Cmd
+    [Arguments]    ${minion_id}    ${cmd}
+    ${res}=    Write Sudo Cmd    salt ${minion_id} cmd.run "${cmd}"    &{salt-master}[passwd]
+    # Provide higher level keywords
+    [Return]    ${res}
+
+Sync All CPE Salt Module
+    ${available_cpe}=    Get All Available Minion
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${status}=    run keyword and return status    should contain    ${available_cpe}    &{${cpe}_cpe}[minion_id]
+    \    run keyword if    ${status}    Sync CPE Salt Modules    &{${cpe}_cpe}[minion_id]
+
+Check Pcapture Done
+    [Arguments]    ${minion_id}    ${interface}
+    ${res}=    Query PCap Status    ${minion_id}    ${interface}
+    ${l_done}=    get lines containing string  ${res}   done
+    should contain    ${l_done}    true
+
+Check Pcapture Running
+    [Arguments]    ${minion_id}    ${interface}
+    ${res}=    Query PCap Status    ${minion_id}    ${interface}
+    ${l_done}=    get lines containing string  ${res}   done
+    should contain    ${l_done}    false
+
+Salt Wget
+    [Arguments]    ${minion_id}    ${src}    ${dst}    ${delay}=3s
+    ${res}=    Write Sudo Cmd    salt ${minion_id} cmd.run "wget -O ${dst} ${src} "    &{salt-master}[passwd]    ${delay}
+    should contain    ${res}    100%
+
+Salt download and reload ip2pop
+    [Arguments]    ${minion_id}
+    SSH Login Salt Master
+    Salt Wget    ${minion_id}    http://192.168.0.8:9900/2006/ip2pop.db    /opt/aiwan/config/ip2pop.db    30s
+    ${res}=    Salt run cmd    ${minion_id}    aiwan-ctl --reloadPopdb
+    Comment    should contain    ${res}    reload popdb success
+    close connection
+
+Salt reload ip2pop
+    [Arguments]    ${minion_id}
+    SSH Login Salt Master
+    ${res}=    Salt run cmd    ${minion_id}    aiwan-ctl --reloadPopdb
+    close connection

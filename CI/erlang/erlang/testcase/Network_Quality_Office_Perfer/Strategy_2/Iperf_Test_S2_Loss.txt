@@ -1,0 +1,72 @@
+*** Settings ***
+Suite Setup       Iperf Setup
+Suite Teardown    Iperf Teardown
+Test Timeout      2 minutes
+Resource          ../../resource/UranusKeyword.txt
+Resource          ../../resource/SshKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+
+*** Variables ***
+${l_iperf_s_port}    5201
+${r_iperf_s_port}    5500
+${loss}           0
+
+*** Test Cases ***
+Office_Network_Iperf_Test Strategy2_loss
+    [Tags]    SDWANDEV-483
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    local
+    [Teardown]
+
+Private_Network_Iperf_Test Strategy2_loss
+    [Tags]    SDWANDEV-4191
+    [Setup]
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    0    remote
+    [Teardown]    Print Iperf Server Log    local
+
+Sideway_Office_Network_Iperf_Test Strategy2_loss
+    [Tags]    SDWANDEV-827    Sideway
+    wait until keyword succeeds    6s    1s    check_paralled_sessions_iperf_loss_result_in_pc    ${loss}    wuhan
+    [Teardown]    Print Iperf Server Log    nanjing
+
+Sideway_Gateway_Office_Network_Iperf_Test Strategy2_loss
+    [Tags]    Sideway    SDWANDEV-1529
+    #run keyword and ignore error    Gateway Pingable Check
+    Iperf3_loss_From_PC_With_Port    &{nanjing_pc}[inner_ip]    8M    guangzhou    ${l_iperf_s_port}
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    guangzhou
+    [Teardown]    Print Iperf Server Log    nanjing
+
+Sideway_2gateway_Office_Network_Iperf_Test Strategy2_loss
+    [Tags]    SDWANDEV-3311    SanityCheck
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    ${loss}    changsha
+    [Teardown]    Print Iperf Server Log    guangzhou
+
+*** Keywords ***
+Iperf Setup
+    ${series_server_connect_list} =    run keyword if    ${suite_test_series_group}    Series_Iperf Setup
+    ...    ELSE    create list
+    ${parallel_server_connect_list} =    run keyword if    ${suite_test_parallel_group}    Parallel_Iperf Setup
+    ...    ELSE    create list
+    ${server_list}    combine Lists    ${series_server_connect_list}    ${parallel_server_connect_list}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+Iperf Teardown
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+
+Series_Iperf Setup
+    ${office_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    remote    ${r_iperf_s_port}
+    ${private_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    local    ${l_iperf_s_port}
+    Iperf3_loss_From_PC_With_Port    &{remote_pc}[inner_ip]    10M    local    ${r_iperf_s_port}
+    Iperf3_loss_From_PC_With_Port    &{local_pc}[intranet_ip]    50M    remote    ${l_iperf_s_port}
+    ${s_list}    create list    ${office_server_connect}    ${private_server_connect}
+    [Return]    ${s_list}
+
+Parallel_Iperf Setup
+    ${nanjing_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    ${guangzhou_server_connect}=    Init_Iperfs_Server_In_PC_with_Port    guangzhou    ${l_iperf_s_port}
+    iperf3_loss_from_pc_with_parallel_sessions    &{nanjing_pc}[inner_ip]    25M    wuhan    ${l_iperf_s_port}    512    2
+    ${target_cpe}    set variable    'changsha'
+    run keyword if  ${target_cpe} in @{cpe_list}   Iperf3_loss_From_PC_With_Port    &{guangzhou_pc}[inner_ip]    &{changsha_pc}[iperf_udp_bandwidth]    changsha    ${l_iperf_s_port}
+    ${s_list}    create list    ${nanjing_server_connect}    ${guangzhou_server_connect}
+    [Return]    ${s_list}

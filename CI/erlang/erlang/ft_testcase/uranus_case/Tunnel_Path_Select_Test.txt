@@ -1,0 +1,206 @@
+*** Settings ***
+Suite Setup       FT_Suit_startup
+Suite Teardown
+Test Setup        TestSetup
+Resource          ../../testcase/resource/UranusKeyword.txt
+Library           ../../libs/uranus/UranusKeyword.py
+Resource          ../resource/FtNeKeyword.txt
+Library           ../../libs/fake_ne/interface/FakeNeKeyword.py
+Library           ../../libs/fake_ne/topo/loadTopo.py
+Resource          ../resource/topoKeyword.txt
+Library           ../../libs/manager/ManagerKeyword.py
+Library           ../../libs/prism/PrismKeyword.py
+Variables         ../../config/ft_topo_check/measure_tasks_check.py
+Variables         ../../config/ft_topo_check/flows_check.py
+Library           ../../libs/uranus/interface/EsInterface.py
+
+*** Variables ***
+@{cpe_wan_if}     enp0s3
+@{cac_6}          6
+@{eac_1}          1
+
+*** Test Cases ***
+Select_Path_No_Loss
+    [Tags]    SDWANDEV-320    SDWANDEV-319
+    [Setup]    change_running_measure_config    weightCoefficient    5
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    ${switchs}=    create list    10150    9622
+    Start_Ne_with_topo    &{path}[topo]/1cr_1er_path_select_topo.json    ${switchs}
+    Measure_tasks_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    Tunnel_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR10150_ER9622_POP_Flows}
+    ${jitter}=    create list    5    0    0    0
+    ${loss}=    create list    1    0    0    0
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}
+    Create_Ne_Measure_Shake_loss_result    9622    ${jitter}    ${loss}
+    wait until keyword succeeds    10s    2s    Tunnel_check    ${CR10150_ER9622_Tasks_and_Tunnels_loss}
+    POP_Flows_check    ${CR10150_ER9622_POP_Flows}
+    ${jitter}=    create list    1    0    0    0
+    ${loss}=    create list    0    0    0    0
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}
+    Create_Ne_Measure_Shake_loss_result    9622    ${jitter}    ${loss}
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    wait until keyword succeeds    60s    2s    Measure_tasks_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    wait until keyword succeeds    60s    2s    Tunnel_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR10150_ER9622_POP_Flows}
+    [Teardown]    run keywords    change_running_measure_config    weightCoefficient    2
+    ...    AND    Case_tear_down
+
+Select_None_Path_All_Loss
+    [Tags]    SDWANDEV-544
+    ${switchs}=    create list    10150    9622
+    Start_Ne_with_topo    &{path}[topo]/1cr_1er_path_select_topo.json    ${switchs}
+    sleep    5s
+    ${jitter}=    create list    5    0    0    0
+    ${loss}=    create list    1    1    0    0
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}
+    Create_Ne_Measure_Shake_loss_result    9622    ${jitter}    ${loss}
+    Measure_tasks_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    wait until keyword succeeds    10s    2s    Tunnel_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR10150_ER9622_POP_Flows}
+    [Teardown]    Case_tear_down
+
+POP_CAC_EAC_Check
+    [Tags]    SDWANDEV-129
+    ${switchs}=    create list    10150    9622
+    Start_Ne_with_topo    &{path}[topo]/1cr_1er_path_select_topo.json    ${switchs}
+    Measure_tasks_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    Tunnel_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR10150_ER9622_POP_Flows}
+    Check_POP_CAC_EAC    10150    ${4}    ${1}
+    Check_POP_CAC_EAC    9622    ${4}    ${11}
+    [Teardown]    Case_tear_down
+
+Select_End_2End_Path_No_Loss
+    [Tags]    SDWANDEV-383
+    [Setup]    change_running_measure_config    weightCoefficient    5
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    ${switchs}=    create list    10150    10166    10182    17792    17808
+    ${cpes}=    create list    17792    17808
+    ${pops}=    create list    10150    10166    10182
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/3cr_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    CPE_Select_Prefer_Area    17808    ${cpe_wan_if}    ${cac_6}    ${eac_1}
+    wait until keyword succeeds    60s    2s    All_CPE_Learn_CAC_EAC
+    Tunnel_check    ${CR10150_CPE17792_CR10166_CR10182_CPE17808_ALL_Tunnels}
+    CPE_Flows_check    ${cpes}    ${CR10150_CPE17792_CR10166_CR10182_CPE17808_POP_TO_CPE_Flows}    ${UN17792_17808_CPE_Flows}
+    ${jitter}=    create list    5    0    0    0
+    ${loss}=    create list    1    1    0    0
+    ${delay}=   create list    0    0    0    0
+    ${target_cac}=    create list    6
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    ${target_cac}=    create list    4
+    Create_Ne_Measure_Shake_loss_result    10182    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    wait until keyword succeeds    10s    5s    CPE_Flows_check    ${cpes}    ${CR10150_CPE17792_CR10166_CR10182_loss_CPE17808_POP_TO_CPE_Flows}    ${UN17792_17808_CPE_Flows}
+    ${jitter}=    create list    1    0    0    0
+    ${loss}=    create list    0    0    0    0
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}
+    Create_Ne_Measure_Shake_loss_result    10182    ${jitter}    ${loss}
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    wait until keyword succeeds    10s    2s    Tunnel_check    ${CR10150_CPE17792_CR10166_CR10182_CPE17808_ALL_Tunnels}
+    wait until keyword succeeds    30s    2s    CPE_Flows_check    ${cpes}    ${CR10150_CPE17792_CR10166_CR10182_CPE17808_POP_TO_CPE_Flows}    ${UN17792_17808_CPE_Flows}
+    [Teardown]    run keywords    delete_company1_relation
+    ...    AND    Case_tear_down
+
+Path_change_when_POP_Abnormal
+    [Tags]    SDWANDEV-383
+    [Setup]    change_running_measure_config    weightCoefficient    5
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    ${switchs}=    create list    10150    10166    10182    17792    17808
+    ${cpes}=    create list    17792    17808
+    ${pops}=    create list    10150    10166    10182
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/3cr_2cpe_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    CPE_Select_Prefer_Area    17808    ${cpe_wan_if}    ${cac_6}    ${eac_1}
+    wait until keyword succeeds    60s    2s    All_CPE_Learn_CAC_EAC
+    Tunnel_check    ${CR10150_CPE17792_CR10166_CR10182_CPE17808_ALL_Tunnels}
+    CPE_Flows_check    ${cpes}    ${CR10150_CPE17792_CR10166_CR10182_CPE17808_POP_TO_CPE_Flows}    ${UN17792_17808_CPE_Flows}
+    ${jitter}=    create list    5    0    0    0
+    ${loss}=    create list    1    1    0    0
+    ${delay}=   create list    0    0    0    0
+    ${target_cac}=    create list    6
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    ${target_cac}=    create list    4
+    Create_Ne_Measure_Shake_loss_result    10182    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    wait until keyword succeeds    10s    5s    CPE_Flows_check    ${cpes}    ${CR10150_CPE17792_CR10166_CR10182_loss_CPE17808_POP_TO_CPE_Flows}    ${UN17792_17808_CPE_Flows}
+    Set_POP_Status    10166    ABNORMAL
+    wait until keyword succeeds    10s    5s    CPE_Flows_check    ${cpes}    ${CR10150_CPE17792_CR10166_CR10182_CPE17808_POP_TO_CPE_Flows}    ${UN17792_17808_CPE_Flows}
+    [Teardown]    run keywords    delete_company1_relation
+    ...    AND    Case_tear_down
+
+Bigger_Than_UpperB_Dont_Change_Path
+    [Tags]    SDWANDEV-2310
+    [Setup]    change_running_measure_config    upperBandwidth    14
+    change_running_measure_config    weightCoefficient    5
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    ${switchs}=    create list    10150    9622
+    Start_Ne_with_topo    &{path}[topo]/1cr_1er_path_select_topo.json    ${switchs}
+    sleep    5s
+    ${jitter}=    create list    5    0    0    0
+    ${loss}=    create list    1    0    0    0
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}
+    Create_Ne_Measure_Shake_loss_result    9622    ${jitter}    ${loss}
+    wait until keyword succeeds    10s    2s    Tunnel_check    ${CR10150_ER9622_Tasks_and_Tunnels_loss}
+    POP_Flows_check    ${CR10150_ER9622_POP_Flows}
+    ${jitter}=    create list    0    0    0    0
+    ${loss}=    create list    0    0    0    0
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}
+    Create_Ne_Measure_Shake_loss_result    9622    ${jitter}    ${loss}
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    sleep    60s
+    Path_not_worth_change_check    ${CR10150_ER9622_POP_Flows_NoPath_Change}
+    change_running_measure_config    upperBandwidth    100
+    sleep    5s
+    wait until keyword succeeds    10s    1s    Tunnel_check    ${CR10150_ER9622_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR10150_ER9622_POP_Flows}
+    [Teardown]    run keywords    change_running_measure_config    upperBandwidth    100
+    ...    AND    change_running_measure_config    weightCoefficient    2
+    ...    AND    Case_tear_down
+
+Weight_Change_Path_Change
+    [Tags]    SDWANDEV-2310
+    [Setup]    change_running_measure_config    weightCoefficient    2
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+    ${switchs}=    create list    10150    10166    10182    10198    10214
+    Start_Ne_with_topo    &{path}[topo]/5cr_path_select_topo.json    ${switchs}
+    sleep    5s
+    ${jitter}=    create list    0    0    0    0
+    ${loss}=    create list    0    0    0    0
+    ${delay}=    create list    20    50    50    0
+    ${target_cac}=    create list    2    3    5
+    Create_Ne_Measure_Shake_loss_result    10150    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    ${delay}=    create list    50    50    0    0
+    ${target_cac}=    create list    2    3
+    Create_Ne_Measure_Shake_loss_result    10198    ${jitter}    ${loss}    ${delay}    ${target_cac}
+    wait until keyword succeeds    30s    2s    Tunnel_check    ${CR_5_Tasks_and_Tunnels}
+    wait until keyword succeeds    30s    2s    POP_Flows_check    ${CR_5_POP_Flows}
+    change_running_measure_config    weightCoefficient    15
+    wait until keyword succeeds    30s    2s    POP_Flows_check    ${CR_5_POP_Flows}
+    [Teardown]    run keywords    change_running_measure_config    weightCoefficient    2
+    ...    AND    Case_tear_down
+
+*** Keywords ***
+Path_not_worth_change_check
+    [Arguments]    ${check_ne_list_name}
+    ${check_ne_list}=    convert to list    ${check_ne_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    ${tunnels_list}=    Get_tunnelIds_by_portPairs    ${check_ne['local']}    ${check_ne['target']}    ${check_ne['port_pairs']}
+    \    Check_P2P_routes_with_tunnelIds    ${check_ne['local']}    ${check_ne['target']}    ${tunnels_list}
+
+Get_tunnelIds_by_portPairs
+    [Arguments]    ${sne_id}    ${dne_id}    ${port_Pairs}
+    ${dst_tunnels}=    get_ne_tunnels_from_controller_with_dst_ne_id    ${sne_id}    ${dne_id}
+    ${tunnels_list}=    create list
+    : FOR    ${port_pair}    IN    @{port_Pairs}
+    \    ${tunnel_id}=    evaluate    filter(lambda x: int(x['srcIp'].split('.')[3]) == ${port_pair[0]} and int(x['dstIp'].split('.')[3]) == ${port_pair[1]}, ${dst_tunnels})[0]['tunnelId']
+    \    run keyword if    ${tunnel_id}    append to list    ${tunnels_list}    ${tunnel_id}
+    [Return]    ${tunnels_list}
+
+Check_P2P_routes_with_tunnelIds
+    [Arguments]    ${sne_id}    ${dne_id}    ${tunnel_ids}
+    ${route_code}=    get_ne_cac_eac    ${dne_id}
+    ${flow_t}=    create list
+    : FOR    ${tunnel_id}    IN    @{tunnel_ids}
+    \    ${ret}=    check_pop_2_pop_next_pop_routes    ${sne_id}    ${route_code['routeCode']['cac']}    ${route_code['routeCode']['eac']}    ${tunnel_id}
+    \    run keyword if    ${ret}    append to list    ${flow_t}    ${tunnel_id}
+    length should be    ${flow_t}    2

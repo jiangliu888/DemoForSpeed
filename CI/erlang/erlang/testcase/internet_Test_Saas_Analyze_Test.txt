@@ -1,0 +1,232 @@
+*** Settings ***
+Suite Setup
+Suite Teardown
+Library           ../libs/uranus/UranusKeyword.py
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+Library           ../libs/manager/ManagerKeyword.py
+Library           ../libs/prism/PrismKeyword.py
+Resource          resource/ManagerKeyword.txt
+Resource          resource/PingKeyword.txt
+Library           ../libs/configCenter/ConsulKeyword.py
+Resource          resource/SaltKeyword.txt
+
+*** Variables ***
+${flow_ttl}       5
+${r_iperf_s_port}    5201
+${domain_wait}    5s
+${exec_time}      10
+${analyze_gw_cpe}    guangzhou
+${analyze_series_cpe}    remote
+${ana_log}        /var/log/ana.log
+${analyze_tmp_log}    /tmp/analyze.log
+${del_req_num}    39
+
+*** Test Cases ***
+GW Saas ICMP Analyze
+    [Tags]    SDWANDEV-3993    SDWANDEV-4000
+    [Setup]    run keywords    append_analyze_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${analyze_gw_cpe}_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000
+    ...    AND    Set Analyze Time    ${analyze_gw_cpe}    2
+    ...    AND    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Spi_Analyze_Dispatch_From_Cpe    ${analyze_gw_cpe}
+    ...    ${suite_saas_tag_id}    1
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_gw_cpe}    ${analyze_tmp_log}
+    ssh_pc    ${analyze_gw_cpe}    sess_pc
+    write    ping samba.systemtest.com -M do -s 64 -i 0.2 -c ${exec_time}
+    ${dns_stats}=    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_gw_cpe}    ${suite_saas_tag_id}
+    ...    ${b_time}    &{dns_server}[ip]    17    2    66    66
+    ...    0.02    ${53}
+    Check Analyze Log DNS    ${dns_stats}    &{dns_server}[ip]    samba.systemtest.com    &{salt-master}[internet_ip]
+    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_gw_cpe}    ${suite_saas_tag_id}    ${b_time}
+    ...    &{salt-master}[internet_ip]    1    ${exec_time}    92    92    2
+    ${b_time}=    get time    epoch
+    switch connection    sess_pc
+    write    ping samba.systemtest.com -M do -s 512 -i 0.2 -c ${exec_time}
+    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_gw_cpe}    ${suite_saas_tag_id}    ${b_time}
+    ...    &{salt-master}[internet_ip]    1    ${exec_time}    540    540    2
+    ${b_time}=    get time    epoch
+    switch connection    sess_pc
+    write    ping samba.systemtest.com -M do -s 1024 -i 0.2 -c ${exec_time}
+    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_gw_cpe}    ${suite_saas_tag_id}    ${b_time}
+    ...    &{salt-master}[internet_ip]    1    ${exec_time}    1052    1052    2
+    close connection
+    [Teardown]    Refresh Default SAAS SPI Dispatch    ${analyze_gw_cpe}
+
+GW Saas TCP Analyze
+    [Tags]    SDWANDEV-3994
+    [Setup]    run keywords    append_analyze_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${analyze_gw_cpe}_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000
+    ...    AND    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Spi_Analyze_Dispatch_From_Cpe    ${analyze_gw_cpe}
+    ...    ${suite_saas_tag_id}    1
+    ...    AND    Set Analyze Time    ${analyze_gw_cpe}    2
+    ...    AND    init_iperf_server
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_gw_cpe}    ${analyze_tmp_log}
+    Wait Until Keyword Succeeds    2x    1    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${analyze_gw_cpe}    ${r_iperf_s_port}
+    ...    ${False}    10M    64
+    ${stats}    Check_Analyze_Log_L3_From_Log_Cli    ${b_time}    6    ${None}    1300    52
+    ...    5
+    Check Analyze Log L4    ${stats}    ${True}    1260    RST    ${0}    ${0}
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_gw_cpe}    /tmp/analyze.log
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${analyze_gw_cpe}    ${r_iperf_s_port}    ${False}    10M    512
+    ${stats}    Check_Analyze_Log_L3_From_Log_Cli    ${b_time}    6    ${None}    1300    52
+    ...    5
+    Check Analyze Log L4    ${stats}    ${True}    1260    RST    ${0}    ${0}
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_gw_cpe}    /tmp/analyze.log
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${analyze_gw_cpe}    ${r_iperf_s_port}    ${False}    10M    1024
+    ${stats}    Check_Analyze_Log_L3_From_Log_Cli    ${b_time}    6    ${None}    1300    52
+    ...    5
+    Check Analyze Log L4    ${stats}    ${True}    1260    RST    ${0}    ${0}
+    [Teardown]    run keywords    Refresh Default SAAS SPI Dispatch    ${analyze_gw_cpe}
+    ...    AND    teardown_iperf_server
+
+GW Saas UDP Analyze
+    [Tags]    SDWANDEV-3992
+    [Setup]    run keywords    append_analyze_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${analyze_gw_cpe}_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000
+    ...    AND    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Spi_Analyze_Dispatch_From_Cpe    ${analyze_gw_cpe}
+    ...    ${suite_saas_tag_id}    1
+    ...    AND    Set Analyze Time    ${analyze_gw_cpe}    2
+    ...    AND    init_iperf_server
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_gw_cpe}    ${analyze_tmp_log}
+    wait until keyword succeeds    2x    1    iperf_and_check_result    64
+    ${stats}=    Check_Analyze_Log_L3_From_Log_Cli    ${b_time}    17    ${None}    92    32
+    ...    5
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_gw_cpe}    /tmp/analyze.log
+    wait until keyword succeeds    2x    1    iperf_and_check_result    512
+    ${stats}=    Check_Analyze_Log_L3_From_Log_Cli    ${b_time}    17    ${None}    540    32
+    ...    5
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_gw_cpe}    /tmp/analyze.log
+    wait until keyword succeeds    2x    1    iperf_and_check_result    1024
+    ${stats}=    Check_Analyze_Log_L3_From_Log_Cli    ${b_time}    17    ${None}    1052    32
+    ...    5
+    [Teardown]    run keywords    Refresh Default SAAS SPI Dispatch    ${analyze_gw_cpe}
+    ...    AND    teardown_iperf_server
+    ...    AND    Copy Ana Log Files    ${analyze_gw_cpe}
+
+Series Saas Http Analyze
+    [Tags]    SDWANDEV-4129    SDWANDEV-3998    SDWANDEV-4000
+    [Setup]    run keywords    append_analyze_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_saas_tag_id}    1000
+    ...    AND    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Spi_Analyze_Dispatch_From_Cpe    ${analyze_series_cpe}
+    ...    ${suite_saas_tag_id}    1
+    ...    AND    Set Analyze Time    ${analyze_series_cpe}    8
+    ...    AND    Init Tcl Http Saas Server
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_series_cpe}    ${analyze_tmp_log}
+    Try Http Client Test    ${analyze_series_cpe}    samba.systemtest.com    ${del_req_num}
+    ${dns_stats}=    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_saas_tag_id}
+    ...    ${b_time}    &{default_dns}[ip]    17    2    66    66
+    ...    0.02    ${53}
+    ${dns_ip}=    set variable if    '${analyze_series_cpe}' == 'remote'    100.64.0.0    &{salt-master}[internet_ip]
+    Check Analyze Log DNS    ${dns_stats}    &{default_dns}[ip]    samba.systemtest.com    ${dns_ip}    &{dns_server}[ip]
+    ${stats}=    wait until keyword succeeds    5s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_saas_tag_id}
+    ...    ${b_time}    &{salt-master}[internet_ip]    6    ${None}    1300    52
+    ...    7
+    Check Analyze Log L4    ${stats}    ${True}    1260    FIN    ${0}    ${0}
+    Check Analyze Log Http Long    ${stats}    ${100}    ${del_req_num}    samba.systemtest.com
+    [Teardown]    run keywords    Refresh Default SAAS SPI Dispatch    ${analyze_series_cpe}
+    ...    AND    switch connection    ${sess_http_server}
+    ...    AND    close connection
+
+Series Passthrough Http Analyze
+    [Tags]    SDWANDEV-4028
+    [Setup]    run keywords    Add Passthrough Analyze SPI    ${analyze_series_cpe}    &{salt-master}[internet_ip]/32
+    ...    AND    Set Analyze Time    ${analyze_series_cpe}    8
+    ...    AND    Init Tcl Http Saas Server
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_series_cpe}    ${analyze_tmp_log}
+    Try Http Client Test    ${analyze_series_cpe}    &{salt-master}[internet_ip]    ${del_req_num}
+    ${stats}=    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_passthrough_analyze_tag_id}
+    ...    ${b_time}    &{salt-master}[internet_ip]    6    ${None}    1300    52
+    ...    0.14
+    Check Analyze Log L4    ${stats}    ${True}    1440    FIN    ${0}    ${0}
+    Check Analyze Log Http Long    ${stats}    ${100}    ${del_req_num}    &{salt-master}[internet_ip]
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_passthrough_analyze_tag_id}
+    ...    AND    Delete Company SPI Tag    ${suite_company_id}    ${suite_passthrough_analyze_tag_id}
+    ...    AND    Refresh Default SAAS SPI Dispatch    ${analyze_series_cpe}
+    ...    AND    switch connection    ${sess_http_server}
+    ...    AND    close connection
+
+Series Passthrough Https Analyze
+    [Tags]    SDWANDEV-3999
+    [Setup]    run keywords    Add Passthrough Analyze SPI    ${analyze_series_cpe}    66.102.251.24/32
+    ...    AND    Set Analyze Time    ${analyze_series_cpe}    8
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_series_cpe}    ${analyze_tmp_log}
+    ssh_pc    ${analyze_series_cpe}
+    write    curl https://sina.com
+    ${res}=    read until prompt
+    close connection
+    ${stats}=    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_passthrough_analyze_tag_id}
+    ...    ${b_time}    66.102.251.24    6    ${None}    1300    52
+    ...    1.2    ${None}    ${False}    ${None}    ${True}
+    Check Analyze Log L4    ${stats}    ${True}    1440    FIN    ${0}    ${0}
+    Check Analyze Log Https    ${stats}    sina.com
+    [Teardown]    run keywords    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_passthrough_analyze_tag_id}
+    ...    AND    Delete Company SPI Tag    ${suite_company_id}    ${suite_passthrough_analyze_tag_id}
+    ...    AND    Refresh Default SAAS SPI Dispatch    ${analyze_series_cpe}
+
+*** Keywords ***
+init_iperf_server
+    ${internet_server_connect} =    Start Iperf Internet Server    ${r_iperf_s_port}
+    ${dns_server_connect}=    Init_Iperfs_Server_In_PC    dns_server
+    ${salt-master_connect}=    Init_Iperfs_Server_In_PC    salt-master
+    ${server_list}=    create list    ${internet_server_connect}    ${dns_server_connect}    ${salt-master_connect}
+    set suite variable    ${iperf_server_list}    ${server_list}
+
+teardown_iperf_server
+    : FOR    ${server_connect}    IN    @{iperf_server_list}
+    \    Close_Iperfs_Server_In_LocalPC    ${server_connect}
+    close all connections
+
+Init Tcl Http Saas Server
+    [Arguments]    ${port}=9700
+    ${tcl_http_server}=    SSH Login Salt Master
+    set suite variable    ${sess_http_server}    ${tcl_http_server}
+    write sudo cmd    killall /usr/bin/tclsh
+    write    ./httpServer.tcl ${port}
+
+Add Passthrough Analyze SPI
+    [Arguments]    ${cpe}    ${dstIP}
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_saas_tag_id}
+    ${tag_name}=    set variable    passthrough_analyze
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    Set global Variable    ${suite_passthrough_analyze_tag_id}    ${tag_id}
+    update_company_spi_tag_rule    ${suite_company_id}    ${suite_passthrough_analyze_tag_id}    ${0}    dstCIDR    ${dstIP}
+    add_site_spi_dispatch    ${suite_company_id}    ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_passthrough_analyze_tag_id}    900
+    append_analyze_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_passthrough_analyze_tag_id}    900
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Office_Analyze_SPI_From_Cpe    ${cpe}    0    ${suite_passthrough_analyze_tag_id}
+    ...    dstCIDR    ${dstIP}    1
+
+Copy Ana Log Files
+    [Arguments]    ${cpe}
+    ssh_cpe    ${cpe}
+    write cpe cmd    ${cpe}    cp /tmp/analyze.log ~/    cp /tmp/analyze.log ~/
+    write cpe cmd    ${cpe}    cp /var/log/ana.log ~/    cp /var/log/ana.log ~/
+
+iperf_and_check_result
+    [Arguments]    ${length}
+    Iperf3 From PC With Protocol    &{internet_host}[saas_dns]    ${analyze_gw_cpe}    ${r_iperf_s_port}    ${True}    10M    ${length}
+    ssh_pc    ${analyze_gw_cpe}
+    ssh_write_command_and_check_string    grep "iperf Done" iperf_test.log    iperf Done
+
+Check_Analyze_Log_L3_From_Log_Cli
+    [Arguments]    ${b_time}    ${protocol}    ${pkts}    ${payload_size_max}    ${payload_size_min}    ${duration}
+    ${result}    ${stats}=    run keyword and ignore error    wait until keyword succeeds    10s    1    Check Analyze Log L3
+    ...    ${analyze_gw_cpe}    ${suite_saas_tag_id}    ${b_time}    &{internet_host}[ip]    ${protocol}    ${pkts}
+    ...    ${payload_size_max}    ${payload_size_min}    ${duration}
+    run keyword if    '${result}' == 'FAIL'    Get L3 Log from Anacli Report    ${b_time}    ${protocol}    ${pkts}    ${payload_size_max}
+    ...    ${payload_size_min}    ${duration}
+    [Return]    ${stats}
+
+Get L3 Log from Anacli Report
+    [Arguments]    ${b_time}    ${protocol}    ${pkts}    ${payload_size_max}    ${payload_size_min}    ${duration}
+    ${num}=    get anacli report    ${analyze_gw_cpe}
+    should be true    ${num} !=${0}
+    Check Analyze Log L3    ${analyze_gw_cpe}    ${suite_saas_tag_id}    ${b_time}    &{internet_host}[ip]    ${protocol}    ${pkts}
+    ...    ${payload_size_max}    ${payload_size_min}    ${duration}    tmp_log='/var/log/ana_cli.log'
+    Check Analyze Log L3    ${analyze_gw_cpe}    ${suite_saas_tag_id}    ${b_time}    &{internet_host}[ip]    6    ${None}
+    ...    1300    52    5

@@ -1,0 +1,733 @@
+*** Settings ***
+Suite Setup
+Suite Teardown
+Test Teardown
+Test Timeout      15 minutes
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/relay/RelayControlCli.py
+Resource          ../resource/SwitchKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+Resource          ../resource/SaltKeyword.txt
+
+*** Variables ***
+${exec_time}      100
+${route_level_2000_p}    2000
+${check_num}      5
+${office_tcpdump_file}    pop_change_office.pcap
+${pop_change_ping_log}    Pop_change_512_ping.log
+${handover_down_pop_log}    hangover_down_pop.log
+
+*** Test Cases ***
+Add_High_Priority_Flush_Catch
+    [Tags]    SDWANDEV-256    long    debug
+    [Timeout]    1 minute
+    Ensure_CPE_Flow_Work    remote    office
+    ${flow_body}=    set_device_flow_spec    &{remote_cpe}[chassis_id]    &{remote_pc}[internet_port]    &{chongqing_cpe}[chassis_id]    4    &{local_pc}[cpe_ip]
+    ...    &{local_pop}[cac]    &{local_pop}[eac]
+    wait until keyword succeeds    8x    20ms    Check_Ping_Packet_All_Loss    &{remote_pc}[inner_ip]
+    [Teardown]    teardown_high_priority_flow    ${flow_body}
+
+powoff_poweron_cpe
+    [Tags]    SDWANDEV-356    abnormal    SDWANDEV-2060
+    [Setup]    set_relay_controller_ip    &{relay}[ip]
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    wait until keyword succeeds    10x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    power_off
+    run keyword and continue on Failure    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing_slave    ha
+    ...    master
+    power_on
+    sleep    50s
+    wait until keyword succeeds    3x    200ms    Ensure_CPE_Flow_Work    remote    office
+    wait until keyword succeeds    10x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    [Teardown]    run keywords    power_on
+    ...    AND    enshare_nanjing_cpe_master
+    ...    AND    wait until keyword succeeds    10x    2s    Ensure_CPE_Flow_Work    nanjing
+    ...    office
+
+arm_cpe_aiwan_hardware_status
+    [Tags]    abnormal    SDWANDEV-3892
+    [Setup]
+    wait until keyword succeeds    10x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    ssh_cpe    changsha
+    write openwrt cmd    echo "NETDEV WATCHDOG: eth0 (mtk_soc_eth): transmit queue 0 timed out" >> /var/log/messages
+    close connection
+    ${b_time}=    get time    epoch
+    sleep    20s
+    wait until keyword succeeds    30x    2s    Check_Aiwan_Hardware_Status_From_AlertMng    changsha    ${b_time}
+    wait until keyword succeeds    10x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    [Teardown]
+
+Shutdown_an_UP_CPE_Wan
+    [Tags]    SDWANDEV-353    SDWANDEV-508    abnormal
+    [Setup]    Valid Ping Start Tcpdump in Remote PC    down_up_wan.pcap    p_down_up_wan.pcap    down_up_wan_cpe_wan.pcap    down_up_wan_cpe_lan.pcap
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    ${c_id}=    shutdown_switch_port    m_242    &{mirror_switch_242}[remote_cpe_if]
+    Check_Ping_Packet_All_Loss    &{remote_pc}[inner_ip]
+    unshutdown_switch_port    ${c_id}    &{mirror_switch_242}[remote_cpe_if]
+    sleep    2s
+    wait until keyword succeeds    10x    20ms    Trigger_learn_IP_and_office_work    remote
+    [Teardown]    run keywords    SSH Login Remote
+    ...    AND    Write Sudo Cmd    killall tcpdump    &{remote_pc}[passwd]
+
+Disable_NE_Netconf
+    [Tags]    SDWANDEV-346    SDWANDEV-122    abnormal
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    Block_Controller_Netconf    &{local_pop}[ip]    block
+    Block_Controller_Netconf    &{local_pc}[cpe_ip]    block
+    ${netconf_num}=    evaluate    ${netconf_devices_num }-2
+    wait until keyword succeeds    24x    2s    Check_Avaiable_Netconf_Num    ${netconf_num}
+    Ensure_CPE_Flow_Work    remote    office
+    [Teardown]    run keywords    Block_Controller_Netconf    &{local_pop}[ip]    unblock
+    ...    AND    Block_Controller_Netconf    &{local_pc}[cpe_ip]    unblock
+    ...    AND    wait until keyword succeeds    30x    2s    Check_Avaiable_Netconf_Num    ${netconf_devices_num }
+
+Disable_NE_openflow
+    [Tags]    SDWANDEV-349    abnormal
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    Block_Controller_openflow    &{local_pop}[ip]    block    6633
+    Block_Controller_openflow    &{local_pc}[cpe_ip]    block    6653
+    ${netconf_num}=    evaluate    ${of_devices_num }-2
+    wait until keyword succeeds    30x    2s    Check_Avaiable_OpenFlow_Num    ${netconf_num}
+    Ensure_CPE_Flow_Work    remote    office
+    [Teardown]    run keywords    Block_Controller_openflow    &{local_pop}[ip]    unblock    6633
+    ...    AND    Block_Controller_openflow    &{local_pc}[cpe_ip]    unblock    6653
+    ...    AND    wait until keyword succeeds    6x    1s    Check_Avaiable_OpenFlow_Num    ${of_devices_num }
+
+Restart_Pop
+    [Tags]    SDWANDEV-345    SDWANDEV-2345    abnormal
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    Restart_Pop
+    sleep    40s
+    wait until keyword succeeds    10x    1s    Check Undirector Link Stats    remote    local
+    wait until keyword succeeds    10x    1s    Ensure_CPE_Flow_Work    remote    office
+    [Teardown]
+
+Shutdown_an_UP_CPE_Lan
+    [Tags]    SDWANDEV-353    SDWANDEV-352    abnormal
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    ${c_id}=    shutdown_switch_port    m_242    &{mirror_switch_242}[remote_cpe_if_lan]
+    Check_Ping_Packet_All_Loss    &{remote_pc}[inner_ip]
+    unshutdown_switch_port    ${c_id}    &{mirror_switch_242}[remote_cpe_if_lan]
+    sleep    2s
+    wait until keyword succeeds    5x    20ms    Trigger_learn_IP_and_office_work    remote
+
+Change_cpe_tunnel_number
+    [Tags]    abnormal    SDWANDEV-1498
+    [Setup]
+    wait until keyword succeeds    5x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    Change_Cpe_Tunnel_Port    guangzhou    ${6800}
+    Restart_Cpe    guangzhou
+    wait until keyword succeeds    15s    1s    check_CPE_tunnels_local_port    guangzhou    ${6800}
+    wait until keyword succeeds    5x    1s    check_CPE_tunnels_remote_port    nanjing    guangzhou    ${6800}
+    wait until keyword succeeds    62s    1s    gateway_all_link_not_bad
+    Ensure_CPE_Flow_Work    nanjing    office
+    [Teardown]    teardown_cpe_tunnels
+
+Register After Call Home Requests
+    [Tags]    SDWANDEV-3175    abnormal
+    ${callhome_test_list}    create list    guangzhou    wuhan    changsha
+    : FOR    ${cpe}    IN    @{callhome_test_list}
+    \    Check CPE Register After Call Home Requests    ${cpe}
+    [Teardown]    Restore Netconf and CPE    ${callhome_test_list}
+
+Stop_Start_Controller
+    [Tags]    SDWANDEV-344    SDWANDEV-343    abnormal
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    Start Ping in Parallel    512    &{remote_pc}[inner_ip]    ${pop_change_ping_log}
+    stop_controller
+    ssh login    &{local_pc}[ctrl_ip]    &{local_pc}[ctrl_port]    &{local_pc}[user]    &{local_pc}[passwd]
+    Get Valid Ping Logs_loss_less_than    ${pop_change_ping_log}    0
+    [Teardown]    Start_Controller_teardown
+
+keep_poweroffon
+    [Tags]    debug    reboot
+    : FOR    ${n}    IN RANGE    1    50
+    \    poweroff_test
+
+Restart_CPE
+    [Tags]    abnormal    SDWANDEV-1200    SDWANDEV-1541    SDWANDEV-1542    SDWANDEV-3401
+    [Setup]
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    Restart_All_CPE
+    sleep    2s
+    wait until keyword succeeds    5s    200ms    Check_CPE_Status    chongqing    state    stable
+    wait until keyword succeeds    10s    200ms    Check_CPE_Status    zhenjiang    state    stable
+    wait until keyword succeeds    5s    200ms    Check_CPE_Status    changsha    state    stable
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    nanjing    &{wuhan_cpe}[chassis_id]
+    ...    8
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    wuhan    &{nanjing_cpe}[chassis_id]
+    ...    8
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    nanjing    &{guangzhou_cpe}[chassis_id]
+    ...    8
+    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    10x    2s    Ensure_CPE_Flow_Work    nanjing    office
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    10x    2s    Ensure_CPE_Flow_Work    guangzhou    office
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    [Teardown]
+
+Restart_CPE_When_Saas_down
+    [Tags]    abnormal    SDWANDEV-4482
+    [Setup]
+    Ensure_Saas_OK    chongqing    &{dns_server}[ip]
+    ssh_pop    remote    sess_remote_pop
+    write sudo cmd    systemctl stop aiwan-saas.service    &{remote_pop}[passwd]
+    Restart_Cpe    chongqing
+    wait until keyword succeeds    15s    200ms    Check_CPE_Status    chongqing    state    stable
+    start_saas_service
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    1s    200ms    Check End2End Links    chongqing    &{Saas_Service2}[ne_id]
+    ...    2
+    ssh_pc    chongqing
+    write    ping &{dns_server}[ip] -c 5 -i 0.5 >ping_p.log &
+    sleep    1
+    run keyword and ignore error    get_cpe_cache_info    chongqing    &{dns_server}[ip]    ${False}    ${True}    ${1}
+    Ensure_Saas_OK    chongqing    &{dns_server}[ip]
+    [Teardown]    start_saas_service
+
+Unregister under Unions and Re-register
+    [Tags]    SDWANDEV-1960    SDWANDEV-1961
+    [Setup]    Stop_All_Slave_CPE
+    ${l_cpes}=    create list    local    wuhan    guangzhou
+    ${l_items}=    create list    tunnel    link    bond    controller    manager
+    ...    secret    port
+    : FOR    ${cpe}    IN    @{l_cpes}
+    \    Print CPE Netconf Port    ${cpe}
+    \    unregister_ne    &{${cpe}_cpe}[chassis_id]
+    \    Print CPE Netconf Port    ${cpe}
+    \    ${callhome_4G}=    run keyword if    '${cpe}' == 'guangzhou'    Check Current Callhome Uses 4G    ${cpe}
+    \    ...    ELSE    set variable    ${False}
+    \    ${timeout}=    set variable if    ${callhome_4G}    25s    20s
+    \    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    &{${cpe}_cpe}[chassis_id]
+    \    Wait Until Keyword Succeeds    ${timeout}    200ms    Confirm No Data in Sysrepo Startup    ${cpe}    ${l_items}
+    : FOR    ${pop}    IN    @{pop_list}
+    \    ${pass}=    run keyword and return status    Get_POP_Status    &{${pop}_pop}[ne_id]    NORMAL
+    \    run keyword if    ${pass}    Set_POP_Status    &{${pop}_pop}[ne_id]    MAINTENANCE
+    Restart_CPE_List    ${l_cpes}
+    Nping_From_PC    local
+    wait until keyword succeeds    5s    200ms    Check_CPE_Status    local    state    stable
+    wait until keyword succeeds    40s    20ms    Check Link Stats
+    wait until keyword succeeds    10s    1    Series Pingable Check
+    wait until keyword succeeds    10s    1    Gateway Pingable Check
+    wait until keyword succeeds    10s    1    Sideway Pingable Check
+    : FOR    ${pop}    IN    @{pop_list}
+    \    Set_POP_Status    &{${pop}_pop}[ne_id]    NORMAL
+    Reset All CPE CAC EAC    ${l_cpes}
+    ${pops_ports_num}=    get_pops_total_port_num
+    wait until keyword succeeds    80s    5s    All_CPE_Learn_CAC_EAC
+    wait until keyword succeeds    75s    500ms    check_all_CPE_tunnels    ${pops_ports_num}    ${True}
+    Ensure_All_CPE_Learn_Right_CAC_EAC
+    wait until keyword succeeds    62s    3s    check_all_POP_tunnels
+    check_pop_cpe_perfer_port
+    Check_Union_Flows
+    [Teardown]    run keywords    Print CPE Netconf Port    guangzhou
+    ...    AND    TearDown_Set_Pop_Normal
+    ...    AND    TearDown for Unregister Case    ${l_cpes}
+
+Change Kernel Pop Tunnel Port
+    [Tags]    SDWANDEV-2658    debug
+    ${target_port}=    set variable    4780
+    ${pwd}=    ssh_pop    remote
+    Check Pop Tunnel Port    ${pwd}    &{remote_pop}[tunnel_port]    &{remote_pop}[ip]    &{wuhan_switch}[ip2]
+    Update the Kernel Pop Tunnel Port    ${pwd}    ${target_port}    &{remote_pop}[groups]
+    Check Pop Tunnel Port    ${pwd}    ${target_port}    &{remote_pop}[ip]    &{wuhan_switch}[ip2]
+    close connection
+    [Teardown]    Restore Kernel Pop Tunnel Port    remote
+
+of_disconnect_with_errorkey
+    [Tags]    SDWANDEV-2340
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    guangzhou    office
+    Change_pop_openflow_key    local    ${False}
+    Change_cpe_openflow_key    guangzhou    ${False}
+    ${openflow_num}=    evaluate    ${of_devices_num }-2
+    wait until keyword succeeds    30x    2s    Check_Avaiable_OpenFlow_Num    ${openflow_num}
+    wait until keyword succeeds    10x    1ms    Ensure_CPE_Flow_Work    guangzhou    office
+    [Teardown]    run keywords    Change_pop_openflow_key    local    ${True}
+    ...    AND    Change_cpe_openflow_key    guangzhou    ${True}
+    ...    AND    wait until keyword succeeds    30x    1s    Check_Avaiable_OpenFlow_Num    ${of_devices_num }
+
+cpe_auth_failed_with_err_hwsecret
+    [Tags]    SDWANDEV-2342    SDWANDEV-3704    alarm
+    unregister_ne    &{wuhan_cpe}[chassis_id]
+    ${l_items}=    create list    tunnel    link    bond    controller    manager
+    ...    secret    port
+    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    &{wuhan_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    5s    200ms    Confirm No Data in Sysrepo Startup    wuhan    ${l_items}
+    Change_cpe_auth_hwSecret    wuhan    ${False}
+    sleep    10s
+    wait until keyword succeeds    7s    200ms    Check_CPE_Status    wuhan    state    init
+    # check cpeStatus alarm
+    wait until keyword succeeds    18x    10s    check_alarm_num    firing    0206    CpeStatusError
+    ...    Critical    wuhan    1006    368    1
+    [Teardown]    run keywords    Change_cpe_auth_hwSecret    wuhan    ${True}
+    ...    AND    wait until keyword succeeds    20s    2s    Check_CPE_Status    wuhan
+    ...    state    stable
+
+cpe_auth_failed_with_err_jwt
+    [Tags]    SDWANDEV-2343
+    unregister_ne    &{wuhan_cpe}[chassis_id]
+    ${l_items}=    create list    tunnel    link    bond    controller    manager
+    ...    secret    port
+    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    &{wuhan_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    5s    200ms    Confirm No Data in Sysrepo Startup    wuhan    ${l_items}
+    Change_cpe_auth_jwt    wuhan    ${False}
+    sleep    10s
+    wait until keyword succeeds    7s    200ms    Check_CPE_Status    wuhan    state    init
+    [Teardown]    run keywords    Change_cpe_auth_jwt    wuhan    ${True}
+    ...    AND    wait until keyword succeeds    20s    2s    Check_CPE_Status    wuhan
+    ...    state    stable
+
+Nginx_Down_cpe_reg_failed_up_success
+    [Tags]    SDWANDEV-3274    SDWANDEV-3273    SDWANDEV-4012
+    unregister_ne    &{guangzhou_cpe}[chassis_id]
+    ${callhome_4G}=    Check Current Callhome Uses 4G    guangzhou
+    ${timeout}=    set variable if    ${callhome_4G}    15s    10s
+    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    &{guangzhou_cpe}[chassis_id]
+    Block_Controller_Host_Ports    &{guangzhou_switch}[ip]    block    &{uranus_host}[nginx_south_port]
+    Change_cpe_4G_usage    guangzhou    ${True}
+    Change_cpe_collectd_log_level    guangzhou    ${True}
+    sleep    10s
+    wait until keyword succeeds    7s    200ms    Check_CPE_Status    guangzhou    state    init
+    Block_Controller_Host_Ports    &{guangzhou_switch}[ip]    unblock    &{uranus_host}[nginx_south_port]
+    Wait Until Keyword Succeeds    5s    200ms    Check_CPE_Status    guangzhou    state    stable
+    wait until keyword succeeds    20    1s    check_if_measure_fill    guangzhou    ${0}
+    wait until keyword succeeds    80s    5s    All_CPE_Learn_CAC_EAC
+    wait until keyword succeeds    20    1s    check_if_measure_fill    guangzhou    ${1}
+    [Teardown]    run keywords    Block_Controller_Host_Ports    &{guangzhou_switch}[ip]    unblock    &{uranus_host}[nginx_south_port]
+    ...    AND    guangzhou_cpe_teardown    8
+
+AuthServer_Down_cpe_init_failed_up_success
+    [Tags]    SDWANDEV-2348
+    unregister_ne    &{guangzhou_cpe}[chassis_id]
+    ${callhome_4G}=    Check Current Callhome Uses 4G    guangzhou
+    ${timeout}=    set variable if    ${callhome_4G}    15s    10s
+    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    &{guangzhou_cpe}[chassis_id]
+    Block_Controller_Host_Ports    &{guangzhou_switch}[ip]    block    &{uranus_host}[nginx_auth_port]
+    Restart_Cpe    guangzhou
+    sleep    10s
+    wait until keyword succeeds    7s    200ms    Check_CPE_Status    guangzhou    state    init
+    [Teardown]    run keywords    Block_Controller_Host_Ports    &{guangzhou_switch}[ip]    unblock    &{uranus_host}[nginx_auth_port]
+    ...    AND    guangzhou_cpe_teardown    4
+
+authList_change_pop_check_link
+    [Tags]    SDWANDEV-2349    SDWANDEV-2350
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    guangzhou    office
+    change_pop1_in_pop2_auth_list    ${False}
+    sleep    10s
+    wait until keyword succeeds    50s    2s    check_gz_cs_N12_N21_bad_cs_gz_N12_N21_bad
+    [Teardown]    run keywords    change_pop1_in_pop2_auth_list    ${True}
+    ...    AND    Wait Until Keyword Succeeds    60s    2s    check_gz_and_cs_undirect_link_good
+
+check_acl_and_route_offline_to_online
+    [Tags]    SDWANDEV-3583
+    [Setup]    guangzhou_offline
+    ${aclName_list}=    create list    deny_to_changsha
+    add_company_acl    ${suite_company_id}    deny_to_changsha    ${suite_guangzhou_site_id}    ${500}    deny    ${None}
+    ...    &{changsha_cpe}[nets]
+    Restart_Cpe    guangzhou
+    wait until keyword succeeds    20s    2s    Check_CPE_Status    guangzhou    state    stable
+    wait until keyword succeeds    10x    1s    Check_Cpe_Acl_Enable    guangzhou    ${500}    REJECT    172.19.45.0\/24
+    ${pwd}=    ssh_cpe    guangzhou
+    write openwrt cmd    iptables -nvL aiwan_chain_acl    ${pwd}
+    close connection
+    wait until keyword succeeds    2x    2s    check_guangzhou_to_changsha_acl_deny
+    [Teardown]    Delete_acl    ${aclName_list}
+
+check_acl_and_route_restart_cpe
+    [Tags]    SDWANDEV-3584
+    ${aclName_list}=    create list    deny_to_changsha
+    add_company_acl    ${suite_company_id}    deny_to_changsha    ${suite_guangzhou_site_id}    ${500}    deny    ${None}
+    ...    &{changsha_cpe}[nets]
+    wait until keyword succeeds    10s    2s    check_guangzhou_to_changsha_acl_deny
+    Restart_Cpe    guangzhou
+    Restart_Cpe    changsha
+    wait until keyword succeeds    10s    2s    check_guangzhou_to_changsha_acl_deny
+    [Teardown]    Delete_acl    ${aclName_list}
+
+Without_config_CPE_passthought_work
+    [Tags]    abnormal    SDWANDEV-1541
+    [Setup]
+    Clear_Check_CPE_config_restart_cpe_thurster
+    wait until keyword succeeds    5s    200ms    check_cpe_config    remote
+    wait until keyword succeeds    5s    200ms    check_cpe_config    local
+    : FOR    ${cpe}    IN    @{cpe_check_list}
+    \    wait until keyword succeeds    10s    200ms    Check_CPE_Status    ${cpe}
+    \    wait until keyword succeeds    4x    200ms    salt available check    &{${cpe}_cpe}[minion_id]
+    [Teardown]
+
+CPE_didnot_relearn_after_learnAddress
+    [Tags]    abnormal    SDWANDEV-1541
+    [Setup]
+    ssh_pc    local
+    write sudo cmd    nping --tcp-connect -c 200 --delay 30ms 10.194.16.1 -p 22    &{local_pc}[passwd]
+    close connection
+    check_ip_in_interface    local    &{local_pc}[cpe_ip]
+    [Teardown]
+
+CPE_relearn_IP_from_old_learn_json
+    [Tags]    abnormal    SDWANDEV-4313
+    [Setup]
+    ssh_cpe    remote
+    write sudo cmd    cp /home/sdn/NoDelete/learn_enp1s0f0_old.json /opt/aiwan/config/learn_enp1s0f0.json    &{remote_pc}[passwd]
+    write sudo cmd    service aiwan-cpe restart    &{remote_pc}[passwd]
+    close connection
+    Nping_From_PC    remote
+    wait until keyword succeeds    10s    200ms    Check_CPE_Status    remote
+    wait until keyword succeeds    20s    3s    check_ip_in_interface    remote    &{remote_switch}[ip]
+    [Teardown]
+
+Remove CPE WAN2
+    [Tags]   abnormal
+    ${ping_log_file}=    set variable  wan_remove_ping.log
+    ${cpe}=     set variable   changsha
+    ssh_pc  ${cpe}
+    write   ping -i 0.2 &{guangzhou_pc}[inner_ip] > ${ping_log_file} &
+    update_cpe_startup_wan   &{${cpe}_cpe}[minion_id]   del   &{${cpe}_cpe}[internet_if2]
+    restart_cpe  ${cpe}
+    ssh_pc  ${cpe}
+    wait until keyword succeeds  15s   1   Check Wan Remove Ping Log    ${ping_log_file}    15
+    [Teardown]    run keywords   update_cpe_startup_wan   &{${cpe}_cpe}[minion_id]   add   &{${cpe}_cpe}[internet_if2]
+    ...   AND   restart_cpe  ${cpe}
+    ...   AND   wait until keyword succeeds  60s   2   Ensure_CPE_Wan_Select_Right_EAC    &{guangzhou_cpe}[chassis_id]    
+    ...   &{guangzhou_cpe}[internet_if]    ${0}    @{cac_list}[0]    @{eac_list}[0]
+    ...   AND   wait until keyword succeeds  10s   1   Check End2End Links    changsha    &{guangzhou_cpe}[chassis_id]    8
+    ...   AND   wait until keyword succeeds  15s   1   Arm Pingable Check
+    ...   AND   close all connections
+
+Delete_Auth_Key_Restart_Pop_Moon
+    [Tags]    abnormal    SDWANDEV-4376
+    Ssh_Pop    remote
+    check POP Callhome Netconf Connection    remote
+    check POP Netconf From Controller    remote
+    delete_auth_key_restart_moon    remote
+    wait until keyword succeeds    10x    200ms    check_auth_key_exist
+    check POP Callhome Netconf Connection    remote
+    check POP Netconf From Controller    remote
+    close connection
+    wait until keyword succeeds    10x    1s    Check Undirector Link Stats    remote    local
+    [Teardown]
+
+*** Keywords ***
+Check Wan Remove Ping Log
+    [Arguments]  ${log}  ${max_time}
+    write  grep -v Unreachable ${log} > /tmp/ping.log
+    read until prompt
+    Check Outage Time  /tmp/ping.log  ${max_time}
+
+TearDown_Set_Pop_Normal
+    : FOR    ${pop}    IN    @{pop_list}
+    \    ${pass}=    run keyword and return status    Get_POP_Status    &{${pop}_pop}[ne_id]    MAINTENANCE
+    \    run keyword if    ${pass}    Set_POP_Status    &{${pop}_pop}[ne_id]    NORMAL
+
+Check Link Stats
+    ${link_ids}    ${links}=    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    4
+    ${score_list1}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    guangzhou    ${link_ids}
+    ${link_ids}    ${links}=    Check End2End Links    wuhan    &{nanjing_cpe}[chassis_id]    4
+    ${score_list2}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    wuhan    ${link_ids}
+    ${link_ids}    ${links}=    Check End2End Links    local    &{remote_cpe}[chassis_id]    1
+    ${score_list3}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${score}    IN    @{score_list3}
+    \    should be true    ${score} < 10000
+    : FOR    ${score}    IN    @{score_list2}
+    \    should be true    ${score} < 10000
+    : FOR    ${score}    IN    @{score_list1}
+    \    should be true    ${score} < 10000
+
+teardown_high_priority_flow
+    [Arguments]    ${flow_body}
+    delete_device_flow    ${flow_body}
+    SCP_File_From_H1_To_H2    local    &{remote_pc}[inner_ip]    DontDelete.o    target.o
+
+check_dst_ip_tunnel_num
+    [Arguments]    ${dest_ip}    ${expect_num}
+    ${num}    ${t_id}    ${weight}=    get_dst_ne_tunnel_info_with_sip    &{local_pop}[ne_id]    &{remote_pop}[ne_id]    ${dest_ip}
+    Should Be Equal As Integers    ${num}    ${expect_num}
+
+Check_Flow_Increase_Num
+    [Arguments]    ${init_packet}    ${init_packet2}    ${t_id}    ${t_id2}    ${port1_big_weight}
+    ${packet}    ${priority}=    get_pop_table_1_device_tunnel_packets    &{local_pop}[ne_id]    ${t_id}
+    ${packet2}    ${priority2}=    get_pop_table_1_device_tunnel_packets    &{local_pop}[ne_id]    ${t_id2}
+    ${increase_packet}=    evaluate    ${packet}-${init_packet}
+    ${increase_packet2}=    evaluate    ${packet2}-${init_packet2}
+    run keyword if    ${port1_big_weight}    should be true    ${increase_packet} >= ${check_num}
+    run keyword if    ${port1_big_weight}    should be true    ${increase_packet2} <= 0
+    run keyword unless    ${port1_big_weight}    should be true    ${increase_packet2} >= ${check_num}
+    run keyword unless    ${port1_big_weight}    should be true    ${increase_packet} <= 0
+
+Case_Teardown
+    set_measure_polling_freq_to_controller    5
+    wait until keyword succeeds    480s    2s    check_dst_ip_tunnel_num    &{local_pop}[ip2]    1
+    close all connections
+    set_measure_polling_freq_to_controller    30
+
+Check_Avaiable_Netconf_Num
+    [Arguments]    ${expect}
+    ${num}    @{devices} =    get_available_devices    NETCONF
+    Should Be Equal As Numbers    ${num}    ${expect}
+
+check_flow_num
+    [Arguments]    ${t_id}    ${t_id2}    ${port1_better}
+    ${init_packet}    ${priority}=    get_pop_table_1_device_tunnel_packets    &{local_pop}[ne_id]    ${t_id}
+    ${init_packet2}    ${priority2}=    get_pop_table_1_device_tunnel_packets    &{local_pop}[ne_id]    ${t_id2}
+    wait until keyword succeeds    2s    500ms    Check_Flow_Increase_Num    ${init_packet}    ${init_packet2}    ${t_id}
+    ...    ${t_id2}    ${port1_better}
+
+Change_pop_openflow_key
+    [Arguments]    ${pop}    ${status}
+    ${keypath_restart}    Set Variable    /etc/aiwan/host_ca.cert;sudo systemctl restart aiwan-moon
+    ${cmd}=    run keyword if    ${status}    Catenate    sed -i 's/ERRKEY/END CERTIFICATE/g'    ${keypath_restart}
+    ...    ELSE    Catenate    sed -i 's/END CERTIFICATE/ERRKEY/g'    ${keypath_restart}
+    ssh_pop    ${pop}    sess_pop
+    write sudo cmd    ${cmd}    &{${pop}_pop}[passwd]
+    close connection
+
+Change_cpe_openflow_key
+    [Arguments]    ${cpe}    ${status}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${keypath}=    set variable    /builtin/security/CA.pem
+    ${sed_cmd}=    run keyword if    ${status}    Catenate    sed -i 's/ERRKEY/END CERTIFICATE/g'    ${keypath}
+    ...    ELSE    Catenate    sed -i 's/END CERTIFICATE/ERRKEY/g'    ${keypath}
+    ${cmd}=    run keyword if    ${openwrt}    Catenate    ${sed_cmd}    ;/etc/init.d/aiwan-cpe restart
+    ...    ELSE    Catenate    ${sed_cmd}    ;sudo systemctl restart aiwan-cpe
+    ${pwd}=    ssh_cpe    ${cpe}
+    run keyword if    ${openwrt}    Write OpenWrt Cmd    ${cmd}
+    ...    ELSE    Write Sudo Cmd    ${cmd}    &{${cpe}_cpe}[passwd]
+    close connection
+
+Change_cpe_auth_hwSecret
+    [Arguments]    ${cpe}    ${status}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${hw_secret_path}=    set variable    /builtin/security/secret
+    ${sed_cmd}=    set variable if    ${status}    sed -i 's/*/=/g' ${hw_secret_path}    sed -i 's/=/*/g' ${hw_secret_path}
+    ${cmd}=    set variable if    ${openwrt}    ${sed_cmd};/etc/init.d/aiwan-cpe restart    ${sed_cmd};sudo systemctl restart aiwan-cpe
+    ${pwd}=    ssh_cpe    ${cpe}
+    run keyword if    ${openwrt}    Write OpenWrt Cmd    ${cmd}
+    ...    ELSE    Write Sudo Cmd    ${cmd}    &{${cpe}_cpe}[passwd]
+    close connection
+
+Change_cpe_auth_jwt
+    [Arguments]    ${cpe}    ${status}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${jwt_path}=    set variable    /builtin/security/device_rsa.pub
+    ${sed_cmd}=    set variable if    ${status}    sed -i 's/ERRJWT/END PUBLIC KEY/g' ${jwt_path}    sed -i 's/END PUBLIC KEY/ERRJWT/g' ${jwt_path}
+    ${cmd}=    set variable if    ${openwrt}    ${sed_cmd};/etc/init.d/aiwan-cpe restart    ${sed_cmd};sudo systemctl restart aiwan-cpe
+    ${pwd}=    ssh_cpe    ${cpe}
+    run keyword if    ${openwrt}    Write OpenWrt Cmd    ${cmd}
+    ...    ELSE    Write Sudo Cmd    ${cmd}    &{${cpe}_cpe}[passwd]
+    close connection
+
+check_gz_cs_N12_N21_bad_cs_gz_N12_N21_bad
+    check_crosswan_bad_and_nocrosswan_good    guangzhou    changsha
+    check_crosswan_bad_and_nocrosswan_good    changsha    guangzhou
+
+check_gz_and_cs_undirect_link_good
+    ${link_ids}    Get End2End undirect Links    guangzhou    &{changsha_cpe}[chassis_id]
+    ${bad_num}=    get_link_qos_num    guangzhou    ${link_ids}
+    should be true    ${bad_num}==0
+    ${link_ids}    Get End2End undirect Links    changsha    &{guangzhou_cpe}[chassis_id]
+    ${bad_num}=    get_link_qos_num    changsha    ${link_ids}
+    should be true    ${bad_num}==0
+
+check_crosswan_bad_and_nocrosswan_good
+    [Arguments]    ${local}    ${remote}
+    ${links}=    get_cpe_end2end_links    &{${local}_cpe}[ip]    &{${remote}_cpe}[chassis_id]    &{${local}_cpe}[ssh_port]    &{${local}_cpe}[user]    &{${local}_cpe}[passwd]
+    ${NLink}=    EVALUATE    filter(lambda x: x['remote-id']==&{${remote}_cpe}[chassis_id] and x['direct']==False, ${links})
+    ${bad}=    EVALUATE    filter(lambda x: (x['local-wan-id']==1 and x['remote-wan-id']==2) or (x['local-wan-id']==2 and x['remote-wan-id']==1), ${NLink})
+    ${good}=    EVALUATE    [v for v in ${NLink} if v not in ${bad}]
+    ${good_link_ids}=    EVALUATE    map(lambda x: x['number'], ${good})
+    ${bad_link_ids}=    EVALUATE    map(lambda x: x['number'], ${bad})
+    ${good_num}=    get_link_qos_num    ${local}    ${good_link_ids}
+    ${bad_num}=    get_link_qos_num    ${local}    ${bad_link_ids}
+    should be true    ${good_num}==0
+    should be true    ${bad_num}==2
+
+change_pop1_in_pop2_auth_list
+    [Arguments]    ${status}
+    ${authList_path}=    set variable    /opt/aiwan/moon/config/auth.txt
+    ${sed_cmd}=    set variable if    ${status}    sed -i 's/11.11.11.11/10.194.20.4/g;s/22.22.22.22/10.196.20.4/g;s/33.33.33.33/10.196.20.5/g;s/44.44.44.44/10.0.0.0/g' ${authList_path}    sed -i 's/10.196.20.5/33.33.33.33/g;s/10.194.20.4/11.11.11.11/g;s/10.196.20.4/22.22.22.22/g;s/10.0.0.0/44.44.44.44/g' ${authList_path}
+    ${cmd}=    set variable    ${sed_cmd};sudo systemctl restart aiwan-moon
+    ssh_pop    remote    sess_remote_pop
+    write sudo cmd    ${sed_cmd}    &{remote_pop}[passwd]
+    close connection
+
+Check_Avaiable_OpenFlow_Num
+    [Arguments]    ${expect}
+    ${num}    @{devices} =    get_available_devices    OF_13
+    Should Be Equal As Numbers    ${num}    ${expect}
+
+Start_Controller_teardown
+    ssh_pc    nanjing
+    Write    rm -rf ${pop_change_ping_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${pop_change_ping_log} 2>&1 &
+    Start_Controller
+    ssh_pc    nanjing
+    Get Valid Ping Logs_loss_less_than    ${pop_change_ping_log}    0
+
+Trigger_learn_IP_and_office_work
+    [Arguments]    ${cpe}
+    Nping_From_PC    ${cpe}
+    Ensure_CPE_Flow_Work    ${cpe}    office
+
+check_CPE_dst_ip_tunnel_num
+    [Arguments]    ${dest_ip}    ${expect_num}
+    ${num}    ${t_id}    ${weight}=    get_dst_ne_tunnel_info_with_dip    &{local_cpe}[chassis_id]    &{local_pop}[ne_id]    ${dest_ip}
+    Should Be Equal As Integers    ${num}    ${expect_num}
+
+teardown_cpe_tunnels
+    Change_Cpe_Tunnel_Port    guangzhou    ${6868}
+    Restart_Cpe    guangzhou
+    wait until keyword succeeds    15s    1s    check_CPE_tunnels_local_port    guangzhou    ${6868}
+    wait until keyword succeeds    5x    1s    check_CPE_tunnels_remote_port    nanjing    guangzhou    ${6868}
+
+gateway_all_link_not_bad
+    ${link_ids}    ${links}=    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    8
+    ${link_ids2}    ${links2}=    Check End2End Links    nanjing    &{guangzhou_cpe}[chassis_id]    8
+    all_link_not_bad    guangzhou    ${link_ids}
+    all_link_not_bad    nanjing    ${link_ids2}
+
+poweroff_test
+    wait until keyword succeeds    5x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+    power_off
+    sleep    1s
+    power_on
+    sleep    50s
+    wait until keyword succeeds    5x    20ms    Ensure_CPE_Flow_Work    nanjing    office
+
+Reset CPE Prefer HomeCode
+    [Arguments]    ${l_cpe}
+    : FOR    ${cpe}    IN    @{l_cpe}
+    \    put_ne_cac_eac    &{${cpe}_cpe}[chassis_id]    63    63    cpe
+    \    put_ne_cac_eac    &{${cpe}_cpe}[chassis_id]    &{${cpe}_cpe}[prefer_cac]    &{{cpe}_cpe}[prefer_eac]    cpe
+
+TearDown for Unregister Case
+    [Arguments]    ${l_cpes}
+    Restart_CPE_List    ${l_cpes}
+    Trigger_CPE_Learn_IP
+    Reset All CPE CAC EAC    ${l_cpes}
+    ${pops_ports_num}=    get_pops_total_port_num
+    wait until keyword succeeds    300s    5s    All_CPE_Learn_CAC_EAC
+    Ensure_All_CPE_Learn_Right_CAC_EAC
+    wait until keyword succeeds    75s    500ms    check_all_CPE_tunnels    ${pops_ports_num}    ${True}
+    wait until keyword succeeds    15s    1s    Check Local Link Stats
+    Run Keyword And Continue On Failure    Wait Until Keyword Succeeds    10x    2s    Ensure_CPE_Flow_Work    guangzhou    office
+    Restart_All_Slave_CPE
+
+Check Local Link Stats
+    ${link_ids}    ${links}=    Check End2End Links    local    &{remote_cpe}[chassis_id]    2
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    local    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} < 9999
+
+Check Undirector Link Stats
+    [Arguments]    ${cpe}    ${peer}
+    ${link_ids}    Get End2End undirect Links    ${cpe}    &{${peer}_cpe}[chassis_id]
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} < ${9999}
+
+Restore Netconf and CPE
+    [Arguments]    ${cpe_list}
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    \    ${netconf}=    check_device_status    &{${cpe}_cpe}[chassis_id]    NETCONF
+    \    run keyword if    '${netconf}' == '${False}'    Write CPE CMD    ${cpe}    systemctl restart netopeer2-server    /etc/init.d/netopeer2-server restart
+    \    switch connection    sess_${cpe}_cpe
+    \    Write CPE CMD    ${cpe}    systemctl restart aiwan-cpe    /etc/init.d/aiwan-cpe restart
+    \    wait until keyword succeeds    15s    200ms    Check_CPE_Status    ${cpe}
+    wait until keyword succeeds    70s    5s    All_CPE_Learn_CAC_EAC
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    wait until keyword succeeds    5s    1s    Ensure_CPE_Flow_Work    ${cpe}    office
+
+Check CPE Register After Call Home Requests
+    [Arguments]    ${cpe}
+    ${l_items}=    create list    tunnel    link    bond    vports
+    unregister_ne    &{${cpe}_cpe}[chassis_id]
+    Print CPE Netconf Port    ${cpe}
+    ${callhome_4G}=    run keyword if    '${cpe}' == 'guangzhou'    Check Current Callhome Uses 4G    ${cpe}
+    ...    ELSE    set variable    ${False}
+    ${timeout}=    set variable if    ${callhome_4G}    15s    10s
+    wait until keyword succeeds    7s    200ms    Check CPE Netconf Config on Controller    &{${cpe}_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    ${timeout}    200ms    Confirm No Data in Sysrepo Startup    ${cpe}    ${l_items}
+    # Stop aiwan-cpe & netopeer
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    Write CPE CMD    ${cpe}    systemctl stop aiwan-cpe    /etc/init.d/aiwan-cpe stop
+    Write CPE CMD    ${cpe}    systemctl stop netopeer2-server    /etc/init.d/netopeer2-server stop
+    wait until keyword succeeds    15s    500ms    Check CPE Netconf From Controller    ${cpe}    ${False}
+    Check CPE Callhome Netconf Connection    ${cpe}    ${False}
+    # Start netopeer and check the connection; check no configurations from controller
+    Write CPE CMD    ${cpe}    systemctl start netopeer2-server    /etc/init.d/netopeer2-server start
+    wait until keyword succeeds    3s    500ms    Check CPE Callhome Netconf Connection    ${cpe}
+    Check CPE Netconf From Controller    ${cpe}
+    sleep    5s
+    Check Data in Sysrepo Running    ${cpe}    ${l_items}    ${False}
+    # Register cpe and then get configurations via the netconf
+    Write CPE CMD    ${cpe}    systemctl start aiwan-cpe    /etc/init.d/aiwan-cpe start
+    ${learn}=    evaluate    '${cpe}' in @{learn_ip_cpe_list}
+    run keyword if    ${learn}    SCP_File_From_H1_To_H2    ${cpe}    &{uranus_host}[office_ip]    DontDelete.o    target.o
+    run keyword if    ${learn}    SCP_File_From_H1_To_H2    ${cpe}    &{uranus_host}[office_ip]    DontDelete.o    target.o
+    wait until keyword succeeds    15s    200ms    Check_CPE_Status    ${cpe}
+    switch connection    sess_${cpe}_cpe
+    wait until keyword succeeds    11s    200ms    Check Data in Sysrepo Running    ${cpe}    ${l_items}
+
+Check CPE Callhome Netconf Connection
+    [Arguments]    ${cpe}    ${established}=${True}
+    ${res}=    Write CPE CMD    ${cpe}    netstat -an | grep 4335    netstat -an | grep 4335
+    run keyword if    '${established}' == '${True}'    should contain    ${res}    ESTABLISHED
+    ...    ELSE    should not contain    ${res}    ESTABLISHED
+
+Check CPE Netconf From Controller
+    [Arguments]    ${cpe}    ${available}=${True}
+    ${netconf}=    check_device_status    &{${cpe}_cpe}[chassis_id]    NETCONF
+    run keyword if    '${available}' == '${True}'    should be true    ${available}
+    ...    ELSE    should not be true    ${netconf}
+    [Return]    ${netconf}
+
+guangzhou_offline
+    ssh_cpe    guangzhou    sess_guangzhou_cpe
+    Write CPE CMD    guangzhou    systemctl stop aiwan-cpe    /etc/init.d/aiwan-cpe stop
+    Write CPE CMD    guangzhou    systemctl stop netopeer2-server    /etc/init.d/netopeer2-server stop
+
+guangzhou_cpe_teardown
+    [Arguments]    ${linkNum}
+    Change_cpe_4G_usage    guangzhou    ${True}
+    Change_cpe_collectd_log_level    guangzhou    ${False}
+    wait until keyword succeeds    4s    200ms    Check_CPE_Status    guangzhou    state    stable
+    Wait Until Keyword Succeeds    40s    200ms    Check End2End Links    guangzhou    &{nanjing_cpe}[chassis_id]    ${linkNum}
+    wait until keyword succeeds    20x    2s    Ensure_CPE_Flow_Work    guangzhou    office
+
+check_ip_in_interface
+    [Arguments]    ${cpe}    ${wan_ip}
+    ssh_cpe    ${cpe}
+    ${res}=    write sudo cmd    ifconfig &{${cpe}_cpe}[internet_if] |grep ${wan_ip}|wc -l    &{${cpe}_pc}[passwd]
+    ${num}    Get Line    ${res}    -2
+    should be true    '${num}'=='1'
+
+start_saas_service
+    ssh_pop    remote
+    write sudo cmd    systemctl start aiwan-saas.service    &{remote_pop}[passwd]
+    close connection
+
+Check POP Callhome Netconf Connection
+    [Arguments]    ${cpe}    ${established}=${True}
+    ${res}=    write sudo cmd    netstat -an | grep 4335
+    run keyword if    '${established}' == '${True}'    should contain    ${res}    ESTABLISHED
+    ...    ELSE    should not contain    ${res}    ESTABLISHED
+
+Check POP Netconf From Controller
+    [Arguments]    ${pop}    ${available}=${True}
+    ${netconf}=    check_device_status    &{${pop}_pop}[ne_id]    NETCONF
+    run keyword if    '${available}' == '${True}'    should be true    ${available}
+    ...    ELSE    should not be true    ${netconf}
+    [Return]    ${netconf}
+
+delete_auth_key_restart_moon
+    [Arguments]    ${pop}
+    Write Sudo Cmd    rm -rf /etc/aiwan/host_*    &{${pop}_pop}[passwd]
+    Write Sudo Cmd    service aiwan-moon restart    &{${pop}_pop}[passwd]
+
+Check_auth_key_exist
+    ${res}=    Write Sudo Cmd    ls /etc/aiwan/host_* -ltr | wc -l    &{local_pop}[passwd]
+    ${num}=    get line    ${res}    0
+    should be true    ${num}==7

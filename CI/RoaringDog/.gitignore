@@ -1,0 +1,7 @@
+# ignore report file
+cypress/results/
+cypress/videos/
+cypress/screenshots/
+node_modules/
+
+*.pyc

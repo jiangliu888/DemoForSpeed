@@ -1,0 +1,103 @@
+#!groovy
+
+pipeline {
+    agent { label 'master' }
+
+    stages {
+        stage ('Build') {
+            parallel {
+                stage('build planet') {
+                    agent { label 'master' }
+                    steps {
+                        dir('src/maat') {
+                            git(url: 'ssh://dev@192.168.0.100:8011/maat', branch: 'master')
+                        }
+                        dir('src/planet') {
+                            git(url: 'ssh://dev@192.168.0.100:8011/planet', branch: 'master')
+                        }
+
+                        sh '''#!/bin/bash
+                        docker rm $(docker ps -a -q -f status=exited)
+                        docker run -v ${WORKSPACE}/src:/home/sdn/build_planet/src fzaiwan/er:2.1.0 /home/sdn/build_planet/src/planet/ci/build.sh
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/maat/ci/of-config.deb, src/planet/moon.deb, src/planet/ci/generate-config/generate-config', fingerprint: true
+                    }
+                }
+
+                stage('build dpdk') {
+                    agent { label 'er25.2' }
+                    steps {
+                        dir('src/dpdk') {
+                            git(url: 'ssh://dev@192.168.0.100:8011/dpdk', branch: 'planet-v18.08', credentialsId: 'aac47fba-17c9-4426-9f2d-868eaebdc92c')
+                        }
+
+                        sh '''
+                        cd ${WORKSPACE}/src/dpdk
+                        git clean -fd
+                        make defconfig
+                        make -j12
+                        export RTE_TARGET=build
+                        export RTE_SDK=`pwd`
+                        cd examples/ip_pipeline
+                        make -j12
+                        cd ${WORKSPACE}/src/dpdk
+                        make planet
+                        '''
+                        archiveArtifacts allowEmptyArchive: true, artifacts: 'src/dpdk/build/*.deb', fingerprint: true
+                    }
+                }
+            }
+        }
+
+        stage ('Deploy') {
+            parallel {
+                stage ('deploy pop') {
+                    agent { label 'er25.2' }
+                    steps {
+                        copyArtifacts filter: '**/planet*.deb, **/of-config.deb, **/moon.deb', target: 'deb', fingerprintArtifacts: true, flatten: true, projectName: '${JOB_NAME}', selector: specific('${BUILD_NUMBER}')
+
+                        sh '''#!/bin/bash
+                        cd ${WORKSPACE}/deb
+
+                        sudo systemctl stop planet
+
+                        sudo dpkg -r planet
+                        if [ $? -ne 0 ];then
+                            echo "rm planet failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -r moon
+                        if [ $? -ne 0 ];then
+                            echo "rm moon failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -r of-config
+                        if [ $? -ne 0 ];then
+                            echo "rm of-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i planet*.deb
+                        if [ $? -ne 0 ];then
+                            echo "install planet failed."
+                            exit 1
+                        fi
+
+                        sudo systemctl start planet.service
+
+                        sudo dpkg -i of-config.deb
+                        if [ $? -ne 0 ];then
+                            echo "install of-config failed."
+                            exit 1
+                        fi
+
+                        sudo dpkg -i moon.deb
+                        '''
+                    }
+                }
+            }
+        }
+    }
+}

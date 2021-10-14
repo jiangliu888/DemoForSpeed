@@ -1,0 +1,381 @@
+cpe_list:   ['guangzhou','wuhan','nanjing','changsha']
+opwrt_list:  ['guangzhou','changsha']
+sideway_cpe_list:  ['nanjing','wuhan']
+nat_cpe_list: ['wuhan','nanjing', 'guangzhou','changsha']
+cpe_check_list: ['wuhan','nanjing']
+4g_cpe_list: []
+pop_list:   ['local', 'remote']
+world_pop_list: ['remote']
+learn_ip_cpe_list: []
+union_list: [['nanjing','wuhan'],['nanjing','guangzhou'],['guangzhou','changsha']]
+union_check_list: [['nanjing','wuhan','parallel'],['nanjing','guangzhou','parallel'],['changsha','guangzhou','parallel']]
+Network_Quality_Test_Group: ['parallel_group']
+saas_cpe_list: ['guangzhou','changsha']
+saas_service_list: ['Saas_Service1']
+anyc_service_list: []
+slave_cpe_list: ['nanjing_slave']
+master_cpe_list: ['nanjing']
+stop_mwan_cpe_list: []
+local_code_g: '2013265920'
+wuhan_pc:
+    ctrl_ip: "10.192.15.175"
+    ctrl_port:  '22'
+    inner_ip: "172.32.14.175"
+    inner_nic:  "enp2s0"
+    intranet_ip: ""
+    internet_port: "1"
+    user: "sdn"
+    passwd: "rocks"
+    cpe_ip: "172.30.14.75"
+    site_name: 'wuhan'
+    intranet_name: 'lady'
+    intranet_port: "2"
+    intranet_if: ""
+    iperf_tcp_bandwidth: 400
+    cpe_wan_mirror_if: ""
+    cpe_lan_mirror_if: ""
+nanjing_pc:
+    ctrl_ip: "10.192.15.177"
+    ctrl_port:  '22'
+    inner_ip: "172.32.15.177"
+    inner_nic:  "enp2s0"
+    intranet_ip: ""
+    internet_port: "1"
+    user: "sdn"
+    passwd: "rocks"
+    site_name: 'nanjing'
+    intranet_name: 'gentleman'
+    intranet_port: "2"
+    intranet_if: ""
+    cpe_wan_mirror_if: ""
+    cpe_lan_mirror_if: ""
+guangzhou_pc:
+    ctrl_ip: "10.192.15.174"
+    ctrl_port:  '22'
+    inner_ip: "172.32.16.174"
+    inner_nic:  "enp2s0"
+    intranet_ip: ""
+    internet_port: "1"
+    user: "sdn"
+    passwd: "rocks"
+    site_name: 'guangzhou'
+    toNJ_bandwidth: 40
+    intranet_name: 'gentleman'
+    intranet_port: "2"
+    intranet_if: "enp3s0"
+changsha_pc:
+    ctrl_ip: "10.192.15.176"
+    ctrl_port:  '22'
+    inner_ip: "172.32.17.176"
+    inner_nic:  "enp1s0f0"
+    intranet_ip: ""
+    internet_port: "1"
+    user: "sdn"
+    passwd: "rocks"
+    site_name: 'changsha'
+    intranet_name: 'gentleman'
+    intranet_port: "2"
+    intranet_if: ""
+    iperf_tcp_bandwidth: 35
+    iperf_udp_bandwidth: '35M'
+uranus_host:
+    ip:   "10.184.20.2"
+    nic:  "eno2"
+    office_ip: "10.184.20.2"
+    es_ip: "10.184.20.2"
+    es_port: "9200"
+    port:   '6526'
+    of_ip: "10.184.20.3"
+    of_domain: "authserver-ci.netgrounder.com"
+    south_port: '6116'
+    cli_port:   '8101'
+    netconf_port: ['6633', '6653']
+    onos_port: '8181'
+    user:   "karaf"
+    passwd: "karaf"
+    ssh_port:   '22'
+    ssh_user: "sdn"
+    ssh_passwd: "rocks"
+    jump_port: "22"
+    jump_ip: ""
+pontus_host:
+    ip: "10.184.20.2"
+    port: "6226"
+gaea_host:
+    ip: "10.184.20.2"
+    port: "6126"
+wuhan_cpe:
+    ip:   "10.192.15.75"
+    ssh_port:   '22'
+    user:   "sdn"
+    passwd: "rocks"
+    chassis_id: '320'
+    minion_id: 'cpe1011-shaoxing'
+    internet_if: "enp1s0f0"
+    intranet_port: "2"
+    intranet_if: "enp1s0f1"
+    intranet_wan_port: "4"
+    intranet_wan_if: "enp1s0f3"
+    mpls_wan_static_ip: "169.254.100.102"
+    mpls_tunnel_id: 9998
+    mpls_tunnel_port: 1000
+    lan_if: "enp1s0f1"
+    port_num: 3
+    portal_sid: 8001
+    location: "shaoxing"
+    office_peer: ['nanjing']
+    intranet_peer: ['nanjing']
+    nets: "172.32.14.0/24"
+    prefer_cac: [4,4]
+    prefer_eac: [4,5]
+    prefer_port: ['10.184.21.3', '10.186.22.4']
+    wan_port1: "1"
+    wan_ips: ["172.30.14.75", "172.30.14.76"]
+    wan_num: 2
+    oss_endpoint: "oss-aiwan-cn-beijing.aliyuncs.com:9999"
+nanjing_cpe:
+    ip:   "10.192.15.77"
+    ssh_port:   '22'
+    user:   "sdn"
+    passwd: "rocks"
+    chassis_id: '336'
+    minion_id: 'cpe1012-wenzhou'
+    internet_if: "enp1s0f0"
+    intranet_port: "2"
+    intranet_if: "enp1s0f1"
+    lan_if: "enp1s0f1"
+    location: "wenzhou"
+    office_peer: ['wuhan', 'guangzhou']
+    intranet_peer: ['wenzhou', 'guangzhou']
+    nets: "172.32.15.0/24"
+    prefer_cac: [4,4]
+    prefer_eac: [4,5]
+    prefer_port: ['10.184.21.3', '10.184.22.4']
+    wan_port1: "1"
+    wan_ips: ["172.30.15.77", "172.30.15.78"]
+    wan_num: 2
+    oss_endpoint: "oss-aiwan-cn-beijing.aliyuncs.com:9999"
+nanjing_slave_cpe:
+    ip:   "10.192.15.87"
+    ssh_port:   '22'
+    user:   "sdn"
+    passwd: "rocks"
+    chassis_id: '336'
+    minion_id: 'cpe1012-wenzhou-slave' 
+    oss_endpoint: "oss-aiwan-cn-beijing.aliyuncs.com:9999"
+guangzhou_cpe:
+    ip:   "10.192.15.73"
+    ssh_port:   '22'
+    user:   "root"
+    passwd: "rocks"
+    chassis_id: '338'
+    minion_id: 'HB202105120281'
+    internet_if: "pppoe-wan2"
+    intranet_port: "2"
+    intranet_if: "tun1"
+    internet_if2: "wan"
+    wan_if: "lan3"
+    wan2_if: "wan"
+    wan_alias: "wan2"
+    wan2_alias: "wan"
+    lan_if: "tun1"
+    delay: 499
+    loss: 0
+    min_list_d: [0.01, 55]
+    max_list_d: [239, 300]
+    avg_list_d: [0.1, 190]
+    sdev_list_d: [1, 190]
+    office_peer: ['nanjing', 'changsha']
+    intranet_peer: ['nanjing']
+    nets: "172.32.16.0/24"
+    prefer_cac: [4, 4]
+    prefer_eac: [4, 5]
+    prefer_port: ['10.184.21.3', '10.184.22.4']
+    location: "guangzhou"
+    wan_num: 2
+    wan_ips: ["172.0.0.77", "10.184.16.2"]
+    4g_wan_p2p_tunnels_num: 4
+    4G_wan_id:  ""
+    internet_wan_num: 2
+    oss_endpoint: "oss-aiwan-cn-beijing.aliyuncs.com:9999"
+changsha_cpe:
+    ip:   "10.192.15.74"
+    ssh_port:   '22'
+    user:   "root"
+    passwd: "rocks"
+    chassis_id: '352'
+    minion_id: 'cpe1013-ningbo'
+    internet_if: "pppoe-wan"
+    intranet_port: "1"
+    intranet_if: "tun1"
+    internet_if2: "eth1"
+    wan_if: "eth0"
+    lan_if: "tun1"
+    delay: 499
+    loss: 0
+    min_list_d: [0.01, 55]
+    max_list_d: [239, 300]
+    avg_list_d: [0.1, 190]
+    sdev_list_d: [1, 190]
+    office_peer: ['guangzhou']
+    intranet_peer: ['guangzhou']
+    nets: "172.32.17.0/24"
+    prefer_cac: [4, 4]
+    prefer_eac: [4, 5]
+    prefer_port: ['10.184.21.3', '10.184.22.4']
+    location: "guangzhou"
+    wan_num: 2
+    wan_ips: ["172.1.0.77", "10.186.17.2"]
+    4g_wan_p2p_tunnels_num: 4
+    internet_wan_num: 2
+    oss_endpoint: "oss-aiwan-cn-beijing.aliyuncs.com:9999"
+of_devices_num: 6
+netconf_devices_num: 6
+cac_list:   [4]
+eac_list:   [4]
+cfp_eac_list: [6]
+company1:
+    name: 'best_ai_wan'
+    remark: 'best ai wan'
+    location: 'shanghai'
+    key: 'cUUMG+vPbnvjUV21'
+company2:
+    name: 'alibaba'
+    remark: 'alibaba'
+    location: 'beijing'
+    key: 'AAAAB3NzaC1yc2EA'
+local_pop:
+    ctrl_ip: 10.184.21.3
+    ip: 10.184.21.3
+    ip2: 10.186.21.3
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    nat_phy_port: "enp1s0f0"
+    phy_port_2: "enp1s0f1"
+    cac: 4
+    eac: 4
+    tunnel_port: 4789
+    ne_id: 326
+    cpes: []
+    cpe_wans: [{'id':320, 'iface':"enp1s0f0", 'index': 0, "wan_id": 1},{'id':336, 'iface':"enp1s0f0", 'index': 0, "wan_id": 1},{'id':352, 'iface':"pppoe-wan", 'index': 0, "wan_id": 1},{'id':338, 'iface':"pppoe-wan2", 'index': 0, "wan_id": 2}]
+    logic_ports: ["enp1s0f0", "enp1s0f1"]
+    logic_ports_isp: ["default", "china telecom"]
+remote_pop:
+    ctrl_ip: 10.184.22.4
+    ip: 10.184.22.4
+    ip2: 10.186.22.4
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    nat_phy_port: "enp1s0f0"
+    cac: 4
+    eac: 5
+    ne_id: 342
+    tunnel_port: 4789
+    groups: 0,101
+    cpes: []
+    cpe_wans: [{'id':320, 'iface':"enp1s0f0", 'index': 1, "wan_id": 2},{'id':336, 'iface':"enp1s0f0", 'index': 1, "wan_id": 2},{'id':352, 'iface':"eth1", 'index': 0, "wan_id": 2},{'id':338, 'iface':"wan", 'index': 0, "wan_id": 1}]
+    logic_ports: ["kni0", "kni1"]
+    logic_ports_isp: ["default", "china telecom"]
+Saas_Service1:
+    ne_id: 328
+    ctrl_ip: 10.184.22.4
+    ip: 10.184.22.4
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    port_num: 1
+    preferPop: "remote"
+    logic_ports_isp: ["lo"]
+    tunnel_port: 4791
+internet_host:
+    ip: 10.184.20.106
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    key: "/var/lib/jenkins/.ssh/sdn_rsa"
+    nat_phy_port: "enp1s0"
+    saas_dns: "samba.systemtest.com"
+    dns_pattern: "samba.systemtest.com"
+insight_host:
+    ip: '10.184.20.2'
+    port: '8088'
+    user: 'admin'
+    password: 'AIRwalk2013!)'
+internet_switch:
+    type: 'dell_os10'
+    ip: 10.192.15.1
+    port: 22
+    user: 'admin'
+    password: 'admin'
+dns_server:
+    ip: "10.184.20.105"
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    a_ip1: 191.168.0.8
+    a_ip2: 191.168.0.11
+    a_wrong_ip: 199.59.242
+default_dns:
+    ip: 10.184.20.105
+manager_server:
+    ip: 10.184.20.105
+    port: 9103
+    ctrl_ip: 10.192.15.105
+    ctrl_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    manager_port: 9103
+    influxdb_ip: 10.184.20.105
+    influxdb_port: 8086
+    port_list: [8970, 8972, 8974, 8976]
+wuhan_switch:
+    type: 'huawei_telnet'
+    ip: 10.184.14.2
+    ip2: 10.184.14.2
+    user: 'admin'
+    password: 'Passw0rd'
+    wuhan_wan_if: Vlanif14
+nanjing_switch:
+    type: 'huawei_telnet'
+    ip: 10.184.15.2
+    ip2: 10.186.15.2
+    user: 'admin'
+    password: 'Passw0rd'
+    nanjing_wan_if: Vlanif15
+guangzhou_switch:
+    ip: 10.184.16.2
+    ip2: 10.186.16.2
+    ctl_ip: 172.0.0.1
+    type: 'mikrotik_routeros'
+    port: '22'
+    user: 'admin'
+    password: ''
+changsha_switch:
+    ip: 10.186.17.2
+    ip2: 10.184.17.2
+fake_oss_server:
+    ip: 10.184.20.2
+    port_list: [9999, 9998]
+collector_server:
+    ip: 10.184.20.2
+    port_list: [8970,8974]
+salt-master:
+    ctl_ip: "10.192.15.105"
+    ip: "10.184.20.105"
+    internet_ip: "10.184.20.106"
+    ssh_port: "22"
+    user: "sdn"
+    passwd: "rocks"
+    port_list: [4505, 4506]
+consul_server:
+    ip: "10.184.20.2"
+    port: "8500"
+    token: "2f181eb2-0728-7ae6-4843-bd7ef8d528b4"
+aliyuncs_server:
+    log_server_dns: "dig cn-shanghai.log.aliyuncs.com"
+    log_server_ip: "106.15.241."
+alert_server:
+    ip: 10.184.20.105
+    port: 8001

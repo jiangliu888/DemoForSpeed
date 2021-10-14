@@ -1,0 +1,406 @@
+*** Settings ***
+Suite Setup       Setup_Fec_SPI_ON_CPES
+Suite Teardown    TearDown_Fec_SPI_ON_CPES
+Library           ../../libs/common/SetHttp.py
+Library           ../../libs/uranus/UranusKeyword.py
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${r_iperf_s_port}    5201
+${l_iperf_s_port}    5202
+${handover_sideway_log}    spi_sideway.log
+${vport_check}    5s
+${hard_sleep}     10s
+${domain_wait}    10
+${link_Score_wait}    20s
+
+*** Test Cases ***
+check_private_fec_on_right_link_with_dup_configed
+    [Tags]    SDWANDEV-3734    SDWANDEV-3737
+    ${dup_link_id}=    get_dup_link_id    local    336
+    Wait Until Keyword Succeeds    3x    1s    check_fec_on_right_link_keyWord    ${dup_link_id}
+
+check_saas_fec_on_right_link_with_dup_configed
+    [Tags]    SDWANDEV-3735
+    [Setup]    tc_setup    saas
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    328    5
+    ${dup_link_id}=    get_dup_link_id    local    328
+    ${init_packets}=    Get_CPE_Link_dup_Packets    local    ${dup_link_id}
+    ssh_pc    local
+    Write Sudo Cmd    nping --icmp -c 10 --delay 0.1s samba.systemtest.com > fec_domain_icmp_Not.log &    &{local_pc}[passwd]
+    Write Sudo Cmd    nping --icmp -c 10 --delay 0.1s 114.114.114.114 > fec_icmp_yes.log &    &{local_pc}[passwd]
+    close connection
+    ${expect_packets}=    evaluate    ${init_packets}+10
+    Wait Until Keyword Succeeds    11s    1s    check_dup_num_on_right_link    local    ${dup_link_id}    ${expect_packets}
+    ...    ${expect_packets}+1
+    [Teardown]    Teardown_TC_config
+
+check_private_fec_effect_with_dup_configed
+    [Tags]    SDWANDEV-3736
+    [Setup]    tc_setup
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    10
+    ...    100    ${True}
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    0
+    ...    100    ${False}
+    ${dup_link_id}=    get_dup_link_id    local    336
+    ${init_packets}=    Get_CPE_Link_dup_Packets    local    ${dup_link_id}
+    ssh_pc    local
+    Write Sudo Cmd    ping -c 10 -i 0.2 10.193.0.101 > fec_icmp.log &    &{local_pc}[passwd]
+    close connection
+    sleep    2
+    ${expect_packets}=    evaluate    ${init_packets}+10
+    Wait Until Keyword Succeeds    11s    1s    check_dup_num_on_right_link    local    ${dup_link_id}    ${expect_packets}
+    ...    ${expect_packets}+1
+    ${cmd}    Set Variable    cat fec_icmp.log|grep 'loss' | awk -F '%' '{print $1}' | awk '{print $NF}'
+    ssh_pc    local
+    Write    ${cmd}
+    ${res}=    read until prompt
+    ${loss}    Get Line    ${res}    0
+    Should Be equal    ${loss}    0
+    [Teardown]    Teardown_TC_config
+
+office_and_saas_not_influenced_by_dup
+    [Tags]    SDWANDEV-3738
+    [Setup]    setup_for_not_influence
+    Iperf3_loss_From_PC_With_Port    10.193.0.101    4M    local    ${r_iperf_s_port}    10s
+    Init_remote_saasPing    114.114.114.114
+    Apply_fec_SPI_To_CPE    local
+    delete_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_tag_id}    fec
+    wait until keyword succeeds    15s    1s    check_iperf_loss_result_in_pc    ${0}    local
+    wait until keyword succeeds    15s    1s    Check_remote_saasPing    ${0}
+    [Teardown]    teardown_for_not_influence
+
+2Port_10M_FEC_10M
+    [Tags]    SDWANDEV-3899    SDWANDEV-3963
+    [Setup]    set_changsha_wan_port_10M
+    ${i_vp1_tp}    ${i_vp1_tb}    ${i_vp1_rp}    ${i_vp1_rb}    Get CPE Vports Packets    changsha    &{changsha_cpe}[internet_if]
+    ...    ${0}
+    ${i_vp2_tp}    ${i_vp2_tb}    ${i_vp2_rp}    ${i_vp2_rb}    Get CPE Vports Packets    changsha    &{changsha_cpe}[internet_if2]
+    ...    ${0}
+    Comment    ${i_p1_tp}    ${i_p1_tb}    ${i_p1_rp}    ${i_p1_rb}    Get CPE interface Packets    changsha
+    ...    &{changsha_cpe}[internet_if]
+    Comment    ${i_p2_tp}    ${i_p2_tb}    ${i_p2_rp}    ${i_p2_rb}    Get CPE interface Packets    changsha
+    ...    &{changsha_cpe}[internet_if2]
+    Iperf3_band_From_PC_With_Port    &{guangzhou_pc}[inner_ip]    changsha    ${l_iperf_s_port}
+    Wait Until Keyword Succeeds    10s    1s    check_iperf_band_result_in_pc    9.0    changsha    12.2
+    ...    ${false}
+    ${i_vp1_tp}    ${i_vp1_tb}    ${i_vp1_rp}    ${i_vp1_rb}    Get CPE Vports Packets    changsha    &{changsha_cpe}[internet_if]
+    ...    ${0}
+    ${i_vp2_tp}    ${i_vp2_tb}    ${i_vp2_rp}    ${i_vp2_rb}    Get CPE Vports Packets    changsha    &{changsha_cpe}[internet_if2]
+    ...    ${0}
+    Comment    ${i_p1_tp}    ${i_p1_tb}    ${i_p1_rp}    ${i_p1_rb}    Get CPE interface Packets    changsha
+    ...    &{changsha_cpe}[internet_if]
+    Comment    ${i_p2_tp}    ${i_p2_tb}    ${i_p2_rp}    ${i_p2_rb}    Get CPE interface Packets    changsha
+    ...    &{changsha_cpe}[internet_if2]
+    [Teardown]    Set_CPE_Interface_Bandwith    changsha    1024000    100    10    0
+
+dup_choose_right_link_when_wan_disabled
+    [Tags]    SDWANDEV-3739
+    [Setup]    chasha_tc    3739
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_wan_score_between    328    2    8    30
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_wan_score_between    328    1    0    8
+    ${dup_link_id}=    get_dup_link_id    changsha    328
+    ${init_packets}=    Get_CPE_Link_dup_Packets    changsha    ${dup_link_id}
+    ssh_pc    changsha
+    Write Sudo Cmd    ping -c 10 -i 0.1 114.114.114.114 > fec_icmp_yes.log    &{changsha_pc}[passwd]
+    shutdown_changsha_wan1_port
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_wan_score_between    328    1    9999    10001
+    ${new_dup_link_id}=    get_dup_link_id    changsha    328
+    ${new_init_packets}=    Get_CPE_Link_dup_Packets    changsha    ${new_dup_link_id}
+    ssh_pc    changsha
+    Write Sudo Cmd    ping -c 10 -i 0.1 114.114.114.114 > fec_icmp_yes.log    &{changsha_pc}[passwd]
+    Wait Until Keyword Succeeds    11s    1s    check_dup_on_two_link    changsha    ${dup_link_id}    ${init_packets}
+    ...    ${new_dup_link_id}    ${new_init_packets}
+    [Teardown]    run keywords    unshutdown_changsha_wan1_port    0
+    ...    AND    chasha_tc    teardown
+
+Fec_Nuwa_CLI_Test
+    [Tags]    SDWANDEV-3955
+    [Setup]    run keywords    Apply Fec To CPEs Tags    changsha    1
+    ...    AND    add_loss_on_cpe_wan    changsha
+    ssh pc    changsha
+    Write Sudo Cmd    ps    &{changsha_pc}[passwd]
+    Write Sudo Cmd    nping --tcp -c 20 --delay 1s &{dns_server}[ip] -p 999 > fec_tcp_yes.log &    &{changsha_pc}[passwd]
+    ${init_r_send_pkgs}    ${init_r_send_bytes}    ${init_r_recv_pkgs}    ${init_r_recv_bytes}    ${init_r_fec_pkgs}    ${init_r_fec_bytes}=    Get_CPE_Nuwa_Stream_Fec_Pkgs
+    ...    changsha    service1    ${True}    &{dns_server}[ip]    999    saas
+    wait until keyword succeeds    10    200ms    Check CPE Nuwa Cli Fec Pkgs    changsha    ${True}    ${init_r_send_pkgs}
+    ...    ${init_r_send_bytes}    ${init_r_fec_pkgs}    ${init_r_fec_bytes}    ${4}
+    [Teardown]    run keywords    Delete Fec To CPEs Tags    changsha    1
+    ...    AND    del_loss_on_cpe_wan    changsha
+
+nuwa_partialReliable_saas_check
+    [Tags]    SDWANDEV-4018
+    [Setup]    nuwa_partialReliable_setup    changsha
+    add_loss_on_cpe_wan    changsha
+    add_loss_on_cpe_wan    changsha    2
+    sleep    3
+    Iperf3_loss_From_PC_With_Port    10.192.20.15    4M    changsha    ${r_iperf_s_port}    10s
+    wait until keyword succeeds    18s    1s    check_iperf_loss_result_in_pc    ${8}    changsha
+    [Teardown]    run keywords    del_loss_on_cpe_wan    changsha
+    ...    AND    del_loss_on_cpe_wan    changsha    2
+
+nuwa_partialReliable_office_check
+    [Tags]    SDWANDEV-4019
+    [Setup]    nuwa_partialReliable_setup    local
+    tc_setup    nuwa
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    10
+    ...    100
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    10
+    ...    100    ${True}
+    Iperf3_loss_From_PC_With_Port    10.193.0.101    4M    local    ${r_iperf_s_port}    10
+    wait until keyword succeeds    15s    1s    check_iperf_loss_result_in_pc    ${5}    local
+    [Teardown]    Teardown_TC_config
+
+check_dynamic_fec_reliable_saas
+    [Tags]    SDWANDEV-4020
+    [Setup]    run keywords    fec_dynamic_setup    changsha    reliable
+    ...    AND    chasha_tc    4020
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_wan_score_between    328    1    0    3
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_wan_score_between    328    2    8
+    wait until keyword succeeds    20s    1s    dynamic_fec_check_dup_number_right    changsha    114.114.114.114
+    ...    1    15    ${None}    328
+    [Teardown]    chasha_tc    teardown
+
+check_dynamic_fec_partialReliable_office
+    [Tags]    SDWANDEV-4022
+    [Setup]    fec_dynamic_setup    local    partialReliable
+    tc_setup
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    10
+    ...    100    ${True}
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    0
+    ...    100    ${False}
+    ${dup_link_id}=    get_dup_link_id    local    336
+    wait until keyword succeeds    10x    1s    dynamic_fec_check_dup_number_right    local    10.193.0.101
+    ...    1    18    ${dup_link_id}
+    [Teardown]    Teardown_TC_config
+
+check_dynamic_fec_unreliable_office
+    [Tags]    SDWANDEV-4021
+    [Setup]    fec_dynamic_setup    local    unreliable
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    200
+    ...    300    ${True}
+    wait until keyword succeeds    ${link_Score_wait}    1s    check_cpe_link_score_between    local    336    0
+    ...    10    ${False}
+    ${dup_link_id}=    get_dup_link_id    local    336
+    wait until keyword succeeds    10x    1s    dynamic_fec_check_dup_number_right    local    10.193.0.101
+    ...    0    0    ${dup_link_id}
+
+*** Keywords ***
+Setup_Fec_SPI_ON_CPES
+    unions_setup
+    append_fec_spi_cpe_tag
+    : FOR    ${cpe}    IN    @{fec_cpe_list}
+    \    Apply_fec_SPI_To_CPE    ${cpe}
+    #\    Open_Cpe_Debug_Mode    ${cpe}
+
+Append_fec_SPI_CPE_TAG
+    ${tag_name}=    set variable    Fec_always_Tag
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    set suite variable    ${suite_tag_id}    ${tag_id}
+    : FOR    ${cpe}    IN    @{fec_cpe_list}
+    \    ${proto}=    Get From List    &{${cpe}_cpe}[fec_spi_rule]    0
+    \    ${s_ip}=    Get From List    &{${cpe}_cpe}[fec_spi_rule]    1
+    \    ${s_port}=    Get From List    &{${cpe}_cpe}[fec_spi_rule]    2
+    \    ${d_ip}=    Get From List    &{${cpe}_cpe}[fec_spi_rule]    3
+    \    ${d_port}=    Get From List    &{${cpe}_cpe}[fec_spi_rule]    4
+    \    append_company_spi_Fec_tag_rules    ${suite_company_id}    ${proto}    ${s_ip}    ${s_port}    ${d_ip}
+    \    ...    ${d_port}    ${tag_name}
+
+Apply_fec_SPI_To_CPE
+    [Arguments]    ${cpe}
+    ${pri}=    set variable    600
+    config_fec_params_to_site_fec_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_tag_id}    ${pri}
+    ${agent_codes}=    create list    ${CM_local_code}
+    ${indexes}=    create list    1
+    ${ttls}=    create list    600
+    config_saas_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_tag_id}    1100    ${agent_codes}    ${indexes}
+    ...    ${ttls}    reliable
+    Wait Until Keyword Su cceeds    ${domain_wait}    200ms    Check_Spi_fec_Dispatch_From_Cpe    ${cpe}    ${suite_tag_id}
+
+check_fec_on_right_link_keyWord
+    [Arguments]    ${dup_link_id}
+    ${init_packets}=    Get_CPE_Link_dup_Packets    local    ${dup_link_id}
+    ssh_pc    local
+    Write Sudo Cmd    nping --icmp -c 10 --delay 0.1s 10.193.0.101 > fec_icmp.log &    &{local_pc}[passwd]
+    Write Sudo Cmd    nping --tcp-connect -c 10 --delay 0.1s 10.193.0.101 -p 22 > fec_tcp22.log &    &{local_pc}[passwd]
+    close connection
+    ${expect_packets_s}=    evaluate    ${init_packets}+40
+    ${expect_packets_l}=    evaluate    ${init_packets}+50
+    Wait Until Keyword Succeeds    3x    1s    check_dup_num_on_right_link    local    ${dup_link_id}    ${expect_packets_s}
+    ...    ${expect_packets_l}
+
+dynamic_fec_check_dup_number_right
+    [Arguments]    ${cpe}    ${dst}    ${s}    ${l}    ${dup_link_id}=${None}    ${dst_id}=${None}
+    ${dup_id}=    run keyword if    '${dup_link_id}' == '${None}'    get_dup_link_id    ${cpe}    ${dst_id}
+    ...    ELSE    set variable    ${dup_link_id}
+    ${init_packets}=    Get_CPE_Link_dup_Packets    ${cpe}    ${dup_id}
+    ${expect_packets_s}=    evaluate    ${init_packets}+${s}
+    ${expect_packets_l}=    evaluate    ${init_packets}+${l}
+    ssh_pc    ${cpe}
+    Write Sudo Cmd    nping --udp -c 15 --delay 0.1s ${dst} -p 22 > fec_udp.log    &{${cpe}_pc}[passwd]
+    close connection
+    check_dup_num_on_right_link    ${cpe}    ${dup_id}    ${expect_packets_s}    ${expect_packets_l}
+
+TearDown_Fec_SPI_ON_CPES
+    unions_teardown
+    : FOR    ${cpe}    IN    @{fec_cpe_list}
+    \    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_tag_id}
+    #\    Close_Cpe_Debug_Mode    ${cpe}
+
+setup_for_not_influence
+    delete_site_spi_dispatch    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    ${suite_tag_id}
+
+teardown_for_not_influence
+    Apply_fec_SPI_To_CPE    local
+    config_fec_params_to_site_fec_spi_dispatchs    ${suite_company_id}    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_tag_id}    600
+
+tc_setup
+    [Arguments]    ${fun}=fec
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    ${cmd}=    set variable    sh add_${fun}_on_1002_1003.sh
+    Write Sudo Cmd    ${cmd}    &{tc_server}[passwd]
+    close connection
+    sleep    5
+
+chasha_tc
+    [Arguments]    ${head}
+    ssh cpe    changsha
+    write openwrt cmd    sh NoDelete/${head}_add_delay.sh
+    close connection
+
+fec_dynamic_setup
+    [Arguments]    ${cpe}    ${transportType}
+    config_fec_params_to_site_fec_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_tag_id}    1000    dynamic    1200
+    ...    5    1
+    config_transport_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_tag_id}    1000    ${transportType}
+    Wait Until Keyword Su cceeds    ${domain_wait}    200ms    Check_Spi_Dispatch_From_Cpe    ${cpe}    ${suite_tag_id}    FEC
+    ...    dynamic
+    Wait Until Keyword Su cceeds    ${domain_wait}    200ms    Check_Spi_Dispatch_From_Cpe    ${cpe}    ${suite_tag_id}    QOS
+    ...    ${transportType}
+
+nuwa_partialReliable_setup
+    [Arguments]    ${cpe}
+    delete_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_tag_id}    fec
+    config_transport_params_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${cpe}_pc}[site_name]_site_id}    ${suite_tag_id}    1000    partialReliable
+
+get_dup_link_id
+    [Arguments]    ${cpe}    ${dst_id}
+    ${local_wan_num}=    get_CPE_Wan_Num    ${cpe}
+    ${dup_link_id}=    set variable    ${0}
+    ${wan1_good_link_id}    ${wan1_good_link_score}    ${wan1_bad_link_id}    ${wan1_bad_link_score}=    get_link_id_score_info_by_wan    ${cpe}    ${dst_id}
+    ...    1
+    ${dup_link_id}=    run keyword if    ${local_wan_num}==2    get_dup_id_from_2wan    ${cpe}    ${dst_id}
+    ...    ELSE    set variable    ${wan1_bad_link_id}
+    [Return]    ${dup_link_id}
+
+get_dup_id_from_2wan
+    [Arguments]    ${cpe}    ${dst_id}
+    ${wan1_good_link_id}    ${wan1_good_link_score}    ${wan1_bad_link_id}    ${wan1_bad_link_score}=    get_link_id_score_info_by_wan    ${cpe}    ${dst_id}
+    ...    1
+    ${wan2_good_link_id}    ${wan2_good_link_score}    ${wan2_bad_link_id}    ${wan2_bad_link_score}=    get_link_id_score_info_by_wan    ${cpe}    ${dst_id}
+    ...    2
+    ${wan1_down}=    set variable if    (${wan1_good_link_score}==${wan1_bad_link_score} and ${wan1_good_link_score}==10000)    ${True}    ${False}
+    ${dup_id}=    run keyword if    ${wan1_down}    set variable    ${wan2_bad_link_id}
+    ...    ELSE    set variable if    ${wan1_good_link_score}>${wan2_good_link_score}    ${wan1_good_link_id}    ${wan2_good_link_id}
+    [Return]    ${dup_id}
+
+get_link_id_score_info_by_wan
+    [Arguments]    ${cpe}    ${dst_id}    ${wan}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${links_j}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    ${filter_wan}=    EVALUATE    filter(lambda x:x['src_wan_id']==${wan} and x['dst_id']==${dst_id},${links_j})
+    ${sorted_filter}=    EVALUATE    sorted(${filter_wan}, key=lambda x:x['score'])
+    ${wan_links_ids_scores}=    EVALUATE    map(lambda x: [x['port'],x['score']],${sorted_filter})
+    ${wan_good_link_id_score}=    Get From List    ${wan_links_ids_scores}    0
+    ${wan_bad_link_id_score}=    Get From List    ${wan_links_ids_scores}    1
+    ${wan_good_link_id}=    Get From List    ${wan_good_link_id_score}    0
+    ${wan_good_link_score}=    Get From List    ${wan_good_link_id_score}    1
+    ${wan_bad_link_id}=    Get From List    ${wan_bad_link_id_score}    0
+    ${wan_bad_link_score}=    Get From List    ${wan_bad_link_id_score}    1
+    [Return]    ${wan_good_link_id}    ${wan_good_link_score}    ${wan_bad_link_id}    ${wan_bad_link_score}
+
+check_dup_num_on_right_link
+    [Arguments]    ${cpe}    ${link_id}    ${dup_pkts_num_s}    ${dup_pkts_num_l}
+    ${r_num}=    Get_CPE_Link_dup_Packets    ${cpe}    ${link_id}
+    should be true    ${r_num}<=${dup_pkts_num_l}
+    should be true    ${r_num}>=${dup_pkts_num_s}
+
+check_dup_on_two_link
+    [Arguments]    ${cpe}    ${link1}    ${num1}    ${link2}    ${num2}
+    ${num3}=    Get_CPE_Link_dup_Packets    ${cpe}    ${link1}
+    ${num4}=    Get_CPE_Link_dup_Packets    ${cpe}    ${link2}
+    ${r}=    evaluate    ${num3}>${num1} and ${num4}>${num2}
+    should be true    ${r}
+
+Get_CPE_Link_dup_Packets
+    [Arguments]    ${cpe}    ${link_id}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${openwrt}=    evaluate    '${cpe}' in ${opwrt_list}
+    ${packets_list}    create_list
+    ${links_j}=    Get_CPE_Link_Json_Result    ${openwrt}    ${pwd}
+    ${r}=    evaluate    filter(lambda x:x['port']==${link_id },${links_j})[0]
+    [Return]    ${r['tx_duplicate_packets']}
+
+Init_remote_saasPing
+    [Arguments]    ${ip_addr}
+    ssh pc    remote
+    Write    ping \ ${ip_addr} -c 10 > ping_p.log &
+    # close connection
+
+Check_remote_saasPing
+    [Arguments]    ${loss}
+    ssh pc    remote
+    ${stdout}    ${stderr}=    Execute Command    cat \ ping_p.log    return_stderr=True
+    Should Be Empty    ${stderr}
+    ${cmd}    Set Variable    grep 'loss' ping_p.log|awk -F '[ %]' '{print $6}'
+    ${res}    ${stderr}=    Execute Command    ${cmd}    return_stderr=True
+    Should Be True    ${res} <= ${loss}    The package should be less than ${loss}%
+
+Check CPE Nuwa Cli Fec Pkgs
+    [Arguments]    ${cpe}    ${reliable}    ${init_r_send_pkgs}    ${init_r_send_bytes}    ${init_r_fec_pkgs}    ${init_r_fec_bytes}
+    ...    ${expect_num}
+    ${r_send_pkgs}    ${r_send_bytes}    ${r_recv_pkgs}    ${r_recv_bytes}    ${r_fec_pkgs}    ${r_fec_bytes}=    Get_CPE_Nuwa_Stream_Fec_Pkgs
+    ...    ${cpe}    service1    ${reliable}    &{dns_server}[ip]    999    saas
+    should be true    ${r_send_pkgs}-${init_r_send_pkgs}>=${expect_num}
+    should be true    ${r_fec_pkgs}-${init_r_fec_pkgs}>=${expect_num}
+    should be true    ${r_send_bytes}-${init_r_send_bytes}>=${expect_num}*64
+    should be true    ${r_fec_bytes}-${init_r_fec_bytes}>=${expect_num}*64
+
+Check Saas Nuwa Stream Cli
+    [Arguments]    ${cpe}    ${reliable}    ${d_ip}    ${d_port}    ${expected_r}    ${expected_s}
+    ...    ${expect_fec}    ${expect_resend}
+    ${saas_stream_info}=    Get_Saas_Nuwa_from_CLI    saas_service1    &{${cpe}_cpe}[chassis_id]    ${reliable}    ${d_ip}    ${d_port}
+    should be true    ${saas_stream_info[0]}>=${expected_incr_s}
+    should be true    ${saas_stream_info[2]}>=${expected_r}
+    should be true    ${saas_stream_info[4]}>=${expected_fec}
+    should be true    ${saas_stream_info[6]}==${expected_resend}
+
+check_wan_score_between
+    [Arguments]    ${ne_id}    ${wan}    ${expect_s}    ${expect_l}=9999
+    ${link_ids}    Get End2End undirect Links With WanId    changsha    ${ne_id}    ${wan}
+    check_linkscore_between    changsha    ${link_ids}    ${expect_s}    ${expect_l}
+
+check_cpe_link_score_between
+    [Arguments]    ${cpe}    ${ne_id}    ${expect_s}    ${expect_l}=9999    ${direct}=False
+    ${link_ids}    Get End2End undirect Links    ${cpe}    ${ne_id}    ${direct}
+    check_linkscore_between    ${cpe}    ${link_ids}    ${expect_s}    ${expect_l}
+
+check_linkscore_between
+    [Arguments]    ${cpe}    ${link_ids}    ${expect_s}    ${expect_l}
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    ${cpe}    ${link_ids}
+    : FOR    ${score}    IN    @{score_list}
+    \    should be true    ${score} > ${expect_s}
+    \    should be true    ${score} < ${expect_l}
+
+set_changsha_wan_port_10M
+    [Arguments]    ${ratio}=100
+    put_cpe_wan_bandwidth    &{changsha_cpe}[chassis_id]    &{changsha_cpe}[internet_if]    0    10240    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    changsha    &{changsha_cpe}[internet_if]    ${0}
+    ...    10240    10    10    ${ratio}
+    put_cpe_wan_bandwidth    &{changsha_cpe}[chassis_id]    &{changsha_cpe}[internet_if2]    0    10240    10    10
+    ...    ${ratio}
+    Wait Until Keyword Succeeds    ${vport_check}    200ms    Check_VPort_Bandwidth_From_Ne    changsha    &{changsha_cpe}[internet_if2]    ${0}
+    ...    10240    10    10    ${ratio}

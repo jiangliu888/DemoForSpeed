@@ -1,0 +1,62 @@
+[
+    {
+        "name":"SAAS_8584-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {   "name":"SAAS_8600-4-1",         
+        "port_num":2,         
+        "use_group":false     
+    },
+    {
+        "name":"SAAS_8616-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {   "name":"SAAS_8632-4-1",         
+        "port_num":2,         
+        "use_group":false     
+    },
+    {
+        "name":"SAAS_8648-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {   "name":"SAAS_8664-4-11",         
+        "port_num":2,         
+        "use_group":false     
+    },
+    {
+        "name":"SAAS_8680-4-11",
+        "port_num":2,
+        "use_group":false
+    },
+    {   "name":"SAAS_8696-4-11",         
+        "port_num":2,         
+        "use_group":false     
+    },
+    {
+        "name":"SAAS_8712-4-11",
+        "port_num":2,
+        "use_group":false
+    },
+    {   "name":"SAAS_8728-4-11",         
+        "port_num":2,         
+        "use_group":false     
+    },
+    {
+        "name":"CR_8550-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {
+         "name":"ER_8566-4-11",
+        "port_num":2,
+        "use_group":false
+    },
+    { 
+        "name":"CPE_17026-4-21",
+        "port_num":2,
+        "use_group":false
+    }
+]

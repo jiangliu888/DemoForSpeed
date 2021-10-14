@@ -1,0 +1,466 @@
+*** Settings ***
+Suite Setup       FT_Suit_startup
+Suite Teardown
+Test Setup        TestSetup
+Resource          ../../../testcase/resource/UranusKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+Library           ../../../libs/configCenter/ConsulKeyword.py
+Resource          ../../resource/FtNeKeyword.txt
+Library           ../../../libs/fake_ne/interface/FakeNeKeyword.py
+Library           ../../../libs/fake_ne/topo/loadTopo.py
+Resource          ../../resource/topoKeyword.txt
+Variables         ../../../config/ft_topo_check/measure_tasks_check.py
+Variables         ../../../config/ft_topo_check/flows_check.py
+
+*** Variables ***
+${select_area_wait_timer}    60s
+
+*** Test Cases ***
+CPE_model3_saas_check_flow
+    [Tags]    SDWANDEV-3252    SDWANDEV-2354    SDWANDEV-3253
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${saas_proxy}=    create list    8584
+    ${port_range}=    evaluate    range(497,501)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_1saas_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_proxy_prefer_pop    8584    8550
+    Tunnel_check    ${CR8550_CR8566_SAAS8584_CPE17026_CPE17043_Tasks_and_Tunnels}
+    Service_Flows_check    ${CR8550_SAAS8584_POP_TO_Service_Flows}
+    create_code_agent_pattern    ${saas_proxy}    1    1    3    19
+    config_saasRule    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}    17026
+    ...    ${port_range}
+    Check_e2e_link_Total_NUM    17026    8584    2
+    unconfig_spi    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8584    0
+    [Teardown]    run keywords    Unregister_saasProxy    ${saas_proxy}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_change_neid_saas_check_flow
+    [Tags]    SDWANDEV-3651    SDWANDEV-2298    remove
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${saas_proxy}=    create list    8584
+    ${port_range}=    evaluate    range(497,501)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_1saas_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    put_proxy_prefer_pop    8584    8550
+    create_code_agent_pattern    ${saas_proxy}    1    1    3    19
+    config_saasRule    ${suite_company_id}    ${sites_id_list[0]}
+    patch_company_sites    ${suite_company_id}    ${sites_id_list[0]}    17043    17043
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}    17043
+    ...    ${port_range}
+    Check_e2e_link_Total_NUM    17043    8584    2
+    [Teardown]    run keywords    Unregister_saasProxy    ${saas_proxy}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_change_neid_anycast_check_flow
+    [Tags]    SDWANDEV-3652    remove
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${anycast}=    create list    8535
+    ${port_range}=    evaluate    range(597,601)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_1anycast_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_anycast_prefer_pop    8535    8550
+    create_code_agent_pattern    ${anycast}    1    1    3    19    anycast
+    config_spiRule    ${suite_company_id}    ${sites_id_list[0]}
+    patch_company_sites    ${suite_company_id}    ${sites_id_list[0]}    17043    17043
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}    17043
+    ...    ${port_range}
+    Check_e2e_link_Total_NUM    17043    8535    2
+    [Teardown]    run keywords    Unregister_anycast    ${anycast}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_anycast_check_flow
+    [Tags]    SDWANDEV-3229    SDWANDEV-3317    remove
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${anycast}=    create list    8535
+    ${port_range}=    evaluate    range(597,601)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_1anycast_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_anycast_prefer_pop    8535    8550
+    Tunnel_check    ${CR8550_CR8566_ANY8535_CPE17026_CPE17043_Tasks_and_Tunnels}
+    Service_Flows_check    ${CR8550_ANY8535_POP_TO_Service_Flows}
+    create_code_agent_pattern    ${anycast}    1    1    3    19    anycast
+    config_spiRule    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}    17026
+    ...    ${port_range}
+    Check_e2e_link_Total_NUM    17026    8535    2
+    unconfig_spi    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8535    0
+    [Teardown]    run keywords    Unregister_anycast    ${anycast}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_anycast_change_prefer
+    [Tags]    SDWANDEV-3229    remove
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${anycast}=    create list    8535
+    ${port_range}=    evaluate    range(597,601)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_1anycast_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_anycast_prefer_pop    8535    8550
+    Tunnel_check    ${CR8550_CR8566_ANY8535_CPE17026_CPE17043_Tasks_and_Tunnels}
+    Service_Flows_check    ${CR8550_ANY8535_POP_TO_Service_Flows}
+    create_code_agent_pattern    ${anycast}    1    1    3    19    anycast
+    config_spiRule    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM_with_DstCac_DstEac    17026    8535    4
+    ...    1    2
+    put_anycast_prefer_pop    8535    8566
+    Tunnel_check    ${CR8550_CR8566_ANY8535_CPE17026_CPE17043_Change_Prefer_Tunnels}
+    Service_Flows_check    ${CR8550_CR8566_ANY8535_POP_TO_Service_Flows}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM_with_DstCac_DstEac    17026    8535    4
+    ...    11    2
+    unconfig_spi    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8535    0
+    [Teardown]    run keywords    Unregister_anycast    ${anycast}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_multi_anycast_check_flow
+    [Tags]    SDWANDEV-3319    remove
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${anycast}=    create list    8535    8583
+    ${port_range}=    evaluate    range(597,601)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_2anycast_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_anycast_prefer_pop    8535    8550
+    put_anycast_prefer_pop    8583    8566
+    Tunnel_check    ${CR8550_ANY8535_CR8566_ANY8583_CPE17026_CPE17043_Tasks_and_Tunnels}
+    Service_Flows_check    ${CR8550_ANY8535_CR8566_ANY8583_POP_TO_Service_Flows}
+    create_code_agent_pattern    ${anycast}    1    1    3    19    anycast
+    : FOR    ${c}    IN    @{cpes}
+    \    ${i}=    get index from list    ${cpes}    ${c}
+    \    config_spiRule    ${suite_company_id}    ${sites_id_list[${i}]}
+    \    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}
+    \    ...    ${c}    ${port_range}
+    \    ${links_c} =    get_e2e_links_from_controller    ${c}    8535
+    \    ${links_c2} =    get_e2e_links_from_controller    ${c}    8583
+    \    ${length} =    Evaluate    len(${links_c})+len(${links_c2})
+    \    Should Be Equal As Integers    ${length}    4
+    \    unconfig_spi    ${suite_company_id}    ${sites_id_list[${i}]}
+    \    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8535
+    \    ...    0
+    \    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8583
+    \    ...    0
+    \    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${False}
+    \    ...    ${c}    ${port_range}
+    [Teardown]    run keywords    Unregister_anycast    ${anycast}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_multi_anycast_change_check_flow
+    [Tags]    SDWANDEV-3320    remove
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${anycast}=    create list    8535    8583
+    ${port_range}=    evaluate    range(597,601)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_2anycast_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_anycast_prefer_pop    8535    8550
+    put_anycast_prefer_pop    8583    8566
+    Tunnel_check    ${CR8550_ANY8535_CR8566_ANY8583_CPE17026_CPE17043_Tasks_and_Tunnels}
+    ${a}=    create list    8535
+    create_code_agent_pattern    ${a}    1    1    3    19    anycast
+    config_spiRule    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}    17026
+    ...    ${port_range}
+    ${bond}=    get_e2e_dest_site_bond    17026    8535
+    Check_flow_output_bond_num    ${bond[0]}    17026    ${saasRule}[agent]    ${port_range}
+    ${a}=    create list    8583
+    create_code_agent_pattern    ${a}    1    1    3    19    anycast
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8583    2
+    ${bond}=    get_e2e_dest_site_bond    17026    8583
+    Wait Until Keyword Succeeds    5s    1s    Check_flow_output_bond_num    ${bond[0]}    17026    ${saasRule}[agent]
+    ...    ${port_range}
+    [Teardown]    run keywords    Unregister_anycast    ${anycast}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_saas_change_prefer
+    [Tags]    SDWANDEV-3255
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${saas_proxy}=    create list    8584
+    ${port_range}=    evaluate    range(497,501)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_1saas_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_proxy_prefer_pop    8584    8550
+    Tunnel_check    ${CR8550_CR8566_SAAS8584_CPE17026_CPE17043_Tasks_and_Tunnels}
+    Service_Flows_check    ${CR8550_SAAS8584_POP_TO_Service_Flows}
+    create_code_agent_pattern    ${saas_proxy}    1    1    3    19
+    config_saasRule    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM_with_DstCac_DstEac    17026    8584    4
+    ...    1    2
+    put_proxy_prefer_pop    8584    8566
+    Tunnel_check    ${CR8550_CR8566_SAAS8584_CPE17026_CPE17043_Change_Prefer_Tunnels}
+    Service_Flows_check    ${CR8550_CR8566_SAAS8584_POP_TO_Service_Flows}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM_with_DstCac_DstEac    17026    8584    4
+    ...    11    2
+    unconfig_spi    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8584    0
+    [Teardown]    run keywords    Unregister_saasProxy    ${saas_proxy}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_multi_saas_check_flow
+    [Tags]    SDWANDEV-3256
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${saas_proxy}=    create list    8584    8600
+    ${port_range}=    evaluate    range(497,501)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_2saas_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_proxy_prefer_pop    8584    8550
+    put_proxy_prefer_pop    8600    8566
+    Tunnel_check    ${CR8550_SAAS8584_CR8566_SAAS8600_CPE17026_CPE17043_Tasks_and_Tunnels}
+    Service_Flows_check    ${CR8550_SAAS8584_CR8566_SAAS8600_POP_TO_Service_Flows}
+    create_code_agent_pattern    ${saas_proxy}    1    1    3    19
+    : FOR    ${c}    IN    @{cpes}
+    \    ${i}=    get index from list    ${cpes}    ${c}
+    \    config_saasRule    ${suite_company_id}    ${sites_id_list[${i}]}
+    \    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}
+    \    ...    ${c}    ${port_range}
+    \    ${links_c} =    get_e2e_links_from_controller    ${c}    8584
+    \    ${links_c2} =    get_e2e_links_from_controller    ${c}    8600
+    \    ${length} =    Evaluate    len(${links_c})+len(${links_c2})
+    \    Should Be Equal As Integers    ${length}    4
+    \    unconfig_spi    ${suite_company_id}    ${sites_id_list[${i}]}
+    \    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8584
+    \    ...    0
+    \    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8600
+    \    ...    0
+    \    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${False}
+    \    ...    ${c}    ${port_range}
+    [Teardown]    run keywords    Unregister_saasProxy    ${saas_proxy}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_multi_saas_with_company_POP_check_flow
+    [Tags]    SDWANDEV-3257
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${saas_proxy}=    create list    8584    8600
+    ${port_range}=    evaluate    range(497,501)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_2saas_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_proxy_prefer_pop    8584    8550
+    put_proxy_prefer_pop    8600    8566
+    Tunnel_check    ${CR8550_SAAS8584_CR8566_SAAS8600_CPE17026_CPE17043_Tasks_and_Tunnels}
+    ${a}=    create list    8584
+    create_code_agent_pattern    ${a}    1    1    3    19
+    config_saasRule    ${suite_company_id}    ${sites_id_list[0]}
+    Wait Until Keyword Succeeds    5s    1s    Check_CPE_NAT_Flow_Table0    ${saasRule}[agent]    ${True}    17026
+    ...    ${port_range}
+    ${bond}=    get_e2e_dest_site_bond    17026    8584
+    Check_flow_output_bond_num    ${bond[0]}    17026    ${saasRule}[agent]    ${port_range}
+    ${a}=    create list    8600
+    create_code_agent_pattern_company    ${suite_company_id}    ${a}    1    1    3    19
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8600    2
+    ${bond}=    get_e2e_dest_site_bond    17026    8600
+    Wait Until Keyword Succeeds    5s    1s    Check_flow_output_bond_num    ${bond[0]}    17026    ${saasRule}[agent]
+    ...    ${port_range}
+    delete_all_agent_pattern_company    ${suite_company_id}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8584    2
+    ${bond}=    get_e2e_dest_site_bond    17026    8584
+    Wait Until Keyword Succeeds    5s    1s    Check_flow_output_bond_num    ${bond[0]}    17026    ${saasRule}[agent]
+    ...    ${port_range}
+    [Teardown]    run keywords    Unregister_saasProxy    ${saas_proxy}
+    ...    AND    Case_tear_down
+    ...    AND    delete_company1_relation
+
+CPE_model3_dedicate_saas_check_flow
+    [Tags]    SDWANDEV-4650
+    ${switchs}=    create list    8550    8566    17026    17043
+    ${cpes}=    create list    17026    17043
+    ${saas_proxy}=    create list    8584    8600
+    ${port_range}=    evaluate    range(700,701)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_2saas_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    4    11
+    put_proxy_prefer_pop    8584    8550
+    put_proxy_prefer_pop    8600    8566
+    Tunnel_check    ${CR8550_SAAS8584_CR8566_SAAS8600_CPE17026_CPE17043_Tasks_and_Tunnels}
+    config_saasRule    ${suite_company_id}    ${sites_id_list[0]}    ${saas_proxy}
+    config_saasRule    ${suite_company_id}    ${sites_id_list[1]}    ${saas_proxy}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8584    2
+    ${bond}=    get_e2e_dest_site_bond    17026    8584
+    ${8584_index}=    Wait Until Keyword Succeeds    5s    1s    Check_spi_flow_output_bond_num    ${bond[0]}    17026
+    ...    ${suite_saas_tag_id}    ${port_range}
+    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    8600    2
+    ${bond}=    get_e2e_dest_site_bond    17026    8600
+    Wait Until Keyword Succeeds    5s    1s    Check_spi_flow_output_bond_num    ${bond[0]}    17026    ${suite_saas_tag_id}
+    ...    ${port_range}
+    ${bond}=    get_e2e_dest_site_bond    17043    8584
+    ${8584_index2}=    Wait Until Keyword Succeeds    5s    1s    Check_spi_flow_output_bond_num    ${bond[0]}    17043
+    ...    ${suite_saas_tag_id}    ${port_range}
+    should be true    ${8584_index2}!=${8584_index}
+    [Teardown]    run keywords    Unregister_saasProxy    ${saas_proxy}
+    ...    AND    delete_company1_relation
+    ...    AND    Case_tear_down
+
+CPE_model3_dedicate_10_saas_check_flow
+    [Tags]    SDWANDEV-4658
+    ${switchs}=    create list    8550    8566    17026
+    ${cpes}=    create list    17026
+    ${saas_proxy}=    create list    8584    8600    8616    8632    8648
+    ...    8664    8680    8696    8712    8728
+    ${port_range}=    evaluate    range(700,701)
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_1cpe_10saas_topo.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    4    11
+    :FOR    ${saas}    IN    @{saas_proxy}
+    \    ${i}    get index from list    ${saas_proxy}    ${saas}
+    \    run keyword if    ${i}<5    put_proxy_prefer_pop    ${saas}    8550
+    \    ...    ELSE    put_proxy_prefer_pop    ${saas}    8566
+    config_saasRule    ${suite_company_id}    ${sites_id_list[0]}    ${saas_proxy}
+    :FOR    ${saas}    IN    @{saas_proxy}
+    \    Wait Until Keyword Succeeds    5s    1s    Check_e2e_link_Total_NUM    17026    ${saas}
+    \    ...    2
+    \    ${bond}=    get_e2e_dest_site_bond    17026    ${saas}
+    \    Wait Until Keyword Succeeds    5s    1s    Check_spi_flow_output_bond_num    ${bond[0]}    17026
+    \    ...    ${suite_saas_tag_id}    ${port_range}
+    [Teardown]    run keywords    Unregister_saasProxy    ${saas_proxy}
+    ...    AND    delete_company1_relation
+    ...    AND    Case_tear_down
+
+*** Keywords ***
+Check_CPE_NAT_Flow_Table0
+    [Arguments]    ${code}    ${result}    ${chassis_id}    ${range}
+    ${ret}=    check_cpe_internet_table_2_flows    ${chassis_id}    ${code}    ${range}
+    should be equal    ${ret}    ${result}
+
+Unregister_saasProxy
+    [Arguments]    ${proxy_id_list}
+    : FOR    ${proxy_id}    IN    @{proxy_id_list}
+    \    delete_proxy    ${proxy_id}
+
+Unregister_anycast
+    [Arguments]    ${anycast_id_list}
+    : FOR    ${anycast_id}    IN    @{anycast_id_list}
+    \    delete_anycast    ${anycast_id}
+
+Put_Company_Spi_and_Saas_Rules_Template_and_Groups
+    [Arguments]    ${companyId}    ${siteId}
+    ${saasId_list}=    create list
+    ${spiId_list}=    create list
+    ${saasId}=    create_etc_saasRules    ${saasRule}[pattern]    ${saasRule}[ttl]    ${saasRule}[priority]    ${saasRule}[name]    ${saasRule}[agent]
+    ...    ${saasRule}[natType]
+    ${spiId}=    create_etc_spiRules    ${spiRule}[priority]    ${spiRule}[tag]    ${spiRule}[scrcidr]    ${spiRule}[dstcidr]    ${spiRule}[l4proto]
+    ...    ${spiRule}[srcport]    ${spiRule}[dstport]
+    append to list    ${saasId_list}    ${saasId}
+    append to list    ${spiId_list}    ${spiId}
+    ${saas_tempId_list}=    create list
+    ${spi_tempId_list}=    create list
+    ${saas_TempId}=    create_etc_template_saas    ${saasId_list}
+    ${spi_TempId}=    create_etc_template_spi    ${spiId_list}
+    append to list    ${saas_tempId_list}    ${saas_TempId}
+    append to list    ${spi_tempId_list}    ${spi_TempId}
+    create_company_site_saasGroups    ${companyId}    ${site_id}    ${saas_tempId_list}
+    create_company_site_spiGroups    ${companyId}    ${site_id}    ${spi_tempId_list}
+    [Return]    ${saasId}    ${spiId}    ${saas_TempId}    ${spi_TempId}
+
+Check_saas_spi_In_Controller
+    [Arguments]    ${companyId}    ${siteId}    ${saasId}    ${spiId}    ${saas_TempId}    ${spi_TempId}
+    ${result_list}=    create list
+    ${saasIdContentCrect}=    check_saasRule    ${saasId}    ${saasRule}[pattern]    ${saasRule}[ttl]    ${saasRule}[priority]    ${saasRule}[name]
+    ...    ${saasRule}[agent]    ${saasRule}[natType]
+    #${spiIdContentCrect}=    check_spiRule    ${saasId}    ${spiRule}[scrcidr]    ${spiRule}[dstcidr]    ${spiRule}[l4proto]
+    #...    ${spiRule}[srcport]    ${spiRule}[dstport]    ${spiRule}[dstdomain]    ${spiRule}[priority]    ${spiRule}[tag]
+    ${saasId_in_saas_temp}=    check_saasRule_in_saasTemp    ${saasId}    ${saas_TempId}
+    #${spiId_in_saas_temp}=    check_spiRule_in_saasTemp    ${saasId}    ${spi_TempId}
+    ${saas_tempId_in_site}=    check_saasTemp_in_site    ${companyId}    ${siteId}    ${saas_TempId}
+    #${spi_tempId_in_site}=    check_spiTemp_in_site    ${companyId}    ${siteId}    ${spi_TempId}
+    append to list    ${result_list}    ${saasIdContentCrect}    ${saasId_in_saas_temp}    ${saas_tempId_in_site}
+    #append to list    ${result_list}    ${fwIdContentCrect}    ${saasIdContentCrect}    ${spiIdContentCrect}    ${fwId_in_fw_temp}
+    #...    ${saasId_in_saas_temp}    ${spiId_in_saas_temp}    ${fw_tempId_in_site}    ${saas_tempId_in_site}    ${spi_tempId_in_site}
+    ${result}    evaluate    all(${result_list})
+    should be true    ${result}
+
+config_saasRule
+    [Arguments]    ${companyId}    ${siteId}    ${appointment}=${None}
+    ${tag_name}=    set variable    saas_tag
+    ${tag_id}=    add company spi tag    ${companyId}    ${tag_name}
+    Set global Variable    ${suite_saas_tag_id}    ${tag_id}
+    append_company_spi_tag_rules    ${companyId}    ${saasRule}[pattern]    ${tag_name}
+    ${agentcodes}=    create list    ${saasRule}[agent]
+    ${indexs}=    create list    0
+    ${ttls}=    create list    ${saasRule}[ttl]
+    config_saas_params_to_site_spi_dispatchs    ${companyId}    ${siteId}    ${tag_id}    ${saasRule}[priority]    ${agentcodes}    ${indexs}
+    ...    ${ttls}    reliable    appointment=${appointment}
+
+config_spiRule
+    [Arguments]    ${companyId}    ${siteId}
+    ${tag_name}=    set variable    spi_tag
+    ${tag_id}=    add company spi tag    ${companyId}    ${tag_name}
+    Set global Variable    ${suite_saas_tag_id}    ${tag_id}
+    append_company_spi_tag_rules    ${companyId}    ${saasRule}[pattern]    ${tag_name}
+    ${action}=    create Dictionary    name=natOpen
+    ${actions}=    create list    ${action}
+    add_site_spi_dispatch    ${companyId}    ${siteId}    ${tag_id}    ${saasRule}[priority]    ${actions}
+
+Check_e2e_link_Total_NUM_with_DstCac_DstEac
+    [Arguments]    ${localId}    ${remoteId}    ${dcac}    ${deac}    ${linkNum}
+    ${links_c} =    get_e2e_links_from_controller    ${localId}    ${remoteId}
+    ${links}    evaluate    filter(lambda x:x['dstCac']==${dcac} and x['dstEac']==${deac},${links_c})
+    ${length} =    Evaluate    len(${links})
+    Should Be Equal As Integers    ${length}    ${linkNum}
+
+Check_flow_output_bond_num
+    [Arguments]    ${bond}    ${ne_id}    ${code}    ${range}
+    ${flow}=    get_cpe_internet_table_2_flows_bond_id    ${ne_id}    ${code}    ${range}
+    ${ret}=    evaluate    int(${bond['portNumber']}) in ${flow}
+    should be true    ${ret}
+
+Check_spi_flow_output_bond_num
+    [Arguments]    ${bond}    ${ne_id}    ${spi}    ${range}
+    ${flow}=    get_cpe_internet_table_2_spi_flows_bond_id    ${ne_id}    ${spi}    ${range}
+    ${ret}=    evaluate    int(${bond['portNumber']}) in ${flow}
+    should be true    ${ret}
+    ${index}=    evaluate    ${flow}.index(int(${bond['portNumber']}))
+    [Return]    ${index}
+
+unconfig_spi
+    [Arguments]    ${companyId}    ${siteId}
+    delete_all_site_spi_dispatches    ${companyId}    ${siteId}
+    delete_all_company_spi_tags    ${companyId}

@@ -1,0 +1,107 @@
+*** Settings ***
+Suite Setup
+Suite Teardown
+Resource          ../../resource/SshKeyword.txt
+
+*** Variables ***
+${domain_wait}    5s
+${flow_ttl}       5
+${analyze_tmp_log}    /tmp/analyze.log
+${ana_log}        /var/log/ana.log
+${analyze_series_cpe}    remote
+${del_req_num}   40
+${exec_time}      10
+
+*** Test Cases ***
+Series Private Http Analyze
+    [Tags]    SDWANDEV-4129    SDWANDEV-4301    SDWANDEV-4030
+    [Setup]    run keywords    Add Office Analyze SPI   ${analyze_series_cpe}   6
+    ...    AND    Set Analyze Time    ${analyze_series_cpe}    2
+    ...    AND    Init Tcl Http Server    local
+    ${iperf_port}=   set variable   5100
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_series_cpe}    ${analyze_tmp_log}
+    Try Http Client Test    ${analyze_series_cpe}   &{local_pc}[intranet_ip]    ${del_req_num}
+    ${stats}=    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_office_analyze_tag_id}    ${b_time}
+    ...    &{local_pc}[intranet_ip]    6    ${None}    1300    52    0.5   ${None}   ${True}
+    Check Analyze Log L4    ${stats}    ${True}    1370    FIN    ${0}    ${0}
+    Check Analyze Log Http Long   ${stats}   ${100}   ${del_req_num}     &{local_pc}[intranet_ip]
+    ${private_server_connect} =    Init_Iperfs_Server_In_PC_with_Port    local    ${iperf_port}
+    Iperf3_band_From_PC_With_Port    &{local_pc}[intranet_ip]    remote    ${iperf_port}
+    wait until keyword succeeds    6s    1s    check_iperf_band_result_in_pc    350    remote
+    Iperf3_loss_From_PC_With_Port    &{local_pc}[intranet_ip]    50M    remote    ${iperf_port}
+    wait until keyword succeeds    6s    1s    check_iperf_loss_result_in_pc    0    remote
+    [Teardown]    run keywords    delete_site_spi_dispatch     ${suite_company_id}  ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_office_analyze_tag_id}
+    ...   AND   Delete Company SPI Tag   ${suite_company_id}    ${suite_office_analyze_tag_id}
+    ...    AND    switch connection    ${sess_http_server}
+    ...    AND    close connection
+
+ESP Analyze
+    [Tags]  SDWANDEV-4128   long
+    [Setup]  run keywords   Add Office Analyze SPI   ${analyze_series_cpe}   50
+    ...    AND    Set Analyze Time    ${analyze_series_cpe}    2
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_series_cpe}    ${analyze_tmp_log}
+    ssh_pc    ${analyze_series_cpe}    sess_pc
+    write    ping &{local_pc}[inner_ip] -M do -s 64 -i 0.2 -c ${exec_time}
+    ${stats}=    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_office_analyze_tag_id}    ${b_time}
+    ...    &{local_switch}[ip]    50    ${exec_time}    144    144    2
+    ${b_time}=    get time    epoch
+    switch connection    sess_pc
+    write    ping &{local_pc}[inner_ip] -M do -s 512 -i 0.2 -c ${exec_time}
+    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_office_analyze_tag_id}    ${b_time}
+    ...    &{local_switch}[ip]    50    ${exec_time}    592    592    2
+    ${b_time}=    get time    epoch
+    switch connection    sess_pc
+    write    ping &{local_pc}[inner_ip] -M do -s 1024 -i 0.2 -c ${exec_time}
+    wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_office_analyze_tag_id}    ${b_time}
+    ...    &{local_switch}[ip]    50    ${exec_time}    1104    1104    2
+    close connection
+    [Teardown]    run keywords    delete_site_spi_dispatch     ${suite_company_id}  ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_office_analyze_tag_id}
+    ...   AND   Delete Company SPI Tag   ${suite_company_id}    ${suite_office_analyze_tag_id}
+
+Series IPSEC over UDP Analyze
+    [Tags]    SDWANDEV-4001   SDWANDEV-4520
+    [Setup]  run keywords   Add Office Analyze SPI   ${analyze_series_cpe}   50,17
+    ...    AND    Init_Iperfs_Server_In_PC_with_Port    local    5201
+    ssh_pc  ${analyze_series_cpe}   sess_pc
+    write   ping &{local_pc}[inner_ip]
+    ${b_time}=    get time    epoch
+    Redirect Analyze Log    ${analyze_series_cpe}    ${analyze_tmp_log}
+    ssh_cpe   ${analyze_series_cpe}   sess_cpe
+    Write CPE CMD    ${analyze_series_cpe}    systemctl stop aiwan-cpe    /etc/init.d/aiwan-cpe stop
+    sleep   10s
+    Write CPE CMD    ${analyze_series_cpe}    systemctl start aiwan-cpe    /etc/init.d/aiwan-cpe start
+    Set Analyze Time    ${analyze_series_cpe}    2
+    ${status}  ${ipsec_log}=    run keyword and ignore error   wait until keyword succeeds    10s    1    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_office_analyze_tag_id}
+    ...    ${b_time}    &{local_pc}[cpe_ip]    17    ${None}    1300    52    ${0}   ${None}   ${False}   L7_ipsec
+    ${ipsec_log}=   run keyword if     '${status}' == 'FAIL'    Get IPSEC From Anacli Report    ${b_time}
+    Check Analyze Log IPSEC   ${ipsec_log}
+    [Teardown]    run keywords    delete_site_spi_dispatch     ${suite_company_id}  ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_office_analyze_tag_id}
+    ...   AND   Delete Company SPI Tag   ${suite_company_id}    ${suite_office_analyze_tag_id}
+    ...    AND    close all connections
+
+*** Keywords ***
+Init Tcl Http Server
+    [Arguments]   ${cpe}   ${port}=9700
+    ssh_pc   ${cpe}   tcl_http_server
+    set suite variable   ${sess_http_server}   tcl_http_server
+    write sudo cmd  killall /usr/bin/tclsh
+    write   ./httpServer.tcl ${port}
+
+Get IPSEC From Anacli Report
+    [Arguments]  ${b_time}
+    ${num}=     Get Anacli Report   ${analyze_series_cpe}
+    ${log}=    run keyword if  ${num} != ${0}    Check Analyze Log L3    ${analyze_series_cpe}    ${suite_office_analyze_tag_id}
+    ...    ${b_time}    &{local_pc}[cpe_ip]    17    ${None}    1300    52    ${0}   ${None}   ${False}   L7_ipsec    tmp_log='/var/log/ana_cli.log'
+    [Return]  ${log}
+
+Add Office Analyze SPI
+   [Arguments]   ${cpe}   ${protocol}
+    ${tag_name}=    set variable  office_analyze
+    ${tag_id}=    add company spi tag    ${suite_company_id}    ${tag_name}
+    Set global Variable    ${suite_office_analyze_tag_id}    ${tag_id}
+    update_company_spi_tag_rule    ${suite_company_id}    ${suite_office_analyze_tag_id}    ${0}   l4proto     ${protocol}
+    add_site_spi_dispatch    ${suite_company_id}    ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_office_analyze_tag_id}    900
+    append_analyze_action_to_site_spi_dispatchs    ${suite_company_id}    ${suite_&{${analyze_series_cpe}_pc}[site_name]_site_id}    ${suite_office_analyze_tag_id}    900
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    Check_Office_Analyze_SPI_From_Cpe    ${cpe}    0   ${suite_office_analyze_tag_id}   l4proto   ${protocol}     1

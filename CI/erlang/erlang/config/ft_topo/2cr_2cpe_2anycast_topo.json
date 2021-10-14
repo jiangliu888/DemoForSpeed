@@ -1,0 +1,31 @@
+[
+    {
+        "name":"ANYCAST_8535-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {   "name":"ANYCAST_8583-4-11",         
+        "port_num":2,         
+        "use_group":false     
+    },
+    {
+        "name":"CR_8550-4-1",
+        "port_num":2,
+        "use_group":false
+    },
+    {
+         "name":"ER_8566-4-11",
+        "port_num":2,
+        "use_group":false
+    },
+    { 
+        "name":"CPE_17026-4-21",
+        "port_num":2,
+        "use_group":false
+    },
+    {
+        "name":"CPE_17043-4-22",
+        "port_num":3,
+        "use_group":false
+    }
+]

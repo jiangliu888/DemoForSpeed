@@ -1,0 +1,136 @@
+*** Settings ***
+Suite Setup       multi_node_saas_setup
+Suite Teardown    multi_node_saas_teardown
+Library           ../libs/uranus/UranusKeyword.py
+Resource          resource/SshKeyword.txt
+Resource          resource/UranusKeyword.txt
+Library           ../libs/manager/ManagerKeyword.py
+Library           ../libs/prism/PrismKeyword.py
+Resource          resource/ManagerKeyword.txt
+Resource          resource/PingKeyword.txt
+Library           ../libs/configCenter/ConsulKeyword.py
+Resource          resource/SaltKeyword.txt
+
+*** Test Cases ***
+Multi saas choice best path
+    [Tags]    SDWANDEV-3726
+    ${check_cpes}=    create list    local    chongqing    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    \    ${code_map}=    get_cpe_codemap    ${CM_local_code},    ${cpe}
+    \    should contain    ${code_map}    ${${cpe}_service1_bond},
+
+Saas_Down_Auto_Change_Output
+    [Tags]    SDWANDEV-3729
+    ssh_pop    remote    sess_remote_pop
+    write sudo cmd    systemctl stop aiwan-saas.service    &{remote_pop}[passwd]
+    sleep    3
+    ${check_cpes}=    create list    local    chongqing    guangzhou    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Wait Until Keyword Succeeds    3x    200ms    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    \    ${code_map}=    get_cpe_codemap    ${CM_local_code},    ${cpe}
+    \    should contain    ${code_map}    ${${cpe}_service2_bond},
+    [Teardown]    start_service2_saas_teardown
+
+Code Multi saas change choice best path
+    [Tags]    SDWANDEV-3727
+    change_node_saas_1
+    ${check_cpes}=    create list    local    chongqing
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    \    ${code_map}=    get_cpe_codemap    ${CM_local_code},    ${cpe}
+    \    should contain    ${code_map}    ${${cpe}_service2_bond},
+    [Teardown]    change_node_saas_2
+
+change_saas_prefer_pop
+    [Tags]    SDWANDEV-3728
+    [Setup]    run keywords    change_node_saas_1
+    ...    AND    Open_Cpe_Debug_Mode    remote
+    put_proxy_prefer_pop    &{Saas_Service2}[ne_id]    &{remote_pop}[ne_id]
+    ${check_cpes}=    create list    local    chongqing
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    [Teardown]    run keywords    put_proxy_prefer_pop    &{Saas_Service2}[ne_id]    &{local_pop}[ne_id]
+    ...    AND    change_node_saas_2
+    ...    AND    Close_Cpe_Debug_Mode    remote
+
+*** Keywords ***
+multi_node_saas_setup
+    operate_delay_on_service2    add
+    ${pop_list}=    create list    &{Saas_Service1}[ne_id]    &{Saas_Service2}[ne_id]
+    modify_code_agent_pattern    ${pop_list}    1    1    0    0    saas
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Wait Until Keyword Succeeds    10s    1s    check_saas_mulit_port_flow    ${cpe}    ${2}
+    \    Check CPE Saas Bond And Links    ${cpe}    Service1
+    \    Check CPE Saas Bond And Links    ${cpe}    Service2
+    \    ssh cpe    ${cpe}
+    \    Delete_CPE_codeMap    ${cpe}
+    \    close connection
+    get_saas_bond_id
+
+check_saas_mulit_port_flow
+    [Arguments]    ${cpe}    ${expect}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    ${bonds}=    get_cpe_internet_table_2_flows_bond_id    ${ne_id}    ${local_code}
+    Comment    ${outs}=    evaluate    filter(lambda x:x['extension']['type']=='AIWAN_ACTION_EX_OUTPUT', ${bonds[0]["treatment"]["instructions"]})
+    length should be    ${bonds}    ${expect}
+
+check_saas_dedicate_port_flow
+    [Arguments]    ${cpe}    ${expect}
+    ${ne_id}=    get_cpe_chassis_id    ${cpe}
+    ${bonds}=    get_cpe_internet_table_2_spi_flows_bond_id    ${ne_id}    ${suite_saas_tag_id}
+    length should be    ${bonds}    ${expect}
+    should be true    ${bonds}==${expect}
+
+multi_node_saas_teardown
+    operate_delay_on_service2    delete
+    ${pop_list}=    create list    &{Saas_Service1}[ne_id]
+    modify_code_agent_pattern    ${pop_list}    1    1    0    0    saas
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Wait Until Keyword Succeeds    10s    1s    check_saas_mulit_port_flow    ${cpe}    ${1}
+
+operate_delay_on_service2
+    [Arguments]    ${action}
+    ssh services    Saas_Service2
+    write sudo cmd    tc qdisc ${action} dev ens160 root netem delay 30ms    &{Saas_Service2}[passwd]
+    close connection
+
+start_service2_saas_teardown
+    switch connection    sess_remote_pop
+    write sudo cmd    systemctl start aiwan-saas.service    &{remote_pop}[passwd]
+    close connection
+    sleep    3
+    ${check_cpes}=    create list    local    chongqing    guangzhou    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    \    ${code_map}=    get_cpe_codemap    ${CM_local_code},    ${cpe}
+    \    should contain    ${code_map}    ${${cpe}_service2_bond},
+    \    Delete_CPE_codeMap    ${cpe}
+
+change_node_saas_1
+    ${pop_list}=    create list    &{Saas_Service2}[ne_id]
+    modify_code_agent_pattern    ${pop_list}    1    1    0    0    saas
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Wait Until Keyword Succeeds    10s    1s    check_saas_mulit_port_flow    ${cpe}    ${1}
+    get_saas_bond_id
+
+change_node_saas_2
+    ${pop_list}=    create list    &{Saas_Service1}[ne_id]    &{Saas_Service2}[ne_id]
+    modify_code_agent_pattern    ${pop_list}    1    1    0    0    saas
+    : FOR    ${cpe}    IN    @{saas_cpe_list}
+    \    Wait Until Keyword Succeeds    10s    1s    check_saas_mulit_port_flow    ${cpe}    ${2}
+    get_saas_bond_id
+    sleep    3
+    ${check_cpes}=    create list    local    chongqing
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    Ensure_Saas_OK    ${cpe}    &{dns_server}[ip]
+    \    ${code_map}=    get_cpe_codemap    ${CM_local_code},    ${cpe}
+    \    should contain    ${code_map}    ${${cpe}_service2_bond},
+
+get_saas_bond_id
+    ${check_cpes}=    create list    local    chongqing    guangzhou    changsha
+    : FOR    ${cpe}    IN    @{check_cpes}
+    \    ${service1_bond}=    get_e2e_dest_site_bond_portNumber    &{${cpe}_cpe}[chassis_id]    &{Saas_Service1}[ne_id]
+    \    ${service2_bond}=    get_e2e_dest_site_bond_portNumber    &{${cpe}_cpe}[chassis_id]    &{Saas_Service2}[ne_id]
+    \    set suite variable    ${${cpe}_service1_bond}    ${service1_bond}
+    \    set suite variable    ${${cpe}_service2_bond}    ${service2_bond}

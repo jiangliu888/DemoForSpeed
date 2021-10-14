@@ -1,0 +1,60 @@
+*** Settings ***
+Suite Setup       setup
+Suite Teardown    teardown
+Library           ../../libs/portal/RequestApi.py
+Library           ../../libs/common/SetPortal.py
+Library           Dialogs
+
+*** Variables ***
+
+*** Keywords ***
+setup
+    set portal    ${portal}[url]
+    #创建普通公司
+    create company    测试公司5
+    #创建渠道公司
+    create company    测试公司6    渠道1
+    create company    测试公司7    渠道1
+    create company    测试公司8    渠道2
+    #创建账户
+    create account    test5_1@qq.com    test55!    测试公司5    #普通公司账户，激活
+    create account    test6_1@qq.com    test66!    channel=渠道1    #渠道1账户，激活
+    create account    test6_2@qq.com    test66!    测试公司6    #公司(属渠道1)账户，激活
+    create account    test6_3@qq.com    test66!    active=false    channel=渠道1    #渠道1账户，冻结
+    create account    test8_1@qq.com    test88!    channel=渠道2    #渠道2账户，激活
+    create account    ${test_data}[account5_1]    ${test_data}[psd5_1]    ${test_data}[company_3]
+    create account    ${test_data}[account6_1]    ${test_data}[psd6_1]    channel=${test_data}[channel_3]
+    create account    ${test_data}[account6_2]    ${test_data}[psd6_2]    ${test_data}[company_4]
+    create account    ${test_data}[account8_1]    ${test_data}[psd8_1]    channel=${test_data}[channel_4]
+    #创建站点
+    ${测试公司5_id}    get company id    测试公司5
+    ${测试公司6_id}    get company id    测试公司6
+    ${测试公司7_id}    get company id    测试公司7
+    ${测试公司8_id}    get company id    测试公司8
+    create site    testsite5    ${测试公司5_id}    2001
+    create site    testsite6    ${测试公司6_id}    2002
+    create site    testsite7    ${测试公司7_id}    2003
+    create site    testsite8    ${测试公司8_id}    2088
+    set global variable    ${测试公司5_id}
+    set global variable    ${测试公司6_id}
+    set global variable    ${测试公司7_id}
+    set global variable    ${测试公司8_id}
+
+teardown
+    delete site    测试公司5
+    delete site    测试公司6
+    delete site    测试公司7
+    delete site    测试公司8
+    delete account    test5_1@qq.com
+    delete account    test6_1@qq.com
+    delete account    test6_2@qq.com
+    delete account    test6_3@qq.com
+    delete account    test8_1@qq.com
+    delete account    ${test_data}[account5_1]
+    delete account    ${test_data}[account6_1]
+    delete account    ${test_data}[account6_2]
+    delete account    ${test_data}[account8_1]
+    delete company    测试公司5
+    delete company    测试公司6
+    delete company    测试公司7
+    delete company    测试公司8

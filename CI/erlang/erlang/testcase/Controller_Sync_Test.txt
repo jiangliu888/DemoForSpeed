@@ -1,0 +1,122 @@
+*** Settings ***
+Suite Setup       Setup
+Suite Teardown    close all connections
+Resource          resource/UranusKeyword.txt
+Resource          resource/SshKeyword.txt
+Library           ../libs/uranus/UranusKeyword.py
+Library           ../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${c_name}         &{local_pc}[site_name]-&{remote_pc}[site_name]
+
+*** Test Cases ***
+Sync_After_Unions_Removed
+    [Tags]    SDWANDEV-1204
+    [Setup]
+    # get the netconf (bond/link) & open flow from cpe before union removed
+    ${remote_ip}=    get_ip_from_cnf_by_id_port    &{remote_cpe}[chassis_id]    &{remote_cpe}[internet_if]
+    Check_CPE_2CPE_Office_flows    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    ${remote_ip}
+    Check End2End Bond    local    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    Check End2End Links    local    &{remote_cpe}[chassis_id]    2
+    # add iptables on controller to drop the netconf & of messages
+    Block_Controller_Netconf    &{local_pc}[cpe_ip]    block
+    Block_Controller_openflow    &{local_pc}[cpe_ip]    block    6653
+    # remove the union
+    delete_company_unions    ${suite_company_id}    ${suite_${c_name}_union_id}
+    # wait for the remove action
+    Wait Until Keyword Succeeds    2s    500ms    Check Controller End2End Bond Deleted    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    ${bonds_c}=    get_cpe_end2end_bond    &{local_cpe}[ip]    &{remote_cpe}[chassis_id]    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    length should be    ${bonds_c}    ${1}
+    ${links}=    get_cpe_end2end_links    &{local_cpe}[ip]    &{remote_cpe}[chassis_id]    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    length should be    ${links}    ${2}
+    # remove the iptables to restore the netconf & of
+    Block_Controller_Netconf    &{local_pc}[cpe_ip]    unblock
+    Block_Controller_openflow    &{local_pc}[cpe_ip]    unblock    6653
+    # check the cpe netconf and open flow after union removed
+    Wait Until Keyword Succeeds    60s    500ms    Check CPE End2End Bond Deleted    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    60s    500ms    Check End2End Links    local    &{remote_cpe}[chassis_id]    0
+    ${status}=    run keyword and return status    Check_CPE_2CPE_Office_flows    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    ${remote_ip}
+    should be equal    ${status}    ${False}
+    [Teardown]    run keywords    create_company_union_set_suite_id    ${suite_company_id}    ${c_name}    ${False}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    ${suite_&{remote_pc}[site_name]_site_id}
+    ...    AND    Block_Controller_Netconf    &{local_pc}[cpe_ip]    unblock
+    ...    AND    Block_Controller_openflow    &{local_pc}[cpe_ip]    unblock    6653
+
+Sync_After_Unions_Created
+    [Tags]    SDWANDEV-1206
+    [Setup]    delete_company_unions    ${suite_company_id}    ${suite_${c_name}_union_id}
+    # get the netconf (bond/link) & open flow from cpe before union removed
+    ${remote_ip}=    get_ip_from_cnf_by_id_port    &{remote_cpe}[chassis_id]    &{remote_cpe}[internet_if]
+    wait until keyword succeeds  2s    200ms  Check_CPE_2CPE_Office_flows_Removed    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    ${remote_ip}
+    wait until keyword succeeds  5    200ms   Check End2End Bond Deleted    local    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    Check End2End Links    local    &{remote_cpe}[chassis_id]    0
+    # add iptables on controller to drop the netconf & of messages
+    Block_Controller_Netconf    &{local_pop}[ip]    block
+    Block_Controller_openflow    &{local_pop}[ip]    block    6633
+    [Teardown]    union_create_teardown    ${remote_ip}
+
+*** Keywords ***
+Check Controller End2End Bond Deleted
+    [Arguments]    ${ne_id}    ${remote_id}
+    ${bonds}=    get_e2e_dest_site_bond    ${ne_id}    ${remote_id}
+    length should be    ${bonds}    ${0}
+
+Check Controller End2End Bond
+    [Arguments]    ${ne_id}    ${remote_id}
+    ${bonds}=    get_e2e_dest_site_bond    ${ne_id}    ${remote_id}
+    length should be    ${bonds}    ${1}
+
+Check CPE End2End Bond Deleted
+    [Arguments]    ${node}    ${remote_id}
+    ${bonds_c}=    Run Keyword If    '${node}' == 'local'    get_cpe_end2end_bond    &{local_cpe}[ip]    ${remote_id}    &{local_cpe}[ssh_port]
+    ...    &{local_cpe}[user]    &{local_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'remote'    get_cpe_end2end_bond    &{remote_cpe}[ip]    ${remote_id}    &{remote_cpe}[ssh_port]
+    ...    &{remote_cpe}[user]    &{remote_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'nanjing'    get_cpe_end2end_bond    &{nanjing_cpe}[ip]    ${remote_id}    &{nanjing_cpe}[ssh_port]
+    ...    &{nanjing_cpe}[user]    &{nanjing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'guangzhou'    get_cpe_end2end_bond    &{guangzhou_cpe}[ip]    ${remote_id}    &{guangzhou_cpe}[ssh_port]
+    ...    &{guangzhou_cpe}[user]    &{guangzhou_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'chongqing'    get_cpe_end2end_bond    &{chongqing_cpe}[ip]    ${remote_id}    &{chongqing_cpe}[ssh_port]
+    ...    &{chongqing_cpe}[user]    &{chongqing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'wuhan'    get_cpe_end2end_bond    &{wuhan_cpe}[ip]    ${remote_id}    &{wuhan_cpe}[ssh_port]
+    ...    &{wuhan_cpe}[user]    &{wuhan_cpe}[passwd]
+    should be equal    ${bonds_c}    ${None}
+
+Check CPE End2End Bond
+    [Arguments]    ${node}    ${remote_id}
+    ${bonds_c}=    Run Keyword If    '${node}' == 'local'    get_cpe_end2end_bond    &{local_cpe}[ip]    ${remote_id}    &{local_cpe}[ssh_port]
+    ...    &{local_cpe}[user]    &{local_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'remote'    get_cpe_end2end_bond    &{remote_cpe}[ip]    ${remote_id}    &{remote_cpe}[ssh_port]
+    ...    &{remote_cpe}[user]    &{remote_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'nanjing'    get_cpe_end2end_bond    &{nanjing_cpe}[ip]    ${remote_id}    &{nanjing_cpe}[ssh_port]
+    ...    &{nanjing_cpe}[user]    &{nanjing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'guangzhou'    get_cpe_end2end_bond    &{guangzhou_cpe}[ip]    ${remote_id}    &{guangzhou_cpe}[ssh_port]
+    ...    &{guangzhou_cpe}[user]    &{guangzhou_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'chongqing'    get_cpe_end2end_bond    &{chongqing_cpe}[ip]    ${remote_id}    &{chongqing_cpe}[ssh_port]
+    ...    &{chongqing_cpe}[user]    &{chongqing_cpe}[passwd]
+    ...    ELSE IF    '${node}' == 'wuhan'    get_cpe_end2end_bond    &{wuhan_cpe}[ip]    ${remote_id}    &{wuhan_cpe}[ssh_port]
+    ...    &{wuhan_cpe}[user]    &{wuhan_cpe}[passwd]
+    should be equal    ${bonds_c}    ${None}
+
+union_create_teardown
+    [Arguments]    ${remote_ip}
+    # add the union
+    create_company_union_set_suite_id    ${suite_company_id}    ${c_name}    ${False}    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    # wait for the remove action
+    Wait Until Keyword Succeeds    2s    500ms    Check Controller End2End Bond    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    # remove the iptables to restore the netconf & of
+    Block_Controller_Netconf    &{local_pop}[ip]    unblock
+    Block_Controller_openflow    &{local_pop}[ip]    unblock    6633
+    # check the cpe netconf and open flow after union removed
+    Wait Until Keyword Succeeds    60s    500ms    Check CPE End2End Bond    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]
+    Wait Until Keyword Succeeds    60s    500ms    Check End2End Links    local    &{remote_cpe}[chassis_id]    2
+    Check_CPE_2CPE_Office_flows    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    ${remote_ip}
+
+Setup
+    ssh_cpe    local    sess_local_cpe
+    set suite variable    ${sess_local_cpe}    sess_local_cpe
+
+Check_CPE_2CPE_Office_flows_Removed
+    [Arguments]    ${s_ne_id}    ${d_ne_id}    ${d_ip}
+    ${status}=    run keyword and return status    Check_CPE_2CPE_Office_flows     ${s_ne_id}    ${d_ne_id}    ${d_ip}
+    should be equal    ${status}    ${False}

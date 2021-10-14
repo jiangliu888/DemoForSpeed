@@ -1,0 +1,192 @@
+*** Settings ***
+Documentation     GET /api/v1/channel/alerts?
+...               companyId=&status=&skip=&limit=&neId=,&deviceId=,&name=,&startTime=&endTime=
+...
+...               必参：companyId
+...
+...               startTime，endTime参数当前版本不支持
+Suite Setup       suite setup
+Suite Teardown    suite teardown
+Library           ../../libs/portal/RequestApi.py
+Library           Collections
+Library           SSHLibrary
+Resource          ../../testcase/resource/SshKeyword.txt
+Library           ../../libs/portal/JsonValidate.py
+Library           Dialogs
+
+*** Variables ***
+
+*** Test Cases ***
+1. authority limitation
+    [Tags]    SDWANDEV-4538
+    SSH login    ${ssh_ip}    ${ssh_port}    ${ssh_user}    ${ssh_psd}
+    create alert    测试公司5    3000    111    NodeOffline    firing
+    create alert    测试公司7    5000    333    ManagerError    firing
+    create alert    测试公司8    6000    444    NodeCpuHigh    resolved
+    ${code}    ${res}    get alert info    test5_1@qq.com    test55!    companyId=${测试公司5_id}    #公司账户查询自己公司告警
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${res}    get alert info    test5_1@qq.com    test55!    companyId=${测试公司6_id}    #公司账户查询其他公司告警
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}    #渠道账户查询渠道公司6告警
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    should be equal as integers    ${res}[total]    35
+    should be equal    ${res}[alerts][0][labels][companyId]    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司7_id}    #渠道账户查询渠道公司7告警
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    should be equal as integers    ${res}[total]    1
+    should be equal    ${res}[alerts][0][labels][companyId]    ${测试公司7_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司5_id}    #渠道账户查询其他公司告警
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司8_id}    #渠道账户查询其他渠道公司告警
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    ${code}    ${res}    get alert info    test6_2@qq.com    test66!    companyId=${测试公司6_id}    #公司(属渠道)账户查询渠道公司告警
+    ...    #期待失败
+    should be equal as integers    ${code}    403
+    close connection
+    [Teardown]
+
+2. normal params
+    [Tags]    SDWANDEV-4539
+    [Setup]
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}    #正确的公司ID
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    20    companyId    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing    #status=firing
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    20    status    firing
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=resolved    #status=resolved
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    5    status    resolved
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500    #neId=500
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    15    neId    500
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600    #neId=500,600
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    20    neId    500,600
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=2001    #deviceId=2001
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    10    deviceId    2001
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=2001,2021    #deviceId=2001,2021
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    15    deviceId    2001,2021
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=2001,2021&name=CpeHardwareError    #name=CpeHardwareError
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    5    alertname    CpeHardwareError
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=2001,2021&name=CpeHardwareError,CpeConfigError    #name=CpeHardwareError,CpeConfigError
+    alert response check    ${res}    10    alertname    CpeHardwareError,CpeConfigError
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&limit=100&startTime=1619239320&endTime=1619239560    #endtime>starttime
+    alert response check    ${res}    5    status    resolved
+    [Teardown]
+
+3. abnormal params
+    [Tags]    SDWANDEV-4540
+    [Setup]
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    #不携带必参公司ID
+    should be equal as integers    ${code}    404
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=xxxxxxx    #错误公司ID
+    should be equal as integers    ${code}    403
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=xxx    #错误status值
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    0    companyId    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=xxx    #错误neId值
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    0    companyId    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=xxx    #错误deviceId值
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    0    companyId    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=2001,2021&name=xxx    #错误name值
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    0    companyId    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=&skip=&limit=&neId=&deviceId=&name=    #所有选参空值传入
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    20    companyId    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=2001,2021&yyy=xxx    #携带未知参数
+    should be equal as integers    ${code}    404    #期待400，目前返404，待修改
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&status=firing&neId=500,600&deviceId=2001,2021&name=CpeHardwareError,CpeConfigError&startTime=1619239320&endTime=1619239311    #endtime<starttime
+    should be equal as integers    ${code}    200
+    alert response check    ${res}    0    companyId    ${测试公司6_id}
+    ${code}    ${res}    get alert info    test6_1@qq.com    test66!    deviceId=${test_data}[deviceId_1]&interfaceType=WAN&startTime=1619239320&endTime=1619239320    #endtime=starttime
+    should be equal as integers    ${code}    404
+    Comment    alert response check    ${res}    0    companyId    ${测试公司6_id}
+    [Teardown]
+
+4. limit&skip verify
+    [Tags]    SDWANDEV-4541
+    #    skip&limit空值传入
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    companyId=${测试公司6_id}&skip=&limit=
+    should be equal as integers    ${code}    200
+    should be equal as integers    ${resp}[total]    35
+    alert response check    ${resp}    20    companyId    ${测试公司6_id}
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    limit=5&companyId=${测试公司6_id}    #中间值
+    should be equal as integers    ${code}    200
+    should be equal as integers    ${resp}[total]    35
+    alert response check    ${resp}    5    companyId    ${测试公司6_id}
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    limit=40&companyId=${测试公司6_id}    #上界值
+    should be equal as integers    ${code}    200
+    alert response check    ${resp}    35    companyId    ${测试公司6_id}
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    limit=0&companyId=${测试公司6_id}    #下界值
+    should be equal as integers    ${code}    200
+    alert response check    ${resp}    35    companyId    ${测试公司6_id}
+    #    skip参数测试
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    skip=5&companyId=${测试公司6_id}    #中间值
+    should be equal as integers    ${resp}[total]    35
+    should be equal as integers    ${code}    200
+    alert response check    ${resp}    20    companyId    ${测试公司6_id}
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    skip=0&companyId=${测试公司6_id}    #下界值
+    should be equal as integers    ${code}    200
+    alert response check    ${resp}    20    companyId    ${测试公司6_id}
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    skip=40&companyId=${测试公司6_id}    #上界值
+    should be equal as integers    ${code}    200
+    should be equal as integers    ${resp}[total]    35
+    alert response check    ${resp}    0    companyId    ${测试公司6_id}
+    #    skip+limit参数测试
+    ${code}    ${resp}    get alert info    test6_1@qq.com    test66!    skip=30&limit=10&companyId=${测试公司6_id}
+    should be equal as integers    ${code}    200
+    alert response check    ${resp}    5    companyId    ${测试公司6_id}
+
+*** Keywords ***
+suite setup
+    set suite variable    ${ssh_ip}    ${ssh_host}[ip]
+    set suite variable    ${ssh_port}    ${ssh_host}[port]
+    set suite variable    ${ssh_user}    ${ssh_host}[ssh_user]
+    set suite variable    ${ssh_psd}    ${ssh_host}[ssh_psd]
+    SSH login    ${ssh_ip}    ${ssh_port}    ${ssh_user}    ${ssh_psd}
+    create alert    测试公司6    2001    500    NodeOffline    firing    5
+    create alert    测试公司6    2001    500    CpeHardwareError    firing    5
+    create alert    测试公司6    2003    500    ControllerError    firing    5
+    create alert    测试公司6    2021    600    CpeConfigError    firing    5
+    create alert    测试公司6    2004    600    CpeHardwareError    resolved    5
+    create alert    测试公司6    2005    700    ControllerError    firing    10
+    ${stdout}    ${stderr}=    Execute Command    mongo mongo.js    return_stderr=True
+    Should Be Empty    ${stderr}
+    close connection
+
+suite teardown
+    SSH login    ${ssh_ip}    ${ssh_port}    ${ssh_user}    ${ssh_psd}
+    ${stdout}    ${stderr}=    Execute Command    sudo mongo prism --eval 'db.alert.remove({})'    return_stderr=True
+    log    ${stdout}
+    should not contain    ${stdout}    Error
+    close connection
+
+create alert
+    [Arguments]    ${company_id}    ${device_id}    ${ne_id}    ${name}    ${status}    ${num}=1
+    : FOR    ${i}    IN RANGE    ${num}
+    \    ${alarm_body}    create_alert_body    ${company_id}    ${device_id}    ${ne_id}    ${name}
+    \    ...    ${status}
+    \    log    ${alarm_body}
+    \    ${stdout}    ${stderr}=    Execute Command    sudo mongo prism --eval 'db.alert.insert(${alarm_body})'    return_stderr=True
+    \    should not contain    ${stdout}    Error
+    \    Should Be Empty    ${stderr}
+
+alert response check
+    [Arguments]    ${res}    ${total_alerts_num}    ${param_key}    ${param_value}
+    Comment    should be equal as integers    ${res}[total]    ${total_alerts_num}
+    length should be    ${res}[alerts]    ${total_alerts_num}
+    run keyword if    ${total_alerts_num}!= 0    alert_field_check    ${res}    ${param_key}    ${param_value}
+    check response format    ${res}    alert info

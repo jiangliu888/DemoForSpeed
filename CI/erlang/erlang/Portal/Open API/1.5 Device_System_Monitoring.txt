@@ -1,0 +1,84 @@
+*** Settings ***
+Documentation     GET /api/v1/channel/metrics/system?deviceId=,&startTime=&endTime=
+...
+...               必参：deviceId, startTime;
+Suite Setup
+Suite Teardown
+Library           ../../libs/portal/RequestApi.py
+Library           ../../libs/portal/JsonValidate.py
+Library           Collections
+
+*** Test Cases ***
+1. authority limitation
+    [Tags]    SDWANDEV-4545
+    ${code}    ${res}    get device system info    ${test_data}[account5_1]    ${test_data}[psd5_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #公司账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #正确渠道账户查询公司1
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_3]&startTime=1624424653    #正确渠道账户查询公司2
+    ...    #期待成功
+    should be equal as integers    ${code}    200
+    ${code}    ${res}    get device system info    ${test_data}[account6_2]    ${test_data}[psd6_2]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #公司(属渠道)账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+    ${code}    ${res}    get device system info    ${test_data}[account8_1]    ${test_data}[psd8_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #其他渠道账户查询
+    ...    #期待失败
+    should be equal as integers    ${code}    500    #期待403，目前为500
+
+2. params verify
+    [Tags]    SDWANDEV-4546
+    #必参校验
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    \    #不携带任何参数
+    should be equal as integers    ${code}    404
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]    #携带deviceId
+    should be equal as integers    ${code}    404    #期待400，待修改
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213    #携带deviceId&startTime
+    should be equal as integers    ${code}    200
+    check response format    ${res}    device system info
+    #异常参数校验
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&xxx=yyy    #携带未知参数
+    should be equal as integers    ${code}    200    #期待400，待修改
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=abcd&startTime=1624432213    #错误deviceId
+    should be equal as integers    ${code}    404
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&endTime=1624432210    #endtime<starttime
+    should be equal as integers    ${code}    500
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&endTime=1624432213    #endtime=starttime
+    should be equal as integers    ${code}    200
+    check response format    ${res}    device system info
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1]&startTime=1624432213&endTime=    #endTime空值传入
+    should be equal as integers    ${code}    200
+    check response format    ${res}    device system info
+    #deviceId带多参数
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&startTime=1624432213&endTime=1624432713
+    should be equal as integers    ${code}    200
+    check response format    ${res}    device system info
+
+3. sampling number
+    [Documentation]    \#每2分钟一个采样点    #2分钟及以上每隔2分钟增加1个采样点
+    [Tags]    SDWANDEV-4547
+    #采样点数量校验
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&startTime=1624432213&endTime=1624432813    #10分钟
+    should be equal as integers    ${code}    200
+    device system sampling check    ${res}    ${test_data}[deviceId_1]    6
+    device system sampling check    ${res}    ${test_data}[deviceId_2]    6
+    should be equal    ${res}    ${device_system_data}    \    \    \    #数据值校验
+    ${code}    ${res}    get device system info    ${test_data}[account6_1]    ${test_data}[psd6_1]    deviceId=${test_data}[deviceId_1],${test_data}[deviceId_2]&startTime=1624432213&endTime=1624437613    #1.5小时
+    should be equal as integers    ${code}    200
+    device system sampling check    ${res}    ${test_data}[deviceId_1]    46
+    device system sampling check    ${res}    ${test_data}[deviceId_2]    46
+
+*** Keywords ***
+device system sampling check
+    [Arguments]    ${res}    ${device}    ${expect_num}
+    @{res}    convert to list    ${res}[data]
+    ${expect_num}    evaluate    ${expect_num}
+    : FOR    ${i}    IN    @{res}
+    \    ${CPU_num}=    run keyword if    '${i}[deviceId]'=='${device}' and '${i}[instance]' =='CPU'    get length    ${i}[values]
+    \    exit for loop if    '${i}[deviceId]'=='${device}' and '${i}[instance]' =='CPU'
+    : FOR    ${i}    IN    @{res}
+    \    ${MEM_num}=    run keyword if    '${i}[deviceId]'=='${device}' and '${i}[instance]' =='MEM'    get length    ${i}[values]
+    \    exit for loop if    '${i}[deviceId]'=='${device}' and '${i}[instance]' =='MEM'
+    should be equal    ${CPU_num}    ${expect_num}
+    should be equal    ${MEM_num}    ${expect_num}

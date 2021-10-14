@@ -1,0 +1,138 @@
+*** Settings ***
+Suite Setup       FT_Suit_startup
+Suite Teardown
+Test Setup        TestSetup
+Resource          ../../../testcase/resource/UranusKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+Resource          ../../resource/topoKeyword.txt
+Resource          ../../resource/FtNeKeyword.txt
+Library           ../../../libs/fake_ne/interface/FakeNeKeyword.py
+Library           ../../../libs/fake_ne/topo/loadTopo.py
+Library           ../../../libs/manager/ManagerKeyword.py
+Library           ../../../libs/prism/PrismKeyword.py
+Variables         ../../../config/ft_topo_check/measure_tasks_check.py
+Variables         ../../../config/ft_topo_check/flows_check.py
+Library           ../../../libs/uranus/interface/EsInterface.py
+
+*** Test Cases ***
+Add_Delete_CR
+    [Tags]    SDWANDEV-136    SDWANDEV-319
+    [Setup]    Case_Setup
+    ${switchs}=    create list    8550
+    Start_Ne_with_topo    &{path}[topo]/1cr_topo.json    ${switchs}
+    start_A_Ne    CR    8566    5    1    2
+    Measure_tasks_check    ${CR8550_CR8566_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_Tasks_and_Tunnels}
+    POP_Flows_check   ${CR8550_CR8566_POP_Flows}
+    start_A_Ne    CR    8582    6    1    2
+    Measure_tasks_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_CR8566_CR8582_POP_Flows}
+    stop_A_NE    CR    8582    6    1
+    wait until keyword succeeds    3x    1s    Measure_tasks_check    ${CR8550_CR8566_Tasks_and_Tunnels}
+    POP_Flows_check   ${CR8550_CR8566_POP_Flows}
+    [Teardown]    Case_tear_down
+
+Start_3CR
+    [Tags]    SDWANDEV-137
+    ${switchs}=    create list    8550    8566    8582
+    Start_Ne_with_topo    &{path}[topo]/3cr_topo.json    ${switchs}
+    Measure_tasks_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_CR8566_CR8582_POP_Flows}
+    [Teardown]    Case_tear_down
+
+Change_CR_PortNum
+    [Tags]    SDWANDEV-138    SDWANDEV-113
+    ${switchs}=    create list    8550    8566    8582
+    Start_Ne_with_topo    &{path}[topo]/3cr_topo.json    ${switchs}
+    Measure_tasks_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_CR8566_CR8582_POP_Flows}
+    Ne_Change_Port_Num    CR    8566    5    1    3
+    Measure_tasks_check    ${CR8550_CR8566_Port3_CR8582_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_Port3_CR8582_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_CR8566_CR8582_POP_Flows}
+    Ne_Change_Port_Num    CR    8566    5    1    2
+    Measure_tasks_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_CR8566_CR8582_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_CR8566_CR8582_POP_Flows}
+    [Teardown]    Case_tear_down
+
+Add_Delete_ER
+    [Tags]    SDWANDEV-140
+    ${switchs}=    create list    8550    8566    8022
+    Start_Ne_with_topo    &{path}[topo]/2cr_1er_topo.json    ${switchs}
+    start_A_Ne    ER    8038    4    12    2
+    Measure_tasks_check    ${CR8550_ER8022_ER8038_CR8566_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_ER8022_ER8038_CR8566_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_ER8022_ER8038_CR8566_POP_Flows}
+    stop_A_Ne    ER    8022    4    11
+    wait until keyword succeeds    3x    1s    Measure_tasks_check    ${CR8550_ER8038_CR8566_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_ER8038_CR8566_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_ER8038_CR8566_POP_Flows}
+    [Teardown]    Case_tear_down
+
+Start_2ER
+    [Tags]    SDWANDEV-141
+    ${switchs}=    create list    8550    8566    8022    8038
+    Start_Ne_with_topo    &{path}[topo]/2cr_2er_topo.json    ${switchs}
+    Measure_tasks_check    ${CR8550_ER8022_ER8038_CR8566_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_ER8022_ER8038_CR8566_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_ER8022_ER8038_CR8566_POP_Flows}
+    [Teardown]    Case_tear_down
+
+Delete_CR_When_has_ER
+    [Tags]    SDWANDEV-154
+    change_running_measure_config    upperBandwidth    200
+    change_running_measure_config    lowerBandwidth    1
+    ${switchs}=    create list    8550    8566    8022    8038    8054
+    Start_Ne_with_topo    &{path}[topo]/2cr_3er_topo.json    ${switchs}
+    ${er_list}=    create list    8038    8054
+    ${cac_list}=    create list    4    4
+    ${eac_list}=    create list    12    13
+    put_er_cac_eac    ${er_list}    ${cac_list}    ${eac_list}
+    stop_A_Ne    CR    8566    5    1
+    wait until keyword succeeds    3x    1s    Measure_tasks_check    ${CR8550_ER8022_ER8038_ER8054_Tasks_and_Tunnels}
+    Tunnel_check    ${CR8550_ER8022_ER8038_ER8054_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR8550_ER8022_ER8038_ER8054_POP_Flows}
+    [Teardown]    run keywords    change_running_measure_config    upperBandwidth    100
+    ...    AND    change_running_measure_config    lowerBandwidth    2.5
+    ...    AND    Case_tear_down
+
+Start_3POP_With_PortGroup
+    [Tags]    SDWANDEV-528
+    ${switchs}=    create list    13350    13366    12838
+    Start_Ne_with_topo    &{path}[topo]/2cr_1er_port_with_group_topo.json    ${switchs}
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2]
+    sleep    5s
+    Measure_tasks_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels}
+    Tunnel_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR13350_ER12838_CR13366_POP_Flows}
+    [Teardown]    Case_tear_down
+
+Change_Pop_PortGroup
+    [Tags]    SDWANDEV-530
+    ${switchs}=    create list    13350    13366    12838
+    Start_Ne_with_topo    &{path}[topo]/2cr_1er_port_with_group_topo.json    ${switchs}
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2]
+    Measure_tasks_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels}
+    Tunnel_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels}
+    POP_Flows_check    ${CR13350_ER12838_CR13366_POP_Flows}
+    register_pop_config_to_change_group    12838    &{fake_pop}[phy_port]    &{fake_pop}[group_list]
+    Measure_tasks_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels_Group_Change}
+    Tunnel_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels_Group_Change}
+    POP_Flows_check    ${CR13350_ER12838_CR13366_POP_Flows}
+    [Teardown]    Case_tear_down
+
+Pop_Port_To_Multi_PortGroup
+    [Tags]    SDWANDEV-536
+    ${switchs}=    create list    13350    13366    12838
+    Start_Ne_with_topo    &{path}[topo]/2cr_1er_port_with_group_topo.json    ${switchs}
+    register_pop_config_to_change_group    13350    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2]
+    register_pop_config_to_change_group    13366    &{fake_pop}[phy_port2]    &{fake_pop}[group_list_port2]
+    register_pop_config_to_change_group    12838    &{fake_pop}[phy_port]    &{fake_pop}[group_list2]
+    Measure_tasks_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels_Mutli_Group}
+    Tunnel_check    ${CR13350_ER12838_CR13366_Tasks_and_Tunnels_Mutli_Group}
+    POP_Flows_check    ${CR13350_ER12838_CR13366_POP_Flows}
+    [Teardown]    Case_tear_down

@@ -1,0 +1,13 @@
+*** Settings ***
+Library           ../../libs/common/SetHttp.py
+Library           ../../libs/insight/InsightKeyword.py
+
+*** Keywords ***
+Portal_GUI_Login_Admin
+    set_insight_ip_port    &{insight_host}[ip]    &{insight_host}[port]
+    portal login       &{insight_host}[user]    &{insight_host}[password]
+
+Portal_GUI_Login_Others
+    [Arguments]   ${user}   ${passwd}
+    set_insight_ip_port    &{insight_host}[ip]    &{insight_host}[port]
+    portal login       ${user}   ${passwd}

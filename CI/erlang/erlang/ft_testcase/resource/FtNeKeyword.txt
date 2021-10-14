@@ -1,0 +1,353 @@
+*** Settings ***
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/uranus/PontusKeyword.py
+Library           ../../libs/configCenter/ConsulKeyword.py
+Library           ../../libs/fake_ne/interface/FakeNeKeyword.py
+Library           ../../libs/insight/InsightKeyword.py
+Resource          ../../testcase/resource/UranusKeyword.txt
+Library           ../../libs/uranus/interface/EsInterface.py
+
+*** Variables ***
+${tunnel_wait_time}    25s
+${m_tasks_wait_time}    25s
+
+*** Keywords ***
+TestSetup
+    delete_all_config
+    clean_measureData    &{manager_server}[influxdb_ip]    &{manager_server}[influxdb_port]
+
+Get_ne_measure_task
+    [Arguments]    ${ne_id}
+    ${ne_tasks}=    get_fake_ne_measure_tasks    ${ne_id}
+    [Return]    ${ne_tasks}
+
+Get_ne_measure_result
+    [Arguments]    ${ne_id}    ${begin_time}
+    get_devices_measure_result    ${ne_id}    ${begin_time}
+
+create_company_and_site
+    [Arguments]    ${cpe_list}
+    ${company_id}=    create_company    &{company1}[name]    &{company1}[remark]    &{company1}[location]
+    Set Suite Variable    ${suite_company_id}    ${company_id}
+    ${sites_id_list}=    create_company_site    ${cpe_list}    ${company_id}
+    [Return]    ${company_id}    ${sites_id_list}
+
+create_company_site
+    [Arguments]    ${cpe_list}    ${company_id}
+    ${sites_id_list}=    create list
+    : FOR    ${ne_id}    IN    @{cpe_list}
+    \    ${site_id}=    create_company_sites    ${company_id}    ${ne_id}    ${ne_id}    ${None}
+    \    ...    &{cpe_net}[${ne_id}]
+    \    append to list    ${sites_id_list}    ${site_id}
+    [Return]    ${sites_id_list}
+
+modify_company_site_net
+    [Arguments]    ${cpe}    ${site_id}    ${company_id}
+    patch_company_sites    ${company_id}    ${site_id}    ${cpe}    ${cpe}    ${None}    &{cpe_net}[net_change]
+
+create_company1_relation
+    [Arguments]    ${cpes}
+    [Timeout]
+    ${company_id}=    create_company    &{company1}[name]    &{company1}[remark]    &{company1}[location]
+    Set Suite Variable    ${suite_company_id}    ${company_id}
+    sleep    1s
+    ${sites_id_list}=    create_company_site    ${cpes}    ${company_id}
+    [Return]    ${sites_id_list}
+
+delete_company1_relation
+    delete_company    ${suite_company_id}
+
+Delete_company1_site
+    [Arguments]    ${cpe_list}    ${company_id}
+    : FOR    ${ne_id}    IN    @{cpe_list}
+    \    Delete_company_site    ${company_id}    ${ne_id}
+
+Check_fake_ne_tunnel_empty
+    [Arguments]    ${ne_id}
+    [Timeout]
+    ${ne_tunnels}=    get_fake_ne_measure_tunnels    ${ne_id}
+    ${ne_t_len}=    evaluate    len(${ne_tunnels})
+    should be equal as numbers    ${ne_t_len}    0
+
+Check_Fake_Ne_Flows
+    [Arguments]    ${ne_id}
+    ${route_flow}=    get_ne_route    ${ne_id}
+    ${fake_ne_flow_id_list}=    get_fake_ne_flows_id    ${ne_id}
+    ${c_f_len}=    evaluate    len(${route_flow})
+    ${ne_f_len}=    evaluate    len(${fake_ne_flow_id_list})
+    Comment    should be equal as integers    ${c_f_len}    ${ne_f_len}
+    Comment    :FOR    ${fow}    IN    @{c_ne_flows}
+    Comment    \    Should Contain    ${fake_ne_flow_id_list}    ${fow["specId"]}
+
+Create_Ne_Measure_Shake_loss_result
+    [Arguments]    ${ne_id}    ${jitter}    ${loss}    ${delay}=${EMPTY}    ${target}=${EMPTY}
+    change_ne_link_measure_result    ${ne_id}    ${jitter}    ${loss}    ${delay}    ${target}
+
+CPE_Route&Office_SpeedUP_Flows_check
+    [Arguments]    ${check_ne}
+    ${route_list}=    convert to list    ${check_ne['route']}
+    : FOR    ${route}    IN    @{route_list}
+    \    ${src_exsit}=    evaluate    'src' in ${route}
+    \    run Keyword if    ${src_exsit}    Check_CPE_2CPE_Office_flows    ${check_ne['local']}    ${route['target']}    ${route['target_ip']}
+    \    ...    ${route['src']}
+    \    ...    ELSE    Check_CPE_2CPE_Office_flows    ${check_ne['local']}    ${route['target']}    ${route['target_ip']}
+
+FT_Suit_startup
+    Uranus_Login
+    set_measure_polling_freq_to_controller    1
+
+Exec_Cmd_on_Controller
+    [Arguments]    ${cmd}
+    ${conn}=    SSH Login    &{controller_host}[ip]    &{controller_host}[port]    &{controller_host}[user]    &{controller_host}[password]
+    write    ${cmd}
+    Set Client Configuration    timeout=40
+    ${res}=    read until prompt
+    Close Connection
+
+Set_Global_Consul_Config
+    [Arguments]    ${i}
+    create_code_agent_pattern    ${consul_test}[pop_list][${i}]    ${consul_test}[region][${i}]    ${consul_test}[country][${i}]    ${consul_test}[area][${i}]    ${consul_test}[district][${i}]
+    put_gaea_openflow_global_config    ${consul_test}[openflow_ip_list][${i}]    ${consul_test}[openflow_port_list][${i}]
+    put_gaea_openflow_specific_config    ${consul_test}[openflow_neid_specific][${i}]    ${consul_test}[openflow_ip_specific_list][${i}]    ${consul_test}[openflow_port_specific_list][${i}]
+    change_running_measure_config    upperBandwidth    50
+
+Check_Global_Consul_Config_In_Controller
+    [Arguments]    ${i}
+    ${results}=    create list
+    ${r_config}=    check_running_measure_config    upperBandwidth    50
+    ${r_co_pa}=    check_code_agent_pattern    ${consul_test}[pop_list][${i}]    ${consul_test}[region][${i}]    ${consul_test}[country][${i}]    ${consul_test}[area][${i}]    ${consul_test}[district][${i}]
+    append to list    ${results}    ${r_config}    ${r_co_pa}
+    ${r_code}    evaluate    all(${results})
+    should be true    ${r_code}
+
+Prepare_ES_Data
+    [Arguments]    ${topo}
+    bulk_delete_1day_measure_result
+    export_data_to_es    ${topo}
+
+create_company_union
+    [Arguments]    ${cpes}    ${site_list}    ${company_id}
+    ${site_A}=    get from list    ${site_list}    0
+    ${cpeA}=    get from list    ${cpes}    0
+    ${union_list} =    get slice from list    ${site_list}    1
+    ${cpe_list} =    get slice from list    ${cpes}    1
+    ${union_id_list}=    create list
+    : FOR    ${site_B}    IN    @{union_list}
+    \    ${i}=    get index from list    ${union_list}    ${site_B}
+    \    ${cpeB}=    set variable    ${cpe_list[${i}]}
+    \    ${c_name}=    evaluate    '${siteA}To${siteB}'
+    \    ${union_id}=    create_company_unions    ${company_id}    ${c_name}    ${False}    ${siteA}
+    \    ...    ${site_B}
+    \    append to list    ${union_id_list}    ${union_id}
+    \    Create_union_route    ${company_id}    ${cpeA}    ${cpeB}    ${siteA}    ${siteB}
+    [Return]    ${union_id_list}
+
+Create_union_route
+    [Arguments]    ${company_id}    ${cpeA}    ${cpeB}    ${siteA}    ${siteB}
+    ${cpeA_type}=    get_cpe_type_from_ne_id    ${cpeA}
+    ${cpeB_type}=    get_cpe_type_from_ne_id    ${cpeB}
+    run keyword if    '${cpeA_type}'=='SERIES' and '${cpeB_type}'=='SERIES'    add_company_route    ${company_id}    ${cpeA}-${cpeB}    ${500}    ${siteB}
+    ...    ${None}    ${None}    ${None}    ${None}    ${None}    ${None}    ${siteA}
+    ...    ELSE    add_company_route    ${company_id}    ${cpeA}-${cpeB}    ${500}    ${siteB}
+    ...    &{cpe_net}[${cpeB}]    ${None}    ${None}    ${None}    ${None}    ${None}    ${siteA}
+    run keyword if    '${cpeA_type}'=='SERIES' and '${cpeB_type}'=='SERIES'    add_company_route    ${company_id}    ${cpeB}-${cpeA}    ${500}    ${siteA}
+    ...    ${None}    ${None}    ${None}    ${None}    ${None}    ${None}    ${siteB}
+    ...    ELSE    add_company_route    ${company_id}    ${cpeB}-${cpeA}    ${500}    ${siteA}
+    ...    &{cpe_net}[${cpeA}]    ${None}    ${None}    ${None}    ${None}    ${None}    ${siteB}
+
+Create_Pop_Agent_Search_Pattern
+    [Arguments]    ${pop_list}    ${end_list}    ${local_code}
+    create_code_agent_pattern    ${pop_list}    ${end_list}    ${local_code}
+
+Measure_tasks_check
+    [Arguments]    ${check_ne_list_name}
+    ${check_ne_list}=    convert to list    ${check_ne_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    Check_measure_from_controller    ${check_ne}
+    \    Check_measure_from_fake_ne    ${check_ne}
+
+Check_measure_from_fake_ne
+    [Arguments]    ${check_ne}
+    ${peer_list}=    convert to list    ${check_ne['peer']}
+    : FOR    ${peer}    IN    @{peer_list}
+    \    wait until keyword succeeds    ${m_tasks_wait_time}    2s    Check_ne_measure_task    ${check_ne['local']}    ${peer['ne_id']}
+    \    ...    ${peer['task_num']}
+
+Check_ne_measure_task
+    [Arguments]    ${ne_id}    ${dst_ne_id}    ${expect_num}
+    ${n_tasks}=    get_fake_ne_measure_tasks_with_dstNeId    ${ne_id}    ${dst_ne_id}
+    ${n_tasks_len}=    evaluate    len(${n_tasks})
+    Should Be Equal As Integers    ${n_tasks_len}    ${expect_num}
+
+Check_measure_from_controller
+    [Arguments]    ${check_ne}
+    ${peer_list}=    convert to list    ${check_ne['peer']}
+    : FOR    ${peer}    IN    @{peer_list}
+    \    wait until keyword succeeds    ${m_tasks_wait_time}    2s    Check_controller_measure_task    ${check_ne['local']}    ${peer['ne_id']}
+    \    ...    ${peer['task_num']}
+
+Check_controller_measure_task
+    [Arguments]    ${ne_id}    ${dst_ne_id}    ${expect_num}
+    ${c_tasks}=    get_ne_tasks_from_controller_with_dst_ne_id    ${ne_id}    ${dst_ne_id}
+    ${c_tasks_len}=    evaluate    len(${c_tasks})
+    Should Be Equal As Integers    ${c_tasks_len}    ${expect_num}
+
+Tunnel_check
+    [Arguments]    ${check_ne_list_name}
+    ${check_ne_list}=    convert to list    ${check_ne_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    Check_tunnel_from_controller    ${check_ne}
+    \    Check_tunnel_from_fake_ne    ${check_ne}
+
+Check_tunnel_from_fake_ne
+    [Arguments]    ${check_ne}
+    ${peer_list}=    convert to list    ${check_ne['peer']}
+    : FOR    ${peer}    IN    @{peer_list}
+    \    wait until keyword succeeds    ${tunnel_wait_time}    2s    Check_ne_tunnel    ${check_ne['local']}    ${peer['ne_id']}
+    \    ...    ${peer['task_num']}
+    Check_ne_total_tunnel_num    ${check_ne['local']}    ${check_ne['total_num']}
+
+Check_tunnel_from_controller_total_num
+    [Arguments]    ${ne_id}    ${expect_num}
+    ${tunnels}=    get_ne_tunnels_from_controller    ${ne_id}
+    ${len}=    evaluate    len(${tunnels})
+    Should Be Equal As Integers    ${len}    ${expect_num}
+
+Check_ne_tunnel
+    [Arguments]    ${ne_id}    ${dst_ne_id}    ${expect_num}
+    ${n_tunnel}=    get_fake_ne_tunnels_with_dstNeId    ${ne_id}    ${dst_ne_id}
+    ${n_tunnel_len}=    evaluate    len(${n_tunnel})
+    Should Be Equal As Integers    ${n_tunnel_len}    ${expect_num}
+
+Check_ne_total_tunnel_num
+    [Arguments]    ${ne_id}    ${expect_num}
+    ${neId}=    evaluate    ${ne_id} >> 4
+    ${n_tunnel}=    get_fake_ne_measure_tunnels    ${neId}
+    ${n_tunnel_len}=    evaluate    len(${n_tunnel})
+    Should Be Equal As Integers    ${n_tunnel_len}    ${expect_num}
+
+Check_tunnel_from_controller
+    [Arguments]    ${check_ne}
+    ${ne_type}=    get_ne_type_from_neId    ${check_ne['local']}
+    ${peer_list}=    convert to list    ${check_ne['peer']}
+    : FOR    ${peer}    IN    @{peer_list}
+    \    wait until keyword succeeds    ${tunnel_wait_time}    2s    Check_controller_tunnel    ${check_ne['local']}    ${peer['ne_id']}
+    \    ...    ${peer['task_num']}
+    run keyword if    '${ne_type}' != 'CPE'    Check_low_tunnels_ip    ${check_ne}
+    Check_tunnel_from_controller_total_num    ${check_ne['local']}    ${check_ne['total_num']}
+
+Check_low_tunnels_ip
+    [Arguments]    ${check_ne}
+    wait until keyword succeeds    ${tunnel_wait_time}    2s    Check_tunnels_has_quality    ${check_ne['local']}
+    ${peer_list}=    convert to list    ${check_ne['peer']}
+    ${c_ne_tunnels}=    get_ne_tunnels_from_controller    ${check_ne['local']}
+    ${low_weight_tunnel}=    get_low_weight_tunnels    ${c_ne_tunnels}
+    ${peer_list_with_port}=    evaluate    map(lambda x: [x['port_pair'], x['ne_id']] if 'port_pair' in x.keys() else [(1, 1), x['ne_id']], ${peer_list})
+    : FOR    ${tunnel}    IN    @{low_weight_tunnel}
+    \    ${dst_ne_id}=    evaluate    '${tunnel['dstNEId']}'
+    \    ${ne_type}=    get_ne_type_from_neId    ${dst_ne_id}
+    \    ${port_pair}=    evaluate    (int('${tunnel['srcIp']}'.split('.')[3]), int('${tunnel['dstIp']}'.split('.')[3]))
+    \    ${check_port}=    evaluate    filter(lambda x: x[1] == ${tunnel['dstNEId']}, ${peer_list_with_port})[0][0]
+    \    run keyword if    '${ne_type}' != 'CPE'    should be true    ${port_pair} == ${check_port}
+
+Check_controller_tunnel
+    [Arguments]    ${ne_id}    ${dst_ne_id}    ${expect_num}
+    ${c_tunnel}=    get_ne_tunnels_from_controller_with_dst_ne_id    ${ne_id}    ${dst_ne_id}
+    ${c_tunnel_len}=    evaluate    len(${c_tunnel})
+    Should Be Equal As Integers    ${c_tunnel_len}    ${expect_num}
+
+POP_Flows_check
+    [Arguments]    ${check_pop_list_name}
+    ${check_ne_list}=    convert to list    ${check_pop_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    POP_to_POP_Flows_check    ${check_ne}
+
+POP_to_POP_Flows_check
+    [Arguments]    ${check_ne}
+    ${route_list}=    convert to list    ${check_ne['route']}
+    : FOR    ${route}    IN    @{route_list}
+    \    wait until keyword succeeds    ${m_tasks_wait_time}    2s    Check_tunnels_has_quality    ${check_ne['local']}
+    \    wait until keyword succeeds    10    2s    Check_Pop_To_Pop_Route_Flows    ${check_ne['local']}    ${route['target']}
+    \    ...    ${route['next']}
+
+Check_tunnels_has_quality
+    [Arguments]    ${ne_id}
+    ${ne_type}=    get_ne_type_from_neId    ${ne_id}
+    ${ret}=    run keyword if    '${ne_type}' != 'Service'    all_tunnels_have_quality    ${ne_id}
+    ...    ELSE    set variable    ${True}
+    should be true    ${ret}
+
+POP_Route_Flows_check
+    [Arguments]    ${check_ne}
+    ${route_list}=    convert to list    ${check_ne['route']}
+    : FOR    ${route}    IN    @{route_list}
+    \    wait until keyword succeeds    ${m_tasks_wait_time}    2s    Check_tunnels_has_quality    ${check_ne['local']}
+    \    Check_Pop_To_CPE_Route_Flows    ${check_ne['local']}    ${route['target']}    ${route['next']}
+
+CPE_Flows_check
+    [Arguments]    ${cpes}    ${check_pop_list_name}    ${check_cpe_list_name}=${None}
+    Check_CPE_Pass_Through_Flows_From_Controller    ${cpes}
+    ${check_ne_list}=    convert to list    ${check_pop_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    POP_Route_Flows_check    ${check_ne}
+    ${bool}=    evaluate    bool(${check_cpe_list_name})
+    run keyword if    ${bool}    CPE_Flow_table_check    ${check_cpe_list_name}
+    : FOR    ${cpe}    IN    @{cpes}
+    \    Check_Fake_Ne_Flows    ${cpe}
+
+CPE_Flow_table_check
+    [Arguments]    ${check_cpe_list_name}
+    ${check_ne_list}=    convert to list    ${check_cpe_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    CPE_Route&Office_SpeedUP_Flows_check    ${check_ne}
+
+Tunnel_check_with_IpPair
+    [Arguments]    ${check_ne_list_name}
+    ${check_ne_list}=    convert to list    ${check_ne_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    wait until keyword succeeds    ${tunnel_wait_time}    2s    Check_fake_ne_tunnel_with_IpPair    ${check_ne['local']}    ${check_ne['peer']}
+
+Check_fake_ne_tunnel_with_IpPair
+    [Arguments]    ${ne_id}    ${peer_list}
+    [Timeout]
+    ${c_ne_tunnels}=    get_ne_tunnels_from_controller    ${ne_id}
+    ${ip_pair_list}=    evaluate    map(lambda x: [x['srcIp'], x['dstIp']], ${c_ne_tunnels})
+    : FOR    ${pair}    IN    @{peer_list}
+    \    Should Contain    ${ip_pair_list}    ${pair}
+
+Tunnel_check_with_Prefer_ip
+    [Arguments]    ${check_ne_list_name}
+    ${check_ne_list}=    convert to list    ${check_ne_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    ${c_ne_tunnels}=    get_ne_tunnels_from_controller_with_dst_ne_id    ${check_ne['local']}    ${check_ne['dst']}
+    \    ${ip_pair_list}=    evaluate    map(lambda x: [x['srcIp'], x['dstIp']], ${c_ne_tunnels})
+    \    ${ip_pair}=    get from list    ${ip_pair_list}    0
+    \    ${ret}=    evaluate    '${ip_pair[0]}' == '${check_ne['peer'][0]}'
+    \    should be True    ${ret}
+
+Get_Ne_Type_From_Neid
+    [Arguments]    ${ne_id}
+    ${t}=    evaluate    ${ne_id}%16
+    ${ne_type}=    run keyword if    ${t}==6    set variable    POP
+    ...    ELSE IF    7<=${t}<=8    set variable    Service
+    ...    ELSE    set variable    CPE
+    [Return]    ${ne_type}
+
+Service_Flows_check
+    [Arguments]    ${check_service_list_name}
+    ${check_ne_list}=    convert to list    ${check_service_list_name}
+    : FOR    ${check_ne}    IN    @{check_ne_list}
+    \    POP_to_Service_Flows_check    ${check_ne}
+
+POP_to_Service_Flows_check
+    [Arguments]    ${check_ne}
+    ${route_list}=    convert to list    ${check_ne['route']}
+    : FOR    ${route}    IN    @{route_list}
+    \    wait until keyword succeeds    10    2s    Check_Pop_To_Service_Route_Flows    ${check_ne['local']}    ${route['target']}
+    \    ...    ${route['next']}
+
+Check_e2e_link_Total_NUM
+    [Arguments]    ${localId}    ${remoteId}    ${linkNum}
+    ${links_c} =    get_e2e_links_from_controller    ${localId}    ${remoteId}
+    ${length} =    Evaluate    len(${links_c})
+    Should Be Equal As Integers    ${length}    ${linkNum}

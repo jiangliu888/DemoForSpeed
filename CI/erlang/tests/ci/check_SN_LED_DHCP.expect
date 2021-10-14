@@ -1,0 +1,51 @@
+#!/usr/bin/expect
+#If it all goes pear shaped the script will timeout after 20 seconds.
+set timeout 20
+#First argument is assigned to the variable name
+set name [lindex $argv 0]
+#Second argument is assigned to the variable user
+set user [lindex $argv 1]
+#Third argument is assigned to the variable password
+set password [lindex $argv 2]
+set SN      [lindex $argv 3]
+#This spawns the telnet program and connects it to the variable name
+spawn telnet $name
+#The script expects login
+expect "login:"
+#The script sends the user variable
+send "$user\n\r"
+#The script expects Password
+expect "Password:"
+#The script sends the password variable
+send "$password\r\n"
+#This hands control of the keyboard over to you (Nice expect feature!)
+expect "#"
+send "cat /builtin/device/SN\r\n"
+expect {
+    -ex "$SN" {}
+    timeout {
+     send_user "exit 1\n"
+     exit 1
+} }
+send "ls /sys/class/leds/ -ltr|wc -l\r\n"
+expect {
+    -ex "4" {}
+    timeout {
+     send_user "exit 1\n"
+     exit 1
+} }
+send "eth_ctrl --dhcp-client\r\n"
+expect "over"
+send "wlan_ctrl -i 0 -S 20\r\n"
+expect "XYBox"
+send "wlan_ctrl -i 1 -S 20\r\n"
+expect "subao"
+send "wlan_ctrl -i 0 -S 20\r\n"
+expect "XYBox"
+send "wlan_ctrl -i 1 -S 20\r\n"
+expect "subao"
+send "wlan_ctrl -i 0 -S 20\r\n"
+expect "XYBox"
+send "wlan_ctrl -i 1 -S 20\r\n"
+expect "subao"
+puts "all pass"

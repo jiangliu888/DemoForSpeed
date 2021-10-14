@@ -1,0 +1,186 @@
+*** Settings ***
+Suite Setup       run keywords    Prepare Salt
+...               AND    Start Mwan Service
+Suite Teardown    Stop Mwan Service
+Resource          resource/UranusKeyword.txt
+Resource          resource/SshKeyword.txt
+Resource          resource/SaltKeyword.txt
+Library           ../libs/uranus/UranusKeyword.py
+Library           ../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${salt_port}      4505
+${switch_timeout}    120
+
+*** Test Cases ***
+GW Control Plane Switch To Another Wan
+    [Tags]    SDWANDEV-3691    SDWANDEV-3692    SDWANDEV-3740    onlyCI    SanityCheck
+    [Setup]    Restart CPE Salt Minion    changsha
+    ${cpe}=    set variable    changsha
+    # check current table 200
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${init_dev}=    Get Current Dev From Table200
+    ${target_dev}=    set variable if    '${init_dev}' != '&{${cpe}_cpe}[internet_if]'    &{${cpe}_cpe}[internet_if]    &{${cpe}_cpe}[internet_if2]
+    # block from salt master
+    switch connection    ${salt_master_ssh}
+    ${blocked1_ip}=    Block CPE Wan IP From Salt Master    ${cpe}
+    # check salt connection
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Available Check    &{${cpe}_cpe}[minion_id]
+    switch connection    sess_${cpe}_cpe
+    ${switched1_dev}=    Get Current Dev From Table200
+    should not be equal    ${init_dev}    ${switched1_dev}
+    # restore the wan, should not switch back
+    switch connection    ${salt_master_ssh}
+    Unblock CPE Wan IP From Salt Master    ${blocked1_ip}
+    switch connection    sess_${cpe}_cpe
+    ${switched2_dev}=    Get Current Dev From Table200
+    should be equal    ${switched2_dev}    ${switched1_dev}
+    # block the another ip on salt master
+    switch connection    ${salt_master_ssh}
+    ${blocked2_ip}=    Block CPE Wan IP From Salt Master    ${cpe}
+    should not be equal    ${blocked1_ip}    ${blocked2_ip}
+    # check salt connection
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Available Check    &{${cpe}_cpe}[minion_id]
+    switch connection    sess_${cpe}_cpe
+    ${switched3_dev}=    Get Current Dev From Table200
+    should be equal    ${init_dev}    ${switched3_dev}
+    [Teardown]    run keywords    switch connection    ${salt_master_ssh}
+    ...    AND    Unblock CPE Wan IP From Salt Master    &{${cpe}_switch}[ip]
+    ...    AND    Unblock CPE Wan IP From Salt Master    &{${cpe}_switch}[ip2]
+    ...    AND    CPE Restore    ${cpe}
+
+GW Switch To 4G WAN When No Best Wan Is Selected
+    [Tags]    SDWANDEV-3698    debug
+    [Setup]    Restart CPE Salt Minion    guangzhou
+    ${cpe}=    set variable    guangzhou
+    # check current table 200
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${init_dev}=    Get Current Dev From Table200
+    should be equal    ${init_dev}    &{${cpe}_cpe}[internet_if2]
+    # block from salt master
+    switch connection    ${salt_master_ssh}
+    ${blocked1_ip}=    Block CPE Wan IP From Salt Master    ${cpe}
+    # check salt connection
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Available Check    &{${cpe}_cpe}[minion_id]
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${switched1_dev}=    Get Current Dev From Table200
+    should not be equal    ${init_dev}    ${switched1_dev}
+    # restore the wan, should switch back
+    switch connection    ${salt_master_ssh}
+    Unblock CPE Wan IP From Salt Master    ${blocked1_ip}
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    wait until keyword succeeds    10x    1s    Switch Back From 4G Check    ${init_dev}
+    # check salt connection
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Available Check    &{${cpe}_cpe}[minion_id]
+    [Teardown]    run keywords    switch connection    ${salt_master_ssh}
+    ...    AND    Unblock CPE Wan IP From Salt Master    &{${cpe}_switch}[ip]
+    ...    AND    Unblock CPE Wan IP From Salt Master    &{${cpe}_switch}[ip2]
+    ...    AND    CPE Restore    ${cpe}
+
+Series Control Plane Switch To 4G
+    [Tags]    SDWANDEV-3715    debug
+    [Setup]    Restart CPE Salt Minion    remote
+    # As the cpe3 ssh connections would be closed by mwan unexpectedly, such cases should be better offline.
+    ${cpe}=    set variable    remote
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${init_dev}=    Get Current Dev From Table200
+    should not be equal    ${init_dev}    &{${cpe}_cpe}[interface_4G]
+    switch connection    ${salt_master_ssh}
+    ${blocked1_ip}=    Block CPE Wan IP From Salt Master    ${cpe}
+    should be equal    ${blocked1_ip}    ${remote_switch}
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Connection Test    &{${cpe}_cpe}[minion_id]
+    switch connection    sess_${cpe}_cpe
+    ${switched1_dev}=    Get Current Dev From Table200
+    should be equal    ${switched1_dev}    &{remote_cpe}[interface_4G]
+    # restore the wan, should switch back from 4G
+    switch connection    ${salt_master_ssh}
+    Unblock CPE Wan IP From Salt Master    ${blocked1_ip}
+    switch connection    sess_${cpe}_cpe
+    ${switched2_dev}=    Get Current Dev From Table200
+    should be equal    ${switched2_dev}    &{${cpe}_cpe}[internet_if]
+    [Teardown]    run keywords    switch connection    ${salt_master_ssh}
+    ...    AND    Unblock CPE Wan IP From Salt Master    ${blocked1_ip}
+    ...    AND    CPE Restore    ${cpe}
+
+GW MWan Without Aiwan-cpe Can Still Work
+    [Tags]    SDWANDEV-3693    onlyCI    SanityCheck
+    ${cpe}=    set variable    changsha
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    Write CPE CMD    ${cpe}    systemctl stop aiwan-cpe.service    /etc/init.d/aiwan-cpe stop
+    # check current table 200
+    ${init_dev}=    Get Current Dev From Table200
+    ${target_dev}=    set variable if    '${init_dev}' != '&{${cpe}_cpe}[internet_if]'    &{${cpe}_cpe}[internet_if]    &{${cpe}_cpe}[internet_if2]
+    # block from salt master
+    switch connection    ${salt_master_ssh}
+    ${blocked1_ip}=    Block CPE Wan IP From Salt Master    ${cpe}
+    # check salt connection
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Available Check    &{${cpe}_cpe}[minion_id]
+    switch connection    sess_${cpe}_cpe
+    ${switched1_dev}=    Get Current Dev From Table200
+    should not be equal    ${init_dev}    ${switched1_dev}
+    # restore the wan, should not switch back
+    switch connection    ${salt_master_ssh}
+    Unblock CPE Wan IP From Salt Master    ${blocked1_ip}
+    switch connection    sess_${cpe}_cpe
+    ${switched2_dev}=    Get Current Dev From Table200
+    should be equal    ${switched2_dev}    ${switched1_dev}
+    # block the another ip on salt master
+    switch connection    ${salt_master_ssh}
+    ${blocked2_ip}=    Block CPE Wan IP From Salt Master    ${cpe}
+    should not be equal    ${blocked1_ip}    ${blocked2_ip}
+    # check salt connection
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Available Check    &{${cpe}_cpe}[minion_id]
+    switch connection    sess_${cpe}_cpe
+    ${switched3_dev}=    Get Current Dev From Table200
+    should be equal    ${init_dev}    ${switched3_dev}
+    [Teardown]    run keywords    switch connection    ${salt_master_ssh}
+    ...    AND    Unblock CPE Wan IP From Salt Master    &{${cpe}_switch}[ip]
+    ...    AND    Unblock CPE Wan IP From Salt Master    &{${cpe}_switch}[ip2]
+    ...    AND    CPE Restore    ${cpe}    ${True}
+
+Series MWan Without Aiwan-cpe Can Still Work
+    [Tags]    SDWANDEV-3716    debug
+    # As the cpe3 ssh connections would be closed by mwan unexpectedly, such cases should be better offline.
+    ${cpe}=    set variable    remote
+    ${init_ch_ip}=    set variable    ${None}
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    Write CPE CMD    ${cpe}    systemctl stop aiwan-cpe.service    /etc/init.d/aiwan-cpe stop
+    ${init_ch_ip}    ${init_ch_port}=    Get CPE Listening IP    ${cpe}    ${salt_port}
+    switch connection    ${salt_master_ssh}
+    Block CPE Wan IP From Salt Master    ${cpe}    ${init_ch_ip}
+    wait until keyword succeeds    ${switch_timeout}    1s    Salt Connection Test    &{${cpe}_cpe}[minion_id]
+    [Teardown]    CPE Restore    ${cpe}    ${True}    ${True}
+
+*** Keywords ***
+Prepare Salt
+    ${session}=    SSH Login Salt Master
+    set suite variable    ${salt_master_ssh}    ${session}
+
+CPE Restore
+    [Arguments]    ${cpe}    ${flag_restart}=${False}    ${flag_trigger_learning}=${False}
+    run keyword if    ${flag_restart} or ${flag_trigger_learning}    ssh_cpe    ${cpe}    restore_sess_${cpe}_cpe
+    run keyword if    ${flag_restart}    restart_cpe    ${cpe}
+    run keyword if    ${flag_trigger_learning}    SCP_File_From_H1_To_H2    ${cpe}    &{uranus_host}[office_ip]    DontDelete.o    target.o
+    run keyword if    ${flag_restart} or ${flag_trigger_learning}    switch connection    restore_sess_${cpe}_cpe
+    run keyword if    ${flag_trigger_learning}    wait until keyword succeeds    6x    1s    Check_CPE_Status    ${cpe}
+    run keyword if    ${flag_restart} or ${flag_trigger_learning}    close connection
+    wait until keyword succeeds    120s    1s    Ensure_CPE_Flow_Work    ${cpe}    office
+
+Check Ignore Switching
+    [Arguments]    ${cpe}    ${timeout}=${60}
+    ssh_cpe    ${cpe}
+    Set Client Configuration    timeout=${timeout}
+    write    tail -f /var/log/mwan.log
+    ${res}=    read until regexp    ignore switching mwan.*\n
+    close connection
+
+Restart CPE Salt Minion
+    [Arguments]    ${cpe}    ${timeout}=120
+    ssh_cpe    ${cpe}
+    write cpe cmd    ${cpe}    systemctl restart salt-minion    /etc/init.d/salt-minion restart    &{${cpe}_cpe}[passwd]
+    wait until keyword succeeds    ${timeout}    1s    Salt Available Check    &{${cpe}_cpe}[minion_id]
+
+Switch Back From 4G Check
+    [Arguments]    ${init_dev}
+    ${switched2_dev}=    Get Current Dev From Table200
+    should be equal    ${switched2_dev}    ${init_dev}

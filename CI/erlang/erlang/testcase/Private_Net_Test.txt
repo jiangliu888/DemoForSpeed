@@ -1,0 +1,162 @@
+*** Settings ***
+Suite Setup       Private_Net_Setup
+Suite Teardown    Private_Net_TearDown
+Resource          resource/UranusKeyword.txt
+Resource          resource/SshKeyword.txt
+Library           ../libs/uranus/UranusKeyword.py
+Resource          resource/PingKeyword.txt
+Library           ../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${tcpdump}        Private_net_office_tcpdump.pcap
+${p_tcpdump}      Private_net_tcpdump.pcap
+${wan_tcpdump}    Private_net_wan_tcpdump.pcap
+${lan_tcpdump}    Private_net_lan_tcpdump.pcap
+
+*** Test Cases ***
+Add_Key_Trans_To_Company_CPE_And_SCP_OK
+    [Tags]    SDWANDEV-99    long
+    [Setup]    Suite_Start_tcpdump
+    Update_Company_Key_Successful    ${suite_company_id}    &{company1}[key]
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    local    &{company1}[key]
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    remote    &{company1}[key]
+    SCP_File_From_H1_To_H2    local    &{remote_pc}[intranet_ip]    DontDelete.o    target.o
+    ${init_pkg}=    Init_Ping_From_Local_PC    5    &{remote_pc}[intranet_ip]
+    Check_Ping_Result_Form_Local_PC    5    0    ${init_pkg}
+    [Teardown]    run keywords    Suite_stop_tcpdump
+    ...    AND    Delete_Key
+
+Modify_Key_Trans_To_Company_CPE_And_SCP_OK
+    [Tags]    SDWANDEV-100    long
+    Update_Company_Key_Successful    ${suite_company_id}    &{company1}[key]
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    local    &{company1}[key]
+    ${init_pkg}=    Init_Ping_From_Local_PC    10    &{remote_pc}[intranet_ip]
+    Update_Company_Key_Successful    ${suite_company_id}    &{company2}[key]
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    remote    &{company2}[key]
+    Check_Ping_Result_Form_Local_PC    10    35    ${init_pkg}
+    SCP_File_From_H1_To_H2    local    &{remote_pc}[intranet_ip]    DontDelete.o    target.o
+    ${init_pkg}=    Init_Ping_From_Local_PC    5    &{remote_pc}[intranet_ip]
+    Check_Ping_Result_Form_Local_PC    5    0    ${init_pkg}
+    [Teardown]    Delete_Key
+
+Delete_Key_Trans_To_Company_CPE_And_SCP_OK
+    [Tags]    SDWANDEV-101    long
+    Update_Company_Key_Successful    ${suite_company_id}    &{company1}[key]
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    local    &{company1}[key]
+    ${init_pkg}=    Init_Ping_From_Local_PC    10    &{remote_pc}[intranet_ip]
+    put_company_key    ${suite_company_id}
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    local    &{company1}[key]    False
+    Check_Ping_Result_Form_Local_PC    10    10    ${init_pkg}
+    [Teardown]    Delete_Key
+
+Add_Key_Not_Trans_To_Other_Company_CPE
+    [Tags]    SDWANDEV-74    long    debug
+    Update_Company_Key_Successful    ${suite_company2_id}    &{company2}[key]
+    Check_CPE_Key    local    &{company2}[key]    False
+    Check_CPE_Key    remote    &{company2}[key]    False
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{remote_pc}[site_name]'
+    delete_company_unions    ${suite_company_id}    ${suite_${c_name}_union_id}
+    delete_company_sites    ${suite_company_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ${s_id}    create_company_sites    ${suite_company2_id}    &{remote_pc}[site_name]    &{remote_cpe}[chassis_id]    1000.0    ${True}
+    ...    &{remote_pc}[intranet_range]
+    Set Global Variable    ${suite_&{remote_pc}[site_name]_site_id}    ${s_id}
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    remote    &{company2}[key]
+    [Teardown]    Case_TearDown
+
+Check_Private_IP_Range_Ping_OK
+    [Tags]    SDWANDEV-2040
+    [Setup]    All_serise_pc_add_multi_address
+    ssh_pc    local
+    multi_ping_and_check_result    &{remote_pc}[intranet_check_ip]
+    multi_ping_and_check_result    &{chongqing_pc}[intranet_check_ip]
+    close connection
+    ssh_pc    remote
+    multi_ping_and_check_result    &{local_pc}[intranet_check_ip]
+    close connection
+    ssh_pc    chongqing
+    multi_ping_and_check_result    &{local_pc}[intranet_check_ip]
+    close connection
+    [Teardown]    All_serise_pc_del_multi_address
+
+Change_Private_IP_Range_Ping_OK
+    [Tags]    SDWANDEV-2042
+    ${ranges}    evaluate    &{local_pc}[intranet_range][1:]
+    patch_company_sites    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    &{local_pc}[site_name]    &{local_cpe}[chassis_id]    ${ranges}
+    ${r_p_len}=    evaluate    len(&{remote_pc}[intranet_range])
+    ${l_p_len}=    evaluate    len(${ranges})
+    ${c_p_len}=    evaluate    len(&{chongqing_pc}[intranet_range])
+    wait until keyword succeeds    ${union_timer}    200ms    check_e2e_match_route    &{remote_cpe}[chassis_id]    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    2    1    ${l_p_len}
+    wait until keyword succeeds    3s    1s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ...    &{remote_cpe}[chassis_id]    2    1    ${r_p_len}
+    wait until keyword succeeds    ${union_timer}    500ms    check_e2e_match_route    &{chongqing_cpe}[chassis_id]    ${suite_&{chongqing_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    2    2    ${l_p_len}
+    wait until keyword succeeds    2s    500ms    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{chongqing_pc}[site_name]_site_id}
+    ...    &{chongqing_cpe}[chassis_id]    2    1    ${c_p_len}
+    [Teardown]    patch_company_sites    ${suite_company_id}    ${suite_&{local_pc}[site_name]_site_id}    &{local_pc}[site_name]    &{local_cpe}[chassis_id]    &{local_pc}[intranet_range]
+
+*** Keywords ***
+Private_Net_Setup
+    Create_Company_Relation
+    wait until keyword succeeds    2s    200ms    Get_Private_Net_Flows
+    Nping_From_PC    remote    &{local_pc}[inner_ip]
+    Nping_From_PC    remote    &{local_pc}[inner_ip]
+    ${r_p_net}    get from list    &{remote_pc}[intranet_range]    0
+    Set global Variable    ${suite_r_p_net}    ${r_p_net}
+
+Private_Net_TearDown
+    Delete_Company_Relation
+
+Case_TearDown
+    Delete_Key
+    delete_company_sites    ${suite_company2_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ${s_id}=    create_company_sites    ${suite_company_id}    &{remote_pc}[site_name]    &{remote_cpe}[chassis_id]    1000.0    ${True}
+    ...    &{remote_pc}[intranet_range]
+    Set Global Variable    ${suite_&{remote_pc}[site_name]_site_id}    ${s_id}
+    ${c_name}=    evaluate    '&{local_pc}[site_name]-&{remote_pc}[site_name]'
+    create_company_union_set_suite_id    ${suite_company_id}    ${c_name}    ${True}    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ${l_p_len}=    evaluate    len(&{local_pc}[intranet_range])
+    ${r_p_len}=    evaluate    len(&{remote_pc}[intranet_range])
+    wait until keyword succeeds    300s    2s    check_e2e_match_route    &{local_cpe}[chassis_id]    ${suite_&{local_pc}[site_name]_site_id}    ${suite_&{remote_pc}[site_name]_site_id}
+    ...    &{remote_cpe}[chassis_id]    2    1    ${r_p_len}
+    wait until keyword succeeds    3s    200ms    check_e2e_match_route    &{remote_cpe}[chassis_id]    ${suite_&{remote_pc}[site_name]_site_id}    ${suite_&{local_pc}[site_name]_site_id}
+    ...    &{local_cpe}[chassis_id]    2    1    ${l_p_len}
+
+iperf_case_teardown
+    Delete_Key
+    close all connections
+
+Get_Private_Net_Flows
+    Comment    get_device_dest_dev_flow_packets    &{remote_pop}[ne_id]    &{remote_cpe}[chassis_id]    &{remote_cpe}[wan_port1]
+    Comment    get_device_dest_dev_flow_packets    &{local_pop}[ne_id]    &{local_cpe}[chassis_id]    &{local_cpe}[wan_port1]
+    ${r_p_net}    get from list    &{remote_pc}[intranet_range]    0
+    ${l_p_net}    get from list    &{local_pc}[intranet_range]    0
+    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    &{remote_pc}[intranet_port]    ${r_p_net}
+    get_cpe_table0_dest_dev_flow_packets    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]    &{local_pc}[intranet_port]    ${l_p_net}
+
+Delete_Key
+    put_company_key    ${suite_company_id}
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    local    &{company1}[key]    False
+    wait until keyword succeeds    5s    1s    Check_CPE_Key    remote    &{company1}[key]    False
+
+Add_PC_Multi_Private_Address
+    [Arguments]    ${cpe}
+    ssh_pc    ${cpe}
+    Add_Nic_IP    &{${cpe}_pc}[intranet_if]    &{${cpe}_pc}[intranet_check_ip]
+    close connection
+
+Del_PC_Multi_Private_Address
+    [Arguments]    ${cpe}
+    ssh_pc    ${cpe}
+    Del_Nic_ip    &{${cpe}_pc}[intranet_if]    &{${cpe}_pc}[intranet_check_ip]
+    close connection
+
+All_serise_pc_add_multi_address
+    add_pc_multi_private_address    local
+    add_pc_multi_private_address    remote
+    add_pc_multi_private_address    chongqing
+
+All_serise_pc_del_multi_address
+    del_pc_multi_private_address    local
+    del_pc_multi_private_address    remote
+    del_pc_multi_private_address    chongqing

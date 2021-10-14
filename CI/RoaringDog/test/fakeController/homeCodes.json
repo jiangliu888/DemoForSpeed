@@ -1,0 +1,84 @@
+{
+	"65424": [{
+		"cac": -1,
+		"eac": -1,
+		"iface": "enp1s0f0",
+		"index": 0
+	},{
+		"cac": 10,
+		"eac": 3,
+		"iface": "wwan0",
+		"index": 0
+	}],
+	"65440": [{
+		"cac": 10,
+		"eac": 3,
+		"iface": "enp1s0f0",
+		"index": 0
+	},{
+		"cac": 12,
+		"eac": 11,
+		"iface": "enp1s0f0",
+		"index": 1
+	}],
+	"65457": [{
+		"cac": 12,
+		"eac": 11,
+		"iface": "eth0",
+		"index": 0
+	},{
+		"cac": 10,
+		"eac": 3,
+		"iface": "eth1",
+		"index": 1
+	}],
+	"65472": [{
+		"cac": 10,
+		"eac": 3,
+		"iface": "enp1s0f0",
+		"index": 0
+	},{
+		"cac": -1,
+		"eac": -1,
+		"iface": "enp1s0f1",
+		"index": 0
+	},{
+		"cac": 10,
+		"eac": 3,
+		"iface": "wwan0",
+		"index": 0
+	}],
+	"65488": [{
+		"cac": 10,
+		"eac": 3,
+		"iface": "enp1s0f0",
+		"index": 0
+	}],
+	"65504": [{
+		"cac": -1,
+		"eac": -1,
+		"iface": "enp1s0f0",
+		"index": 0
+	},{
+		"cac": 12,
+		"eac": 11,
+		"iface": "enp1s0f0",
+		"index": 1
+	}],
+	"65521": [{
+		"cac": -1,
+		"eac": -1,
+		"iface": "eth0",
+		"index": 0
+	},{
+		"cac": -1,
+		"eac": -1,
+		"iface": "eth1",
+		"index": 1
+	},{
+		"cac": -1,
+		"eac": -1,
+		"iface": "wwan0",
+		"index": 0
+	}]
+}

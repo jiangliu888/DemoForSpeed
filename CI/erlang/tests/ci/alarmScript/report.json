@@ -1,0 +1,21 @@
+{
+    "mode": "push",
+    "host": "1003",
+    "plugin": "push",
+    "plugin_instance": "plugin_instance",
+    "type": "thruster_config_last_update_fail",
+    "type_instance": "version",
+    "v_type": "gauge",
+    "value": 1,
+    "meta": [{
+        "key": "version",
+        "v_type": "int",
+        "value": 123
+    },
+    {
+	    "key": "host",
+	    "v_type": "string",
+	    "value": "1003"
+    }
+    ]
+}

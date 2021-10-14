@@ -1,0 +1,117 @@
+#!/bin/sh
+cd $HOME/RTL819x/sdk/rtl819x/
+
+# build
+echo ${BUILD_NUMBER} > romfs_gamebox/etc/firmware_version
+make image
+
+# copy file to workspace
+mkdir ${WORKSPACE}/image
+cp $HOME/RTL819x/sdk/rtl819x/image/* ${WORKSPACE}/image/
+
+cd ${WORKSPACE}
+sshpass -p rocks scp -o StrictHostKeyChecking=no /home/sdn/RTL819x/sdk/rtl819x/image/fw.bin sdn@10.192.15.200:~/http/
+if [ ${PIPESTATUS[0]} -eq 0 ]; then
+  echo "copy file to gamebox pc successfull"
+else
+    echo "copy file to gamebox pc fail"
+    exit 1
+fi
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "sudo mv http/fw.bin /var/www/html/"
+
+
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./download_fw.expect 192.168.3.1 root ]=9[%Y\&w\;2\>4}8 192.168.3.100"
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./download_fw.expect 192.168.17.1 root ]=9[%Y\&w\;2\>4}8 192.168.17.200"
+sleep 240s
+
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./check_fw_version.expect 192.168.3.1 root ]=9[%Y\&w\;2\>4}8 ${BUILD_NUMBER}" >check_version3.log
+if cat check_version3.log|grep 'all pass'; then
+    echo "check gamebox 2 version successfull"
+else
+    cat check_version3.log
+    exit 1
+fi
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./check_fw_version.expect 192.168.17.1 root ]=9[%Y\&w\;2\>4}8 ${BUILD_NUMBER}" >check_version17.log
+if cat check_version17.log|grep 'all pass'; then
+    echo "check gamebox 2 version successfull"
+else
+    cat check_version17.log
+    exit 1
+fi
+
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 ' ping -c 1 192.168.0.1' > ping.txt
+if cat ping.txt|grep '0% packet loss'; then
+   echo "ping 192.168.0.1 ok"
+else
+   echo "ping 192.168.0.1 fail"
+   exit 1
+fi
+
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "sudo dhclient -v  enp1s0"
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./check_SN_LED_DHCP.expect 192.168.3.1 root ]=9[%Y\&w\;2\>4}8  GX102010010012" > check_sn_led12.txt
+if cat check_sn_led12.txt|grep 'mac:00:e0:67:1b:20:b4 ip:192.168.3.10'; then
+   echo " eth_ctrl --dhcp-client ok"
+else
+   echo " eth_ctrl --dhcp-client fail"
+   exit 1
+fi
+
+if cat check_sn_led12.txt|grep 'XYBox_0020'; then
+   echo " wlan_ctrl -i 0 -S 20 ok"
+else
+   echo " wlan_ctrl -i 0 -S 20 fail"
+   exit 1
+fi
+
+if cat check_sn_led12.txt|grep 'subao-'; then
+   echo " wlan_ctrl -i 1 -S 20 ok"
+else
+   echo " wlan_ctrl -i 1 -S 20 fail"
+   exit 1
+fi
+
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./check_SN_LED_DHCP.expect 192.168.17.1 root ]=9[%Y\&w\;2\>4}8  GX102010010020" > check_sn_led20.txt
+if cat check_sn_led20.txt|grep 'vendor:udhcp 0.9.9-pre'; then
+   echo " eth_ctrl --dhcp-client ok"
+else
+   echo " eth_ctrl --dhcp-client fail"
+   exit 1
+fi
+
+if cat check_sn_led20.txt|grep 'XYBox_0012'; then
+   echo " wlan_ctrl -i 0 -S 20 ok"
+else
+   echo " wlan_ctrl -i 0 -S 20 fail"
+   exit 1
+fi
+
+if cat check_sn_led20.txt|grep 'subao-'; then
+   echo " wlan_ctrl -i 1 -S 20 ok"
+else
+   echo " wlan_ctrl -i 1 -S 20 fail"
+   exit 1
+fi
+
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./check_Multi_Wan.expect 192.168.17.1 root ]=9[%Y\&w\;2\>4}8" > check_wan.txt
+if cat check_wan.txt|grep 'all pass'; then
+    echo " check mulit wan all pass"
+else
+    cat check_wan.txt
+    exit 1
+fi
+
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./check_host_ctrl_blacklist.expect 192.168.17.1 root ]=9[%Y\&w\;2\>4}8 192.168.3.1" > check_host_ctrl_blacklist.txt
+sshpass -p rocks ssh -o StrictHostKeyChecking=no  sdn@10.192.15.200 "./remove_blacklist.expect 192.168.17.1 root ]=9[%Y\&w\;2\>4}8 192.168.3.1" > remove_blacklist.txt
+if cat check_host_ctrl_blacklist.txt|grep 'all pass'; then
+    echo " check_host_ctrl_blacklist all pass"
+else
+    cat check_host_ctrl_blacklist.txt
+    exit 1
+fi
+
+if cat remove_blacklist.txt|grep 'all pass'; then
+    echo " remove_blacklist all pass"
+else
+    cat remove_blacklist.txt
+    exit 1
+fi

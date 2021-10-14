@@ -1,0 +1,61 @@
+*** Settings ***
+Suite Setup       setup_check_mss
+Suite Teardown    teardown_check_mss
+Resource          ../../resource/SshKeyword.txt
+
+*** Variables ***
+${tst}            1
+${strategy2_log}    Strategy2_mss_ping.log
+${pStrategy2_log}    Private_Strategy2_mss_ping.log
+${strategy2_tcpdump}    Strategy2_mss_tcpdump.pcap
+${pStrategy2_tcpdump}    Private_Strategy2_mss_tcpdump.pcap
+${strategy2_wan_tcpdump}    strategy2_mss_wan_tcpdump.pcap
+${strategy2_lan_tcpdump}    strategy2_mss_lan_tcpdump.pcap
+${strategy2_sideway_log}    Sideway_Strategy2_mss_ping.log
+${strategy2_sideway_tcpdump}    Sideway_Strategy2_mss_tcpdump.pcap
+
+*** Test Cases ***
+ChangeMTU_Check_Sideway_MSS
+    [Tags]    Sideway    SDWANDEV-2589
+    ${mtu}=    set variable    ${1000}
+    Update Fragement Strategy    2    ${mtu}
+    ${exp_mtu}=    evaluate    ${mtu} - 70 - 40
+    wait until keyword succeeds    40    200ms    PC_MSS_Check    wuhan    &{nanjing_pc}[inner_ip]    ${exp_mtu}
+    PC_MSS_Check    nanjing    &{wuhan_pc}[inner_ip]    ${exp_mtu}
+    [Teardown]    Update Fragement Strategy    2
+
+Check_Sideway_MSS
+    [Tags]    Sideway    SDWANDEV-2590
+    wait until keyword succeeds    40    200ms    PC_MSS_Check    wuhan    &{nanjing_pc}[inner_ip]    1370
+    PC_MSS_Check    nanjing    &{wuhan_pc}[inner_ip]    1370
+    [Teardown]
+
+Check_Private_Net_MSS
+    [Tags]    SDWANDEV-2591
+    run keyword if    ${suite_test_series_group}    Nping_From_PC    remote    &{local_pc}[intranet_ip]
+    Init Flowtable Counters Mss
+    PC_MSS_Check    local    &{remote_pc}[intranet_ip]    1370
+    PC_MSS_Check    remote    &{local_pc}[intranet_ip]    1370
+    [Teardown]    Init Flowtable Counters Mss
+
+Check_Sideway_Gateway_MSS
+    [Tags]    Sideway    SDWANDEV-2592
+    wait until keyword succeeds    40    200ms    PC_MSS_Check    guangzhou    &{nanjing_pc}[inner_ip]    1370
+
+*** Keywords ***
+setup_check_mss
+    run keyword if    ${suite_test_series_group}    serise_setup_for_check_mss
+
+teardown_check_mss
+    Suite_stop_tcpdump
+
+serise_setup_for_check_mss
+    Valid Ping Start Tcpdump in Remote PC    ${strategy2_tcpdump}    ${pStrategy2_tcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+    valid ping start tcpdump in chongqing pc    ${strategy2_tcpdump}    ${pStrategy2_tcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+    Valid Ping Suite Setup    ${strategy2_tcpdump}    ${pStrategy2_tcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+
+Init Flowtable Counters Mss
+    ${r_p_net}    get from list    &{remote_pc}[intranet_range]    0
+    ${l_p_net}    get from list    &{local_pc}[intranet_range]    0
+    ${p_s2.init_send_packets}=    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    &{remote_pc}[intranet_port]    ${r_p_net}
+    ${p_s2.init_rcv_packets}=    get_cpe_table0_dest_dev_flow_packets    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]    &{local_pc}[intranet_port]    ${l_p_net}

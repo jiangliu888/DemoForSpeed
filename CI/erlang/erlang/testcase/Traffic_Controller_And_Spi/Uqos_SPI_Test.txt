@@ -1,0 +1,161 @@
+*** Settings ***
+Suite Setup       run keywords    Setup_Qos_SPI_ON_CPES
+...               AND    Check_Manager_SPI_Value    guangzhou
+Suite Teardown    TearDown_Qos_SPI_ON_CPES
+Library           ../../libs/common/SetHttp.py
+Library           ../../libs/uranus/UranusKeyword.py
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${r_iperf_s_port}    5201
+${l_iperf_s_port}    5202
+${handover_sideway_log}    spi_sideway.log
+${vport_check}    5s
+${hard_sleep}     10s
+${domain_wait}    10
+
+*** Test Cases ***
+Classify_And_Report_static_To_Manager
+    [Tags]    SDWANDEV-1882
+    ${r_p}    ${bulk_p}    ${d_p}=    Wait Until Keyword Succeeds    3s    1s    Get_Manager_SPI_Value
+    ...    guangzhou
+    ssh_pc    guangzhou
+    Write Sudo Cmd    ps    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    nping --tcp-connect -c 20 --delay 0.2 172.19.14.125 -p 5202 > nping_tcp.log &    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    nping --udp -c 10 --delay 0.2s 172.19.14.125 -p 5201 > nping_udp.log &    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    nping --tcp-connect -c 3 --delay 0.2s 172.19.14.125 -p 22 > nping_tcp2.log &    &{guangzhou_pc}[passwd]
+    Write Sudo Cmd    ping -c 5 -i 0.2 172.19.14.125 > ping_qos.log &    &{guangzhou_pc}[passwd]
+    Wait Until Keyword Succeeds    16s    1s    Check_Manager_SPI_Value    guangzhou    40.0    10.0
+    ...    11.0
+    close connection
+
+First_High_Pri_4_Then_Medium_Pri_2
+    [Tags]    SDWANDEV-3967
+    [Setup]    run keywords    reinit_iperf_server
+    ...    AND    Transport_mode_flow_Setup
+    ...    AND    set_gateway_wan_20M
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${l_iperf_s_port}    10
+    sleep    3
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    5    ${False}    iperf_band_5201.log
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_last_band_result_in_server    nanjing    10    ${l_iperf_s_port}
+    ...    10.9    14
+    check_iperf_last_band_result_in_server    nanjing    3    ${r_iperf_s_port}    2    7.6
+    [Teardown]    teardown_cpe_wan    guangzhou
+
+First_Medium_Pri_Then_High_Pri_Per_Flow
+    [Tags]    SDWANDEV-1883
+    [Setup]    run keywords    reinit_iperf_server
+    ...    AND    set_gateway_wan_20M
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    10
+    sleep    2
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${l_iperf_s_port}    5    ${False}    iperf_band_5201.log
+    Wait Until Keyword Succeeds    10s    1s    check_iperf_last_band_result_in_server    nanjing    5    ${l_iperf_s_port}
+    ...    10.6    17
+    check_iperf_last_band_result_in_server    nanjing    10    ${r_iperf_s_port}    2    7.6
+    [Teardown]    teardown_cpe_wan    guangzhou
+
+Appointed_Vport_Prefered_Vport_Per_Packet
+    [Tags]    SDWANDEV-1889
+    [Setup]    run keywords    reinit_iperf_server
+    ...    AND    set_nanjing_wan_10M
+    ${wan}=    iperf_and_get_better_wan    ${l_iperf_s_port}
+    should be true    '${wan}'=='1'
+    ${wan}=    iperf_and_get_better_wan    ${r_iperf_s_port}
+    should be true    '${wan}'=='2'
+    update_wan_param    wuhan    medium    high
+    ${wan}=    iperf_and_get_better_wan    ${l_iperf_s_port}
+    should be true    '${wan}'=='1'
+    ${wan}=    iperf_and_get_better_wan    ${r_iperf_s_port}
+    should be true    '${wan}'=='1'
+    Iperf3_loss_From_PC_With_Port    &{nanjing_pc}[inner_ip]    10M    wuhan    ${l_iperf_s_port}
+    ${wan}=    iperf_and_get_better_wan    ${r_iperf_s_port}
+    should be true    '${wan}'=='2'
+    update_wan_param    wuhan    high    medium
+    update_wan_param    wuhan    medium    medium
+    ${wan}=    iperf_and_get_better_wan    ${l_iperf_s_port}
+    should be true    '${wan}'=='2'
+    ${wan}=    iperf_and_get_better_wan    ${r_iperf_s_port}
+    should be true    '${wan}'=='2'
+    [Teardown]    run keywords    teardown_cpe_wan    nanjing
+    ...    AND    teardown_wan_param
+
+Appointed_Vport_bandwidth
+    [Tags]    SDWANDEV-1891
+    [Setup]    run keywords    reinit_iperf_server
+    ...    AND    set_nanjing_wan_10M
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    wuhan    ${l_iperf_s_port}    5    ${False}    iperf_band_5202.log
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_last_band_result_in_server    nanjing    5    ${l_iperf_s_port}
+    ...    168    185
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    wuhan    ${r_iperf_s_port}    5
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_last_band_result_in_server    nanjing    5    ${r_iperf_s_port}
+    ...    190    205
+    update_wan_param_prefer_2port    wuhan    high
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    wuhan    ${l_iperf_s_port}    5    ${False}    iperf_band_5202.log
+    Wait Until Keyword Succeeds    6s    1s    check_iperf_last_band_result_in_server    nanjing    5    ${l_iperf_s_port}
+    ...    170    185
+    [Teardown]    run keywords    teardown_cpe_wan    nanjing
+    ...    AND    teardown_wan_param
+
+CPE_Qos_Cache_CLI_Test
+    [Tags]    SDWANDEV-3962
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    guangzhou    ${r_iperf_s_port}    5    ${False}    iperf_band_5201.log
+    Iperf3_band_From_PC_With_Port    &{nanjing_pc}[inner_ip]    wuhan    ${l_iperf_s_port}    5    ${False}
+    wait until keyword succeeds    10    200ms    Check CPE Qos Cache Info    wuhan    &{nanjing_pc}[inner_ip]    ${False}
+    ...    ${False}    6    reliable
+    wait until keyword succeeds    10    200ms    Check CPE Qos Cache Info    guangzhou    &{nanjing_pc}[inner_ip]    ${False}
+    ...    ${False}    6    partial_reliable    100    50
+    [Teardown]
+
+*** Keywords ***
+iperf_and_get_better_wan
+    [Arguments]    ${port}    ${band}=5M
+    ${link_ids}    ${links}=    Check End2End Links    wuhan    &{nanjing_cpe}[chassis_id]    8
+    ${score_list}    ${p_list}    ${b_list}=    Get_CPE_Link_Packets_Bytes_Score    wuhan    ${link_ids}
+    ssh_pc    wuhan
+    Write Sudo Cmd    rm -rf ${handover_sideway_log}    &{wuhan_pc}[passwd]
+    Write Sudo Cmd    git/iperf/src/iperf3 -c 172.19.14.125 \ -t 3 \ -p ${port} -b ${band} --forceflush --logfile iperf_band.log &    &{wuhan_pc}[passwd]
+    sleep    3
+    close connection
+    ${e_score_list}    ${e_p_list}    ${e_b_list}=    Get_CPE_Link_Packets_Bytes_Score    wuhan    ${link_ids}
+    ${b_wan}    ${b_direct}=    Get_Better_Wan    ${links}    ${p_list}    ${e_p_list}
+    [Return]    ${b_wan}
+
+reinit_iperf_server
+    Init_Iperfs_Server_In_PC_with_Port    wuhan    ${r_iperf_s_port}
+    Init_Iperfs_Server_In_PC_with_Port_without_kill_server    wuhan    ${l_iperf_s_port}
+    Init_Iperfs_Server_In_PC_with_Port    nanjing    ${l_iperf_s_port}
+    Init_Iperfs_Server_In_PC_with_Port_without_kill_server    nanjing    ${r_iperf_s_port}
+
+Check CPE Qos Cache Info
+    [Arguments]    ${cpe}    ${remote_ip}    ${pass}    ${saas}    ${proto}    ${expect_qos}
+    ...    ${max_time}=${0}    ${max_pkgs}=${0}
+    ${dst_cache}    ${src_cache}    Get_CPE_Cache_Info    ${cpe}    ${remote_ip}    ${pass}    ${saas}
+    ...    ${proto}
+    should be true    "${dst_cache[0]['qos.exist']}"=="True"
+    should be true    "${src_cache[0]['qos.exist']}"=="False"
+    run keyword if    '${expect_qos}'=='reliable'    should be true    "${dst_cache[0]['qos.reliable']}"=="True"
+    ...    ELSE    should be true    "${dst_cache[0]['qos_partial']}"=="True"
+    Comment    should be true    "${dst_cache[0]['qos.partial.max_time']}"=="${max_time}"
+    Comment    should be true    "${dst_cache[0]['qos.partial.max_pkt_num']}"=="${max_pkgs}"
+
+update_wan_param
+    [Arguments]    ${cpe}    ${pri}    ${target}
+    ${tag_id}=    get_company_spi_tag_id_by_name    ${suite_company_id}    QOS_${cpe}_Pri_${pri}_Tag
+    ${level}=    set variable if    '${pri}'=='medium'    1010    1001
+    ${assign_p}=    set variable if    '${pri}'=='medium'    prefer    assign
+    config_wan_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_${cpe}_site_id}    ${tag_id}    ${level}    ${assign_p}    &{${cpe}_cpe}[qos_spi_${assign_p}_wan${target}]
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_prefer_dispatch_from_cpe    ${cpe}    ${tag_id}    ${level}
+    ...    ${assign_p}    &{${cpe}_cpe}[qos_spi_${assign_p}_wan${target}]
+
+teardown_wan_param
+    update_wan_param    wuhan    high    high
+    update_wan_param    wuhan    medium    medium
+
+update_wan_param_prefer_2port
+    [Arguments]    ${cpe}    ${pri}
+    ${tag_id}=    get_company_spi_tag_id_by_name    ${suite_company_id}    QOS_${cpe}_Pri_${pri}_Tag
+    ${level}=    set variable if    '${pri}'=='medium'    1010    1001
+    config_wan_params_to_site_qos_spi_dispatchs    ${suite_company_id}    ${suite_${cpe}_site_id}    ${tag_id}    ${level}    prefer    &{${cpe}_cpe}[qos_spi_prefer_wan${pri}]
+    Wait Until Keyword Succeeds    ${domain_wait}    200ms    check_spi_prefer_dispatch_from_cpe    ${cpe}    ${tag_id}    ${level}
+    ...    prefer    &{${cpe}_cpe}[qos_spi_prefer_wan${pri}]

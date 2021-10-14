@@ -1,0 +1,68 @@
+*** Settings ***
+Suite Setup       Setup for Ping Too Long
+Suite Teardown    close all connections
+Resource          ../../resource/PingKeyword.txt
+
+*** Variables ***
+${strategy2_log}    Strategy2_too_long_ping.log
+${pStrategy2_log}    Private_Strategy2_too_long_ping.log
+${strategy2_4glog}    Strategy2_4g_too_long_ping.log
+${pStrategy2_4glog}    Private_Strategy2_4g_too_long_ping.log
+${strategy2_nat_log}    Strategy2_nat_too_long_ping.log
+${pStrategy2_nat_log}    pStrategy2_nat_too_long_ping.log
+
+*** Test Cases ***
+Strategy2 MTU1419
+    [Tags]    Invalid Ping    SDWANDEV-206
+    [Setup]    SSH Login Local
+    Check Message Too Long    ${strategy2_log}    ${false}    time=
+    wait until keyword succeeds    10    0.2    Check Message Too Long    ${strategy2_log}    ${true}    1446
+    [Teardown]    close connection
+
+Private Strategy2 MTU1473
+    [Tags]    Invalid Ping    SDWANDEV-224
+    [Setup]    SSH Login Local
+    wait until keyword succeeds    10    0.2    Check Message Too Long    ${pStrategy2_log}    ${false}    time=
+    [Teardown]    close connection
+
+Sideway Strategy2 MTU1473
+    [Tags]    Invalid Ping    SDWANDEV-825    Sideway
+    [Setup]    SSH Login Wuhan
+    Check Message Too Long    ${strategy2_log}    ${false}    time=
+    wait until keyword succeeds    10    0.2    Check Message Too Long    ${strategy2_log}    ${true}    1500
+    [Teardown]    close connection
+
+Strategy2 Nat_MTU1473
+    [Tags]    Invalid Ping    SDWANDEV-206
+    [Setup]    SSH Login Local
+    Check Message Too Long    ${strategy2_nat_log}    ${false}    time=
+    wait until keyword succeeds    10    0.2    Check Message Too Long    ${strategy2_nat_log}    ${true}    1438
+    [Teardown]    close connection
+
+Private Strategy2_Nat_MTU1473
+    [Tags]    Invalid Ping    SDWANDEV-224
+    [Setup]    SSH Login Local
+    wait until keyword succeeds    10    0.2    Check Message Too Long    ${pStrategy2_nat_log}    ${false}    time=
+    [Teardown]    close connection
+
+Sideway_Gateway_Strategy2 MTU1473
+    [Tags]    Invalid Ping    Sideway    SDWANDEV-1530
+    [Setup]    Ssh_PC    guangzhou
+    Check Message Too Long    ${strategy2_log}    ${false}    time=
+    wait until keyword succeeds    10    0.2    Check Message Too Long    ${strategy2_log}    ${true}    1500
+    [Teardown]    close connection
+
+*** Keywords ***
+Setup for Ping Too Long
+    run keyword if    ${suite_test_series_group}    Series_Setup for Ping Too Long
+    run keyword if    ${suite_test_parallel_group}    Parallel_Setup for Ping Too Long
+
+Series_Setup for Ping Too Long
+    Start Ping Too Long    1419    &{remote_pc}[inner_ip]    ${strategy2_log}
+    Start Ping Too Long    1473    &{remote_pc}[intranet_ip]    ${pStrategy2_log}
+    Start Ping Too Long    1411    &{chongqing_pc}[inner_ip]    ${strategy2_nat_log}
+    Start Ping Too Long    1473    &{chongqing_pc}[intranet_ip]    ${pStrategy2_nat_log}
+
+Parallel_Setup for Ping Too Long
+    Start Sideway Ping Too Long    wuhan    1473    &{nanjing_pc}[inner_ip]    ${strategy2_log}
+    Start Sideway Ping Too Long    guangzhou    1473    &{nanjing_pc}[inner_ip]    ${strategy2_log}

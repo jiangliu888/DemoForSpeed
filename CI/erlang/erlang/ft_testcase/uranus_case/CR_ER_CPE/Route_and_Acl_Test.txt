@@ -1,0 +1,106 @@
+*** Settings ***
+Suite Setup       FT_Suit_startup
+Suite Teardown
+Test Setup        TestSetup
+Resource          ../../../testcase/resource/UranusKeyword.txt
+Library           ../../../libs/uranus/UranusKeyword.py
+Library           ../../../libs/configCenter/ConsulKeyword.py
+Resource          ../../resource/FtNeKeyword.txt
+Library           ../../../libs/fake_ne/interface/FakeNeKeyword.py
+Library           ../../../libs/fake_ne/topo/loadTopo.py
+Resource          ../../resource/topoKeyword.txt
+Variables         ../../../config/ft_topo_check/flows_check.py
+
+*** Variables ***
+${select_area_wait_timer}    60s
+
+*** Test Cases ***
+CPE_check_no_flow_without_union_flow_with_union
+    [Tags]    SDWANDEV-3573
+    ${switchs}=    create list    8550    8566    17009    17026
+    ${cpes}=    create list    17009    17026
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_gw_gw.json    ${switchs}    ${cpes}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    5    1
+    create_route    ${suite_company_id}    testroute    ${sites_id_list[0]}    &{cpe_net}[net_all]    &{cpe_net}[dst_net]
+    ${ret}=    Run Keyword And Return Status    CPE_Flow_table_check    ${UN17009_17026_CPE_Flows}
+    should be true    '${ret}'=='False'
+    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    10s    2s    CPE_Flow_table_check    ${UN17009_17026_CPE_Flows}
+    [Teardown]    run keywords    delete_company1_relation    Case_tear_down
+
+CPE_modify_site_net_check_no_route_flow
+    [Tags]    SDWANDEV-3574
+    ${switchs}=    create list    8550    8566    17009    17026
+    ${cpes}=    create list    17009    17026
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_gw_gw.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    5    1
+    create_route    ${suite_company_id}    testroute    ${sites_id_list[0]}    &{cpe_net}[net_all]    &{cpe_net}[dst_net]
+    CPE_Flow_table_check    ${UN17009_17026_CPE_Flows}
+    modify_company_site_net    17026    ${sites_id_list[1]}    ${suite_company_id}
+    ${ret}=    Run Keyword And Return Status    CPE_Flow_table_check    ${UN17009_17026_CPE_Flows}
+    should be true    '${ret}'=='False'
+    [Teardown]    run keywords    delete_company1_relation    Case_tear_down
+
+CPE_add_route_check_flow
+    [Tags]    SDWANDEV-3575
+    ${switchs}=    create list    8550    8566    17009    17026    17043
+    ${cpes}=    create list    17009    17026    17043
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_3cpe_topo_gw_gw_pa.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    5    1
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    5    1
+    create_route    ${suite_company_id}    testroute    ${sites_id_list[0]}    &{cpe_net}[net_all]    &{cpe_net}[dst_net]    ${sites_id_list[1]}
+    CPE_Flow_table_check    ${UN17009_17026_UN17009_17043_Add_route_CPE_Flows}
+    delete_company_route    ${suite_company_id}    testroute
+    CPE_Flow_table_check    ${UN17009_17026_UN17009_17043_CPE_Flows}
+    ${ret}=    Run Keyword And Return Status    CPE_Flow_table_check    ${UN17009_17026_UN17009_17043_Add_route_CPE_Flows}
+    should be true    '${ret}'=='False'
+    [Teardown]    run keywords    delete_company1_relation    Case_tear_down
+
+CPE_add_cpe_union_check_route_flow
+    [Tags]    SDWANDEV-3576
+    ${switchs}=    create list    8550    8566    17009    17026
+    ${cpes}=    create list    17009    17026
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_2cpe_topo_gw_gw.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    5    1
+    create_route    ${suite_company_id}    testroute    ${sites_id_list[0]}    &{cpe_net}[net_all]    &{cpe_net}[dst_net]    ${sites_id_list[1]}
+    CPE_Flow_table_check    ${UN17009_17026_CPE_Flows}
+    start_A_Ne    CPE    17043.2.1    5    24    3
+    ${site17043_id}=    create_company_sites    ${suite_company_id}    17043    17043    ${None}    &{cpe_net}[17043]
+    ${site17009_id}=    get from list    ${sites_id_list}    0
+    ${cpes_add17043}=    create list    ${site17009_id}    ${site17043_id}
+    ${cpe17009_17043}    create list    17009    17043
+    ${union17009_17043_id_list}=    create_company_union    ${cpe17009_17043}    ${cpes_add17043}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Select_Right_EAC    17043    5    1
+    CPE_Flow_table_check    ${UN17009_17026_UN17009_17043_Add_route_CPE_Flows}
+    [Teardown]    run keywords    delete_company1_relation    Case_tear_down
+
+CPE_add_route_withoutUnion_check_flow
+    [Tags]    SDWANDEV-3577
+    ${switchs}=    create list    8550    8566    17009    17026    17043
+    ${cpes}=    create list    17009    17026    17043
+    ${sites_id_list}=    Start_Ne_with_topo    &{path}[topo]/2cr_3cpe_topo_gw_gw_pa.json    ${switchs}    ${cpes}
+    ${union_id_list}=    create_company_union    ${cpes}    ${sites_id_list}    ${suite_company_id}
+    wait until keyword succeeds    ${select_area_wait_timer}    2s    All_CPE_Learn_CAC_EAC
+    Ensure_CPE_Wan_Select_Right_EAC    17009    enp0s3    0    4    1
+    Ensure_CPE_Wan_Select_Right_EAC    17026    enp0s3    0    5    1
+    Ensure_CPE_Wan_Select_Right_EAC    17043    enp0s3    0    5    1
+    create_route    ${suite_company_id}    testroute    ${sites_id_list[0]}    &{cpe_net}[17026]    &{cpe_net}[17043]    ${sites_id_list[1]}
+    CPE_Flow_table_check    ${UN17009_17026_UN17009_17043_Add_17026_17043_route_CPE_Flows}
+    [Teardown]    run keywords    delete_company1_relation    Case_tear_down
+
+*** Keywords ***
+create_route
+    [Arguments]    ${company_id}    ${routeName}    ${nextHop}    ${srcNet}    ${dstNet}    ${siteId}=${None}
+    add_company_route    ${company_id}    ${routeName}    ${500}    ${nextHop}    ${dstNet}    ${srcNet}    ${None}    ${None}    ${None}    ${None}    ${siteId}

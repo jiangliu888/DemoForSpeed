@@ -1,0 +1,135 @@
+*** Settings ***
+Suite Setup       Setup for Ping Longgest
+Suite Teardown    Teardown for Ping Longgest
+Resource          ../../resource/SshKeyword.txt
+Resource          ../../resource/PingKeyword.txt
+
+*** Variables ***
+${exec_time}      50
+${max_latency}    6
+&{s2}             init_pop_send=0    init_pop_rcv=0    init_send_packets=0    init_rcv_packets=0    init_nat_send_packets=0    init_nat_rcv_packets=0    init_pop_nat_send=0
+&{p_s2}           init_pop_send=0    init_pop_rcv=0    init_send_packets=0    init_rcv_packets=0    init_nat_send_packets=0    init_nat_rcv_packets=0
+&{s2_4g}          init_pop_send=0    init_pop_rcv=0    init_send_packets=0    init_rcv_packets=0
+&{p_s2_4g}        init_pop_send=0    init_pop_rcv=0    init_send_packets=0    init_rcv_packets=0
+${strategy2_log}    Strategy2_1418_ping.log
+${pStrategy2_log}    Private_Strategy2_1472_ping.log
+${strategy2_tcpdump}    Strategy2_1378_tcpdump.pcap
+${pStrategy2_tcpdump}    Private_Strategy2_1418_tcpdump.pcap
+${strategy2_4glog}    Strategy2_4g_1418_ping.log
+${pStrategy2_4glog}    Private_Strategy2_4g_1418_ping.log
+${strategy2_4gtcpdump}    Strategy2_4g_1378_tcpdump.pcap
+${pStrategy2_4gtcpdump}    Private_Strategy2_4g_1418_tcpdump.pcap
+${strategy2_wan_tcpdump}    strategy2_1418_wan_tcpdump.pcap
+${strategy2_lan_tcpdump}    strategy2_1418_lan_tcpdump.pcap
+${strategy2_sideway_log}    Sideway_Strategy2_1472_ping.log
+${strategy2_sideway_tcpdump}    Sideway_Strategy2_1472_tcpdump.pcap
+${strategy2_nat_log}    Strategy2_nat_1418_ping.log
+${pStrategy2_nat_log}    Private_Strategy2_nat_1472_ping.log
+${first_latency}    8
+
+*** Test Cases ***
+Strategy2 MTU1418
+    [Tags]    Valid Ping    SDWANDEV-207    long
+    [Setup]    ssh login local
+    ${avg}    ${f_delay}=    Get Valid Ping Logs    ${strategy2_log}    ${strategy2_tcpdump}
+    wait until keyword succeeds    8x    0.5    Check Ping Flowtables    &{s2}[init_send_packets]    &{s2}[init_rcv_packets]    ${exec_time}
+    ...    1    &{local_pc}[internet_port]    &{remote_pc}[internet_port]
+    ${nat_avg}=    evaluate    ${avg}-2
+    ${nat_first}=    evaluate    ${f_delay}-2
+    Check Valid Ping Results    ${nat_avg}    ${nat_first}
+    [Teardown]    close connection
+
+Private Strategy2 MTU1472
+    [Tags]    Valid Ping    SDWANDEV-218
+    [Setup]    ssh login local
+    ${avg}    ${f_delay}=    Get Valid Ping Logs    ${pStrategy2_log}    ${pStrategy2_tcpdump}
+    ${r_p_net}    get from list    &{remote_pc}[intranet_range]    0
+    ${l_p_net}    get from list    &{local_pc}[intranet_range]    0
+    wait until keyword succeeds    8x    0.5    Check Ping Flowtables    &{p_s2}[init_send_packets]    &{p_s2}[init_rcv_packets]    ${exec_time}
+    ...    1    &{local_pc}[intranet_port]    &{remote_pc}[intranet_port]    ${l_p_net}    ${r_p_net}
+    Check Valid Ping Results    ${avg}    ${f_delay}
+    [Teardown]    close connection
+
+Sideway Strategy2 MTU1472
+    [Tags]    Valid Ping    SDWANDEV-824    Sideway
+    [Setup]    ssh login wuhan
+    ${avg}    ${f_delay}=    Get Valid Ping Logs    ${strategy2_sideway_log}    ${strategy2_sideway_tcpdump}
+    #wait until keyword succeeds    6    0.5    Check Ping Flowtables    &{s2}[init_send_packets]    &{s2}[init_rcv_packets]    ${exec_time}
+    #...    1    &{local_pc}[internet_port]    &{remote_pc}[internet_port]
+    Check Valid Ping Results    ${avg}    ${f_delay}
+    [Teardown]    close connection
+
+Strategy2 Nat MTU1472
+    [Tags]    Valid Ping    SDWANDEV-1241
+    [Setup]    ssh login local
+    ${avg}    ${f_delay}=    Get Valid Ping Logs    ${strategy2_nat_log}    ${strategy2_tcpdump}
+    wait until keyword succeeds    8x    0.5    Check Ping Nat Flowtables    &{s2}[init_nat_send_packets]    &{s2}[init_nat_rcv_packets]    ${exec_time}
+    ...    1    &{local_pc}[internet_port]    &{chongqing_pc}[internet_port]
+    ${nat_avg}=    evaluate    ${avg}-2
+    ${nat_first}=    evaluate    ${f_delay}-2
+    Check Valid Ping Results    ${nat_avg}    ${nat_first}
+    [Teardown]    close connection
+
+Private Strategy2 Nat MTU1472
+    [Tags]    Valid Ping    SDWANDEV-1261
+    [Setup]    ssh login local
+    ${avg}    ${f_delay}=    Get Valid Ping Logs    ${pStrategy2_nat_log}    ${pStrategy2_tcpdump}
+    ${c_p_net}    get from list    &{chongqing_pc}[intranet_range]    0
+    ${l_p_net}    get from list    &{local_pc}[intranet_range]    0
+    wait until keyword succeeds    8x    0.5    Check Ping Nat Flowtables    &{p_s2}[init_nat_send_packets]    &{p_s2}[init_nat_rcv_packets]    ${exec_time}
+    ...    1    &{local_pc}[intranet_port]    &{chongqing_pc}[intranet_port]    ${l_p_net}    ${c_p_net}
+    Check Valid Ping Results    ${avg}    ${f_delay}
+    [Teardown]    close connection
+
+Sideway_Gateway_Strategy2 MTU1472
+    [Tags]    Valid Ping    SDWANDEV-1531    Sideway
+    [Setup]    Ssh_PC    guangzhou
+    ${avg}    ${f_delay}=    Get Valid Ping Logs    ${strategy2_sideway_log}    ${strategy2_sideway_tcpdump}
+    Check Valid Ping Results    ${avg}    ${f_delay}
+    [Teardown]    close connection
+
+*** Keywords ***
+Setup for Ping Longgest
+    run keyword if    ${suite_test_series_group}    Series_Setup for Ping Longgest
+    run keyword if    ${suite_test_parallel_group}    Parallel_Setup for Ping Longgest
+
+Init Flowtable Counters
+    ${s2.init_pop_send}=    Get_CPE_Flow_Info_From_POP    remote    &{remote_cpe}[chassis_id]    &{remote_cpe}[wan_port1]
+    ${s2.init_pop_nat_send}=    Get_CPE_Flow_Info_From_POP    remote    &{chongqing_cpe}[chassis_id]    &{chongqing_cpe}[wan_port1]
+    ${s2.init_pop_rcv}=    Get_CPE_Flow_Info_From_POP    local    &{local_cpe}[chassis_id]    &{local_cpe}[wan_port1]
+    ${s2.init_send_packets}=    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    &{remote_pc}[internet_port]
+    ${s2.init_rcv_packets}=    get_cpe_table0_dest_dev_flow_packets    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]    &{local_pc}[internet_port]
+    ${nat_pop}=    get_dst_chongqing_nat_pop_ip    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]
+    ${s2.init_nat_send_packets}=    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]    &{chongqing_pc}[internet_port]    nat_ip=${nat_pop}
+    ${s2.init_nat_rcv_packets}=    get_cpe_table0_dest_dev_flow_packets    &{chongqing_cpe}[chassis_id]    &{local_cpe}[chassis_id]    &{local_pc}[internet_port]
+    ${r_p_net}    get from list    &{remote_pc}[intranet_range]    0
+    ${l_p_net}    get from list    &{local_pc}[intranet_range]    0
+    ${c_p_net}    get from list    &{chongqing_pc}[intranet_range]    0
+    ${p_s2.init_send_packets}=    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{remote_cpe}[chassis_id]    &{remote_pc}[intranet_port]    ${r_p_net}
+    ${p_s2.init_rcv_packets}=    get_cpe_table0_dest_dev_flow_packets    &{remote_cpe}[chassis_id]    &{local_cpe}[chassis_id]    &{local_pc}[intranet_port]    ${l_p_net}
+    ${p_s2.init_nat_send_packets}=    get_cpe_table0_dest_dev_flow_packets    &{local_cpe}[chassis_id]    &{chongqing_cpe}[chassis_id]    &{chongqing_pc}[intranet_port]    ${c_p_net}
+    ${p_s2.init_nat_rcv_packets}=    get_cpe_table0_dest_dev_flow_packets    &{chongqing_cpe}[chassis_id]    &{local_cpe}[chassis_id]    &{local_pc}[intranet_port]    ${l_p_net}
+    # for 4G
+    # TODO: sideway flowtable check
+
+Teardown for Ping Longgest
+    run keyword if    ${suite_test_series_group}    Check POP Ping Flowtables    &{s2}[init_pop_send]    &{s2}[init_pop_rcv]    &{s2}[init_pop_nat_send]    ${exec_time}
+    ...    1    &{local_cpe}[wan_port1]    &{remote_cpe}[wan_port1]
+    Suite_stop_tcpdump
+
+Series_Setup for Ping Longgest
+    Valid Ping Start Tcpdump in Remote PC    ${strategy2_tcpdump}    ${pStrategy2_tcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+    ${target_cpe}   set variable   'chongqing'
+    run keyword if   ${target_cpe} in @{cpe_list}    valid ping start tcpdump in chongqing pc    ${strategy2_tcpdump}    ${pStrategy2_tcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+    Valid Ping Suite Setup    ${strategy2_tcpdump}    ${pStrategy2_tcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+    Init Flowtable Counters
+    Start Ping in Parallel    1418    &{remote_pc}[inner_ip]    ${strategy2_log}
+    Start Ping in Parallel    1472    &{remote_pc}[intranet_ip]    ${pStrategy2_log}
+    Start Ping in Parallel    1410    &{chongqing_pc}[inner_ip]    ${strategy2_nat_log}
+    Start Ping in Parallel    1472    &{chongqing_pc}[intranet_ip]    ${pStrategy2_nat_log}
+
+Parallel_Setup for Ping Longgest
+    Valid Ping Gateway Suite Setup    ${strategy2_4gtcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+    Valid Ping Sideway Suite Setup    ${strategy2_sideway_tcpdump}    ${strategy2_wan_tcpdump}    ${strategy2_lan_tcpdump}
+    Start Ping Sideway in Parallel    wuhan    1472    &{nanjing_pc}[inner_ip]    ${strategy2_sideway_log}
+    Start Ping Sideway in Parallel    guangzhou    1472    &{nanjing_pc}[inner_ip]    ${strategy2_sideway_log}

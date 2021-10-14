@@ -1,0 +1,243 @@
+*** Settings ***
+Suite Setup       Setup
+Suite Teardown    Teardown
+Resource          resource/UranusKeyword.txt
+Resource          resource/ManagerKeyword.txt
+Library           collections
+
+*** Test Cases ***
+POP_CPE_CAC_EAC_Check
+    [Tags]    SDWANDEV-129
+    Check_POP_CAC_EAC    &{local_pop}[ne_id]    &{local_pop}[cac]    &{local_pop}[eac]
+    Check_POP_CAC_EAC    &{remote_pop}[ne_id]    &{remote_pop}[cac]    &{remote_pop}[eac]
+
+POP_CPES_Check
+    [Tags]    SDWANDEV-3079
+    : FOR    ${pop}    IN    @{pop_list}
+    \    ${exp_cpes}=    evaluate    &{${pop}_pop}[cpes]+map(lambda x:x['id'],&{${pop}_pop}[cpe_wans])
+    \    check_pop_cpes    &{${pop}_pop}[ne_id]    ${exp_cpes}
+
+2_tunnels_between_POP2
+    [Tags]    SDWANDEV-452
+    ${ip_list}=    create list    &{remote_pop}[ip]    &{remote_pop}[ip2]
+    Check_Node_Measure_task    remote_pop    5
+    ${tunnel_from_ne}    ${tunnel_from_controller}=    Get_Node_Tunnel    remote_pop
+    ${length_from_controller}    Evaluate    len(filter(lambda x:x['dstNEId']==&{local_pop}[ne_id],${tunnel_from_controller}))
+    ${length} =    Evaluate    len(filter(lambda x:x['remote-id']==&{local_pop}[ne_id],${tunnel_from_ne}))
+    Should Be Equal As Integers    ${length}    5
+    Should Be Equal As Integers    ${length_from_controller}    5
+    Check_Pop_To_Pop_Route_Flows    &{remote_pop}[ne_id]    &{local_pop}[ne_id]    &{local_pop}[ne_id]
+    Check_Pop_To_Pop_Route_Flows    &{local_pop}[ne_id]    &{remote_pop}[ne_id]    &{remote_pop}[ne_id]
+
+POP Learn CPE Nat IP
+    [Tags]    SDWANDEV-1872    SanityCheck
+    [Setup]
+    switch connection    ${sess_guangzhou_cpe}
+    Print Netstat
+    wait until keyword succeeds    120s    1    Check Pop Nat IP
+
+ER_Auto_Reg_Measure
+    [Tags]    SDWANDEV-112    debug    long
+    ${ip_list}=    create list    &{local_pop}[ip]    &{local_pop}[ip2]    &{local_pop}[ip3]
+    Check_POP_Measure_config    local    5
+    Change_Local_POP_Config_To_Port1_Disable
+    wait until keyword succeeds    10x    1s    Check_POP_Measure_config    local    3
+    wait until keyword succeeds    5s    200ms    check_all_CPE_tunnels    ${4}
+    ${local_pop_tunnel_num}=    evaluate    (len(&{local_pop}[cpes])+(len(${pop_list})-1)*3 + len(&{local_pop}[cpe_wans]))
+    ${remote_pop_tunnel_num}=    evaluate    (len(&{remote_pop}[cpes])+(len(${pop_list})-1)*3 + len(&{remote_pop}[cpe_wans]))
+    wait until keyword succeeds    30s    1s    check_all_pop_tunnels    ${local_pop_tunnel_num}    ${remote_pop_tunnel_num}
+    [Teardown]    TearDown_Local_POP_Config_To_Init_Config
+
+Get_CPE_CPU_Info_From_Manager
+    [Tags]    SDWANDEV-688
+    ${check_list}=    evaluate    [x for x in ${cpe_list} if (x not in ${mips_cpe_list})]
+    : FOR    ${cpe}    IN    @{check_list}
+    \    Run Keyword And Continue On Failure    Check_NE_CPU_INFO_From_Manager    ${cpe}
+
+Get_CPE_Mem_Info_From_Manager
+    [Tags]    SDWANDEV-690
+    ${check_list}=    evaluate    [x for x in ${cpe_list} if (x not in ${mips_cpe_list})]
+    : FOR    ${cpe}    IN    @{check_list}
+    \    Run Keyword And Continue On Failure    Check_NE_Mem_INFO_From_Manager    ${cpe}
+
+Get_CPE_Disk_Info_From_Manager
+    [Tags]    SDWANDEV-691
+    ${check_list}=    evaluate    [x for x in ${cpe_list} if (x not in ${mips_cpe_list})]
+    : FOR    ${cpe}    IN    @{check_list}
+    \    run keyword if    '${cpe}' != 'wuhan' and '${cpe}' != 'chongqing'    Check_NE_Disk_INFO_From_Manager    ${cpe}
+
+Get_CPE_Corefile_Info_From_Manager
+    [Tags]    SDWANDEV-692
+    ${check_list}=    evaluate    [x for x in ${cpe_list} if (x not in ${mips_cpe_list})]
+    : FOR    ${cpe}    IN    @{check_list}
+    \    Check_NE_Core_INFO_From_Manager    ${cpe}
+
+Get_CPE_task_Info_From_Manager
+    [Tags]    SDWANDEV-693    long
+    ${cpe_task}=    get_device_net_measure_tasks    &{local_cpe}[ip]    &{local_cpe}[ssh_port]    &{local_cpe}[user]    &{local_cpe}[passwd]
+    ${gw_cpe_task}=    get_device_net_measure_tasks    &{guangzhou_cpe}[ip]    &{guangzhou_cpe}[ssh_port]    &{guangzhou_cpe}[user]    &{guangzhou_cpe}[passwd]
+    ${gw_cpe_task_wan1}=    evaluate    filter(lambda x:x['local-wan-id']==1,${gw_cpe_task})
+    ${timestamp}=    Get Time    epoch
+    sleep    10
+    ${e_timestamp}=    Get Time    epoch
+    sleep    10
+    ${tunnels}    get_ne_tunnels_from_controller_with_dst_ne_id    &{local_cpe}[chassis_id]    &{local_pop}[ne_id]
+    ${gw_tunnels1}    get_ne_tunnels_from_controller_with_dst_ne_id    &{guangzhou_cpe}[chassis_id]    &{local_pop}[ne_id]
+    ${gw_tunnels2}    get_ne_tunnels_from_controller_with_dst_ne_id    &{guangzhou_cpe}[chassis_id]    &{remote_pop}[ne_id]
+    ${gw_tunnels}    Combine Lists    ${gw_tunnels1}    ${gw_tunnels2}
+    : FOR    ${task}    IN    @{cpe_task}
+    \    ${is_check_port}=    evaluate    ${task["tunnel-number"]} in map(lambda x:x['tunnelId'], ${tunnels})
+    \    run keyword if    ${is_check_port}    check_ne_measure_task_count    &{local_cpe}[chassis_id]    ${task["id"]}    ${timestamp}
+    \    ...    ${e_timestamp}
+    : FOR    ${task}    IN    @{gw_cpe_task}
+    \    ${is_check_port}=    evaluate    ${task["tunnel-number"]} in map(lambda x:x['tunnelId'], ${gw_tunnels})
+    \    ${is_4gwan}=    evaluate    ${task['local-wan-id']}==&{guangzhou_cpe}[4G_wan_id]
+    \    ${low}=    set variable if    ${is_4gwan}    60000    150
+    \    ${high}=    set variable if    ${is_4gwan}    70000    8000
+    \    run keyword if    ${is_check_port}    check_ne_measure_task_count    &{guangzhou_cpe}[chassis_id]    ${task["id"]}    ${timestamp}
+    \    ...    ${e_timestamp}
+    \    run keyword if    ${is_check_port}    Check_NE_Measure_Task_Value    &{guangzhou_cpe}[chassis_id]    ${task["id"]}    ${timestamp}
+    \    ...    ${high}    ${low}    ${e_timestamp}
+    [Teardown]
+
+Get_POP_Network_Info_From_Manager
+    [Tags]    SDWANDEV-893    SDWANDEV-1919
+    Check_NE_Network_INFO_From_Manager    local
+
+Check_POP_Measure_OAM_Header
+    [Tags]    SDWANDEV-1062
+    Check_Ne_Measure_OAM_Header    local    KNI0    &{remote_pop}[ip]    4410 5008    a860 5000 6054
+
+Check_CPE_Tunnel_Send_Packet_Header_TTL
+    [Tags]    SDWANDEV-1808
+    Check_CPE_PACKET_Header_TTL    guangzhou    eth0    &{remote_pop}[ip]    08
+
+Check_CPE_Tunnel_Receive_Packet_Header_TTL
+    [Tags]    SDWANDEV-1810
+    Check_CPE_Receive_PACKET_Header_TTL    guangzhou    eth0    06    07
+
+Disable_NE_Traffic_Normal
+    [Tags]    SDWANDEV-3169
+    ${wh_id}=   evaluate    int(&{wuhan_cpe}[chassis_id])
+    ${ne_list}=    create list    &{local_pop}[ne_id]   ${wh_id}
+    : FOR    ${ne}    IN    @{ne_list}
+    \    ${c}=    get_ne_control_status_from_ne_id    ${ne}
+    \    should be true    '${c}'=='enable'
+    \    put_ne_control_status    ${ne}    disable
+    \    ${c}=    get_ne_control_status_from_ne_id    ${ne}
+    \    should be true    '${c}'=='disable'
+    [Teardown]    put_nes_control_status    enable   ${ne_list}
+
+CPE_Static_Port_tunnel_match_with_POP
+    [Tags]    SDWANDEV-3680
+    check_cpe_port_tunnel_match_with_pop    local    local    1
+
+CPE_0_Port_tunnel_match_with_POP
+    [Tags]    SDWANDEV-3678
+    check_cpe_port_tunnel_match_with_pop    changsha    remote    1
+
+CPE_0_Port_tunnel_match_with_IDC
+    [Tags]    SDWANDEV-3679
+    check_cpe_port_tunnel_match_with_IDC_CPE    changsha    nanjing    1
+
+Forward_Tunnel_Check_from_CLI
+    [Tags]    SDWANDEV-3968
+    [Setup]
+    ${init_tunnel_tx_p}    ${init_tunnel_tx_b}    get_pop_tunnel_pkgs_from_cli    remote    remote
+    wait until keyword succeeds    3x    20ms    Ensure_CPE_Flow_Work    remote    office
+    check_pop_tunnel_pkgs_from_cli    remote    remote    ${init_tunnel_tx_p}    ${init_tunnel_tx_b}    20
+
+*** Keywords ***
+Print Netstat
+    ${res}=    write openwrt cmd    netstat -an | grep :6868    &{guangzhou_cpe}[passwd]
+    log    ${res}
+
+Check Pop Nat IP
+    ${ips}=    create list
+    : FOR    ${pop}    IN    @{pop_list}
+    \    ${pop_learnt}=    Get Remote CPE IP from POP    ${pop}
+    \    ${cpe_on_pop}=    Form CPE Wan Info Prefer on POP    ${pop}
+    \    ${result}=    evaluate    cmp(sorted(${pop_learnt}), sorted(${cpe_on_pop}))
+    \    should be equal    ${result}    ${0}
+
+Form CPE Wan Info Prefer on POP
+    [Arguments]    ${pop}
+    ${ips}=    create_list
+    : FOR    ${cpe}    IN    @{cpe_list}
+    \    ${type}=    evaluate    &{${cpe}_cpe}[chassis_id]%16
+    \    ${id}=    evaluate    &{${cpe}_cpe}[chassis_id]/16
+    \    ${wan_info}=    evaluate    filter(lambda x:x['id']==&{${cpe}_cpe}[chassis_id], &{${pop}_pop}[cpe_wans])
+    \    ${len}=    evaluate    len(${wan_info})
+    \    ${f_wan_on_pop}=    evaluate    &{${cpe}_cpe}[chassis_id] in &{${pop}_pop}[cpes]
+    \    ${wan_id}=    run keyword if    '${len}' == '${0}'    set variable if    ${f_wan_on_pop}    ${1}
+    \    ...    ${0}
+    \    ...    ELSE    set variable    ${wan_info[0]['wan_id']}
+    \    ${f_nat}=    evaluate    '${cpe}' in ${nat_cpe_list}
+    \    ${wan_ip}=    run keyword if    ${f_nat}    set variable if    '${wan_id}' == '1'    &{${cpe}_switch}[ip]
+    \    ...    &{${cpe}_switch}[ip2]
+    \    ...    ELSE    Get CPE Nic IP    ${cpe}    &{${cpe}_cpe}[internet_if]
+    \    ${wan_ip}=    Evaluate    '${wan_ip}'.decode('utf-8')
+    \    ${cpe_info}=    create list    ${type}:${id}:${wan_id}    ${wan_ip}
+    \    run keyword if    '${wan_id}' != '${0}'    append to list    ${ips}    ${cpe_info}
+    [Return]    ${ips}
+
+Setup
+    set_measure_polling_freq_to_controller    2
+    ssh_cpe    guangzhou    sess_guangzhou_cpe
+    set suite variable    ${sess_guangzhou_cpe}    sess_guangzhou_cpe
+
+Teardown
+    set_measure_polling_freq_to_controller    30
+    close all connections
+
+check_cpe_port_tunnel_match_with_pop
+    [Arguments]    ${cpe}    ${pop}    ${wan}
+    ${p_ip}=    get_cpe_prefer_ip    ${cpe}    ${wan}
+    ${wan_ip}=    set variable if    '${wan}' == '1'    &{${cpe}_switch}[ip]    &{${cpe}_switch}[ip2]
+    ${cpe_tunnel_states}=    get_cpe_tunnelStats    ${cpe}    &{${pop}_pop}[ne_id]    ${wan}
+    ${cpe_tunnels_info}=   evaluate    filter(lambda x:x['dst_ip']=='${p_ip}',${cpe_tunnel_states})[0]
+    ${tunnel_states}=    get remote cpe tunnels from pop    ${pop}
+    ${pop_tunnel_states}=    get lines containing string    ${tunnel_states}    (&{${cpe}_cpe}[chassis_id])
+    ${a}=    evaluate    "${pop_tunnel_states}".split()[-1]
+    ${b}=    replace string    ${a}    ->    :
+    ${pop_tunnels_info}=    evaluate    "${b}".split(':')
+    should be equal as strings    ${pop_tunnels_info[0]}    ${cpe_tunnels_info['dst_ip']}
+    should be equal as strings    ${pop_tunnels_info[1]}    ${cpe_tunnels_info['dst_port']}
+    should be equal as strings    ${pop_tunnels_info[2]}    ${wan_ip}
+    should be equal as strings    ${pop_tunnels_info[3]}    ${cpe_tunnels_info['src_port']}
+
+check_pop_tunnel_pkgs_from_cli
+    [Arguments]    ${cpe}    ${pop}    ${init_tunnel_tx_p}    ${init_tunnel_tx_b}    ${expect_num}
+    ${tunnel_tx_p}    ${tunnel_tx_b}=    get_pop_tunnel_pkgs_from_cli    ${cpe}    ${pop}
+    should be true    ${tunnel_tx_p}-${init_tunnel_tx_p}>=${expect_num}
+    should be true    ${tunnel_tx_b}-${init_tunnel_tx_b}>=${expect_num}*64
+
+get_pop_tunnel_pkgs_from_cli
+    [Arguments]    ${cpe}    ${pop}
+    ${tunnel_states}=    get remote cpe tunnels from pop    ${pop}
+    ${pop_tunnel_states}=    get lines containing string    ${tunnel_states}    (&{${cpe}_cpe}[chassis_id])
+    ${cpe_tunnels_id}=    evaluate    re.search(r'number: ([0-9]+?), ', '${pop_tunnel_states}').group(1)    re
+    ${tunnel_tx_p}    ${tunnel_tx_b}=    Get Remote CPE Tunnels Packets from POP    ${pop}    ${cpe_tunnels_id}
+    [Return]    ${tunnel_tx_p}    ${tunnel_tx_b}
+
+check_cpe_port_tunnel_match_with_IDC_CPE
+    [Arguments]    ${cpe}    ${idc}    ${wan}
+    ${p_ip}=    get_cpe_prefer_ip    ${cpe}    ${wan}
+    ${idc_wan_ip}=    set variable if    '${wan}' == '1'    &{${idc}_switch}[ip]    &{${idc}_switch}[ip2]
+    ${cpe_wan_ip}=    set variable if    '${wan}' == '1'    &{${cpe}_switch}[ip]    &{${cpe}_switch}[ip2]
+    ${local_wan_ip}=    set variable if    '${wan}' == '1'    169.254.1.2    169.254.1.3
+    ${cpe_id}=    get cpe chassis_id    ${cpe}
+    ${idc_id}=    get cpe chassis_id    ${idc}
+    ${cpe_tunnel_states}=    get_cpe_tunnelStats    ${cpe}    ${idc_id}    ${wan}
+    ${cpe_tunnels_info}=    evaluate    filter(lambda x:x['dst_ip']=='${idc_wan_ip}',${cpe_tunnel_states})[0]
+    ${tunnel_states}=    get_cpe_tunnelStats    ${idc}    ${cpe_id}    ${wan}
+    ${idc_tunnels_info}=    evaluate    filter(lambda x:x['nat_ip']=='${cpe_wan_ip}',${tunnel_states})[0]
+    should be equal as strings    ${idc_tunnels_info['nat_ip']}    ${cpe_wan_ip}
+    should be equal    ${idc_tunnels_info['nat_port']}    ${cpe_tunnels_info['src_port']}
+
+Get CPE Nic IP
+    [Arguments]    ${cpe}    ${nic}
+    ssh_cpe    ${cpe}
+    ${ip}=    Get Nic IP    ${nic}
+    close connection
+    [Return]    ${ip}

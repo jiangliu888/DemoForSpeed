@@ -1,0 +1,414 @@
+cpe_list:   ['local','remote','guangzhou','nanjing', 'wuhan']
+mips_cpe_list: []
+opwrt_list:  ['guangzhou']
+sideway_cpe_list:  []
+nat_cpe_list: ['nanjing', 'wuhan']
+cpe_check_list: ['local','remote']
+world_pop_list: ['remote']
+4g_cpe_list: []
+pop_list:   ['local']
+learn_ip_cpe_list: ['local','remote']
+union_list: [['beijing','shanghai'],['nanjing','wuhan'],['nanjing','guangzhou']]
+union_check_list: [['local','remote','series'],['nanjing','wuhan','parallel'],['nanjing','guangzhou','parallel']]
+Network_Quality_Test_Group: ['series_group','parallel_group']
+saas_cpe_list: ['local', 'guangzhou','remote']
+qos_cpe_list:  ['local', 'guangzhou','nanjing', 'wuhan']
+fec_cpe_list: ['local', 'remote', "guangzhou"]
+saas_service_list: ['Saas_Service1']
+anyc_service_list: []
+slave_cpe_list: []
+master_cpe_list: []
+stop_mwan_cpe_list: []
+local_code_g: '1074790400'
+local_pc:
+    ctrl_ip: "10.192.9.29"
+    ctrl_port:  '22'
+    inner_ip: ""
+    inner_nic:  "enp1s0"
+    intranet_ip: "10.191.0.15"
+    intranet_range: ['10.191.0.15/32']
+    intranet_check_ip: ['10.191.0.15']
+    internet_port: "1"
+    user: "sdn"
+    passwd: "rocks"
+    cpe_ip: "10.192.1.15"
+    site_name: 'beijing'
+    intranet_name: 'lady'
+    intranet_port: "2"
+    intranet_if: "enp3s0"
+    cpe_wan_mirror_if: ""
+    cpe_lan_mirror_if: ""
+remote_pc:
+    ctrl_ip: "10.192.9.31"
+    ctrl_port:  '22'
+    inner_ip: ""
+    inner_nic:  "enp1s0"
+    intranet_ip: "10.191.0.100"
+    intranet_range: ['10.191.0.100/32']
+    intranet_check_ip: ['10.191.0.100']
+    internet_port: "1"
+    user: "sdn"
+    passwd: "rocks"
+    site_name: 'shanghai'
+    intranet_name: 'gentleman'
+    intranet_port: "2"
+    intranet_if: "enp4s0"
+    cpe_wan_mirror_if: ""
+    cpe_lan_mirror_if: ""
+guangzhou_pc:
+    ctrl_ip: "10.192.9.37"
+    ctrl_port:  '22'
+    inner_ip: "172.32.42.5"
+    inner_ip2: ""
+    inner_nic:  "enp3s0"
+    intranet_ip: ""
+    internet_port: "1"
+    user: "sdn"
+    passwd: "rocks"
+    site_name: 'guangzhou'
+    toNJ_bandwidth: 50
+    intranet_name: 'gentleman'
+    intranet_port: "2"
+    intranet_if: ""
+nanjing_pc:
+    ctrl_ip: "10.192.9.39"
+    ctrl_port:  '22'
+    inner_ip: "172.28.42.25"
+    inner_nic:  "enp2s0"
+    internet_port: "1"
+    intranet_ip: ""
+    user: "sdn"
+    passwd: "rocks"
+    site_name: 'nanjing'
+    intranet_name: 'gentleman'
+    intranet_port: "2"
+    intranet_if: ""
+    cpe_wan_mirror_if: ""
+    cpe_lan_mirror_if: ""
+wuhan_pc:
+    ctrl_ip: "10.192.9.40"
+    ctrl_port:  '22'
+    inner_ip: "172.19.42.25"
+    inner_nic:  "enp2s0"
+    internet_port: "1"
+    intranet_ip: ""
+    user: "sdn"
+    passwd: "rocks"
+    site_name: 'wuhan'
+    intranet_name: 'gentleman'
+    intranet_port: "2"
+    intranet_if: ""
+    iperf_tcp_bandwidth: 480
+    cpe_wan_mirror_if: ""
+    cpe_lan_mirror_if: ""
+uranus_host:
+    ip:   "192.168.0.71"
+    nic:  "ens160"
+    office_ip: "192.168.0.71"
+    es_ip: "192.168.0.71"
+    of_ip: "192.168.0.71"
+    of_domain: "controller-st2.netgrounder.com"
+    es_port: "9200"
+    port:   '6326'
+    nginx_south_port: "9001"
+    nginx_auth_port: "443"
+    south_port: '6116'
+    cli_port:   '8101'
+    netconf_port: ['6633','6653']
+    onos_port: '8181'
+    user:   "karaf"
+    passwd: "karaf"
+    ssh_port:   '22'
+    ssh_user: "sdn"
+    ssh_passwd: "rocks"
+    jump_port: "22"
+    jump_ip: "10.192.9.200"
+pontus_host:
+    ip: "192.168.0.71"
+    port: "6226"
+gaea_host:
+    ip: "192.168.0.71"
+    port: "6126"
+local_cpe:
+    ip:   "10.192.9.32"
+    ssh_port:   '22'
+    user:   "sdn"
+    passwd: "rocks"
+    chassis_id: '320'
+    minion_id: '2560'
+    internet_if: "enp1s0f0"
+    intranet_port: "2"
+    intranet_if: "enp1s0f2"
+    intranet_wan_port: "4"
+    intranet_wan_if: "enp1s0f3"
+    lan_if: "enp1s0f1"
+    mpls_wan_static_ip: "169.254.100.102"
+    mpls_tunnel_id: 9998
+    mpls_tunnel_port: 1000
+    port_num: 3
+    portal_sid: 8001
+    location: "beijing"
+    office_peer: ['remote']
+    intranet_peer: ['remote']
+    prefer_cac: [7]
+    prefer_eac: [10]
+    prefer_port: ['10.192.11.2']
+    wan_port1: "1"
+    wan_num: 1
+    oss_endpoint: ""
+    qos_spi_rulehigh: ['6','*','*','*','443']
+    qos_spi_rulemedium: ['17','*','*','*','3480']
+    fec_spi_rule: ['*','*','*','10.193.0.101/32','*']
+remote_cpe:
+    ip:   "10.192.9.33"
+    ssh_port:   '22'
+    user:   "sdn"
+    passwd: "rocks"
+    chassis_id: '336'
+    minion_id: '2004'
+    internet_if: "enp1s0f0"
+    intranet_port: "2"
+    intranet_if: "enp1s0f2"
+    interface_4G: "enp1s0f3"
+    lan_if: "enp1s0f1"
+    location: "shanghai"
+    office_peer: ['local']
+    intranet_peer: ['local']
+    prefer_cac: [7]
+    prefer_eac: [10]
+    prefer_port: ['10.192.11.2']
+    wan_port1: "1"
+    wan_num: 1
+    oss_endpoint: ""
+    fec_spi_rule: ['*','*','*','114.114.114.114/32','*']
+guangzhou_cpe:
+    ip:   "10.192.9.36"
+    ssh_port:   '22'
+    user:   "root"
+    passwd: "rocks"
+    chassis_id: '321'
+    minion_id: '2008'
+    internet_if: "eth0"
+    internet_if2: "eth0"
+    intranet_if: "tun1"
+    wan_if: "eth0"
+    wan2_if: "eth0"
+    wan_alias: "wan"
+    4G_wan_id:   2
+    wan2_alias: "wan"
+    lan_if: "tun1"
+    delay: 499
+    loss: 0
+    min_list_d: [0.01, 55]
+    max_list_d: [239, 300]
+    avg_list_d: [0.1, 190]
+    sdev_list_d: [1, 190]
+    office_peer: ['nanjing']
+    intranet_peer: ['nanjing']
+    nets: "172.32.42.0/24"
+    prefer_cac: [7]
+    prefer_eac: [10]
+    prefer_port: ['10.192.11.2']
+    location: "guangzhou"
+    wan_num: 1
+    wan_ips: ["10.192.5.2"]
+    4g_wan_p2p_tunnels_num: 0
+    internet_wan_num: 1
+    oss_endpoint: ""
+    qos_spi_rulehigh: ['6','172.19.43.101/24','*','172.19.14.125/32','5202']
+    qos_spi_rulemedium: ['6,17','*','*','172.19.14.0/24','5201']
+    fec_spi_rule: ['*','*','*','10.192.20.15/32','*']
+    br_lan_ip: '172.19.43.1'
+nanjing_cpe:
+    ip:   "10.192.9.30"
+    ssh_port:   '22'
+    user:   "sdn"
+    passwd: "rocks"
+    chassis_id: '352'
+    minion_id: '2000'
+    internet_if: "enp1s0f0"
+    intranet_port: "2"
+    intranet_if: "enp1s0f2"
+    lan_if: "enp1s0f1"
+    location: "nanjing"
+    office_peer: ['wuhan', 'guangzhou']
+    intranet_peer: ['wuhan', 'guangzhou']
+    nets: "172.28.42.0/24"
+    wan_ips: ["172.31.42.5"]
+    lan_ip: '172.30.42.5'
+    prefer_cac: [7]
+    prefer_eac: [10]
+    prefer_port: ['10.192.11.2']
+    inner_gw: '172.28.42.1'
+    lan_gw: '172.31.42.1'
+    lan_network: '172.31.42.0/24'
+    wan_num: 1
+    oss_endpoint: ""
+    qos_spi_rulehigh: ['6','172.19.14.0/24','*','*','443']
+    qos_spi_rulemedium: ['17','*','*','172.19.15.0/24','5201']
+    dyn_regs: [{"dstCidr":"172.19.14.0/24","priority":255},{"dstCidr":"10.0.200.0/24","priority":255},
+    {"dstCidr":"172.19.15.0/24","priority":255},{"dstCidr":"10.194.15.0/24","priority":255},{"dstCidr":"10.196.12.0/24","priority":255}]
+wuhan_cpe:
+    ip:   "10.192.9.28"
+    ssh_port:   '22'
+    user:   "sdn"
+    passwd: "rocks"
+    chassis_id: '368'
+    minion_id: '2002'
+    internet_if: "enp1s0f0"
+    intranet_port: "2"
+    intranet_if: "enp1s0f1"
+    lan_if: "enp1s0f1"
+    location: "wuhan"
+    office_peer: ['nanjing']
+    intranet_peer: ['nanjing']
+    nets: "172.19.42.0/24"
+    wan_ips: ["172.20.42.5"]
+    lan_ip: '172.21.42.5'
+    prefer_cac: [7]
+    prefer_eac: [10]
+    prefer_port: ['10.192.11.2']
+    wan_num: 1
+    inner_gw: '172.19.42.1'
+    lan_gw: '172.21.42.1'
+    wan_gw: '172.20.42.1'
+    oss_endpoint: ""
+    qos_spi_rulehigh: ['6','172.19.15.0/24','*','172.19.14.125/32','5202']
+    qos_spi_rulemedium: ['6,17','*','*','172.19.14.0/24','5201']
+    qos_spi_prefer_wanhigh: [{"iface": "enp1s0f0","index": 0}]
+    qos_spi_prefer_wanmedium: [{"iface": "enp1s0f0","index": 1}]
+    qos_spi_assign_wanhigh: [{"iface": "enp1s0f0","index": 0}]
+    qos_spi_assign_wanmedium: [{"iface": "enp1s0f0","index": 1}]
+    dyn_regs: [{"dstCidr":"10.0.200.0/24","priority":255},{"dstCidr":"172.19.15.0/24","priority":255}]
+chongqing_pc:
+    intranet_range: []
+    site_name: ''
+changsha_pc:
+    iperf_udp_bandwidth: 0
+of_devices_num: 6
+netconf_devices_num: 6
+cac_list:   [7]
+eac_list:   [10]
+cfp_eac_list: []
+company1:
+    name: 'aiwan'
+    remark: 'best ai wan'
+    location: 'shanghai'
+    key: 'cUUMG+vPbnvjUV21'
+company2:
+    name: 'alibaba'
+    remark: 'alibaba'
+    location: 'beijing'
+    key: 'AAAAB3NzaC1yc2EA'
+local_pop:
+    ctrl_ip: 10.192.11.2
+    ip: 10.192.11.2
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    minion_id: 'lt-pop'
+    nat_phy_port: "enp2s0"
+    phy_port_2: ""
+    cac: 7
+    eac: 10
+    tunnel_port: 990
+    ne_id: 326
+    cpes: [320, 336, 353, 368, 321]
+    logic_ports: ["enp2s0"]
+    cpe_wans: [{'id':320, 'iface':"enp1s0f0", 'index': 0, "wan_id": 1},{'id':336, 'iface':"enp1s0f0", 'index': 0, "wan_id": 1},{'id':321, 'iface':"eth0", 'index': 0, "wan_id": 1},{'id':352, 'iface':"enp1s0f0", 'index': 0, "wan_id": 1},{'id':368, 'iface':"enp1s0f0", 'index': 0, "wan_id": 1}]
+    logic_ports_isp: ["china telecom,china mobile"]
+remote_pop:
+    cpes: []
+    cpe_wans: []
+    logic_ports_isp: []
+Saas_Service1:
+    ne_id: 328
+    ctrl_ip: 10.192.11.2
+    ip: 10.192.11.2
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    port_num: 1
+    preferPop: "local"
+    logic_ports_isp: ["lo"]
+    tunnel_port: 1290
+internet_host:
+    ip: 192.168.0.8
+    ssh_port: 22
+    user: "sdn"
+    passwd: "Fw1NLLbliTR0q11y7VjBnBHIUhZYZb7e"
+    key: "/var/lib/jenkins/.ssh/sdn_rsa"
+    nat_phy_port: "eno1"
+    saas_dns: "test.sh.wsdashi.com"
+    saas_idcDns: "test.sh.IDCwsdashi.com"
+    saas_dns2: "wiki.sh.wsdashi.com"
+    dns_pattern: ".*.sh.wsdashi.com"
+insight_host:
+    ip: '192.168.0.71'
+    port: '8089'
+    user: 'admin'
+    password: 'AIRwalk2013!)'
+internet_switch:
+    type: 'dell_os10'
+    ip: 10.192.9.1
+    port: 22
+    user: 'admin'
+    password: 'admin'
+dns_server:
+    ip: 10.192.20.210
+    ssh_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    a_ip1: 191.168.0.8
+    a_ip2: 191.168.0.11
+    a_wrong_ip: 192.64.147
+    phy_port: "ens33"
+default_dns:
+    ip: 10.192.20.210
+manager_server:
+    ip: 10.192.20.210
+    port: 9103
+    ctrl_ip: 10.192.20.210
+    ctrl_port: 22
+    user: "sdn"
+    passwd: "rocks"
+    manager_port: 9103
+    influxdb_ip: 10.192.20.210
+    influxdb_port: 8086
+    port_list: [8970, 8972, 8974, 8976]
+nanjing_switch:
+    type: 'MikroTik RouterBorad'
+    ip: 10.192.10.2
+    user: 'admin'
+    password: ''
+    nanjing_wan_if: Vlanif2
+    nanjing_lan_if: Vlanif3
+wuhan_switch:
+    type: 'MikroTik RouterBorad'
+    ip: 10.192.13.2
+    user: 'admin'
+    password: ''
+    wuhan_wan_if: Vlanif3
+    wuhan_lan_if: Vlanif4
+collector_server:
+    ip: 10.192.20.210
+    port_list: [8970,8974]
+salt-master:
+    ctl_ip: "10.192.20.210"
+    internet_ip: 10.192.20.210
+    ip: "10.192.20.210"
+    ssh_port: "22"
+    user: "sdn"
+    passwd: "rocks"
+    port_list: [4505, 4506]
+    phy_port: "ens161"
+consul_server:
+    ip: "192.168.0.71"
+    port: "8500"
+    token: "2cf54bf8-f993-e565-3566-e69bcd089e27"
+aliyuncs_server:
+    log_server_dns: "cn-shanghai.log.aliyuncs.com"
+    log_server_ip: "106.15.241."
+alert_server:
+    ip: 192.168.0.71
+    port: 8001

@@ -1,0 +1,103 @@
+*** Settings ***
+Suite Setup       alarm_setup
+Suite Teardown    alarm_teardown
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/insight/InsightKeyword.py
+
+*** Variables ***
+${exec_time}      100
+
+*** Test Cases ***
+check_NodeOffline_alarm
+    [Tags]    SDWANDEV-3699    SDWANDEV-3706    abnormal    alarm
+    [Setup]
+    # check nodeoffline
+    wait until keyword succeeds    30x    10s    check_alarm_num    firing    0101    NodeOffline
+    ...    Emergency    beijing    1002    320    1
+    restart_alertManage
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0101    NodeOffline
+    ...    Emergency    beijing    1002    320    1
+
+check_cpuHigh_memLow_alarm
+    [Tags]    SDWANDEV-3700    abnormal    alarm
+    [Setup]
+    # check cpu high alarm
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0104    NodeCpuHigh
+    ...    Critical    shanghai    1003    336    4
+    # check mem low alarm
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0102    NodeMemoryLow
+    ...    Critical    shanghai    1003    336    1
+
+check_cpeConfigerror_alarm
+    [Tags]    SDWANDEV-3702    abnormal    alarm
+    [Setup]    exec_cpe_cmd    remote    systemctl stop aiwan-thruster
+    exec_cpe_cmd    remote    sh /home/sdn/NoDelete/fakeConfigError.sh
+    # check cpeconfigerror alarm
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0601    CpeConfigError
+    ...    Critical    shanghai    1003    336    1
+    [Teardown]    exec_cpe_cmd    remote    systemctl start aiwan-thruster
+
+check_HA_NoMaster_alarm
+    [Tags]    SDWANDEV-3701    abnormal    alarm
+    [Setup]
+    # check HA alarm
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0402    CPENoMaster
+    ...    Critical    nanjing    1005    352    1
+
+check_linkScroeDecline_qualityDecline_alarm
+    [Tags]    SDWANDEV-3703    abnormal    alarm
+    [Setup]    add_tc_between_beijing_shanghai
+    # check seviceQuality alarm
+    wait until keyword succeeds    18x    10s    check_alarm_num    firing    0202    ServiceQualityDecline
+    ...    Emergency    shanghai    1003    336    1
+    [Teardown]    Teardown_TC_config
+
+check_cpuLoadhigh_storageLow_alarm
+    [Tags]    SDWANDEV-3700    abnormal    alarm
+    [Setup]
+    # check storage low alarm
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0106    NodeStorageLow
+    ...    Critical    shanghai    1003    336    1
+    # check loadhigh alarm
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0107
+    ...    NodeLoadHigh    Warning    shanghai    1003    336    1
+
+*** Keywords ***
+alarm_setup
+    enshare_nanjing_cpe_master
+    exec_cpe_cmd    local    service collectd stop
+    exec_cpe_cmd    remote    sh /home/sdn/NoDelete/lowdisk.sh;sudo sh /home/sdn/NoDelete/highcpu.sh;sudo sh /home/sdn/NoDelete/highmem.sh
+    Set_CPE_Standby_Status    nanjing_slave    touch
+    Set_CPE_Standby_Status    nanjing    touch
+
+alarm_teardown
+    exec_cpe_cmd    local    service collectd start
+    exec_cpe_cmd    remote    sh /home/sdn/NoDelete/kill_cpu.sh;sudo sh /home/sdn/NoDelete/kill_mem.sh;sudo sh /home/sdn/NoDelete/kill_storage.sh
+    Set_CPE_Standby_Status    nanjing    rm -f
+    Set_CPE_Standby_Status    nanjing_slave    rm -f
+    enshare_nanjing_cpe_master
+    # check nodeoffline alarm eliminate
+    wait until keyword succeeds    10x    1s    check_alarm_num    firing    0101    NodeOffline
+    ...    Emergency    beijing    1002    320    0
+    wait until keyword succeeds    18x    10s    check_alarm_num    resolved    0101    NodeOffline
+    ...    Emergency    beijing    1002    320    1
+
+exec_cpe_cmd
+    [Arguments]    ${cpe}    ${cmdStr}    ${owCmdStr}=""
+    ssh_cpe    ${cpe}    sess_${cpe}_cpe
+    ${res}=    Write CPE CMD    ${cpe}    ${cmdStr}    ${owCmdStr}
+    close connection
+
+add_tc_between_beijing_shanghai
+    sleep    60s
+    ssh login    &{tc_server}[ctrl_ip]    &{tc_server}[ctrl_port]    &{tc_server}[user]    &{tc_server}[passwd]
+    Write Sudo Cmd    sh clean.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh add_all_delay_on_1002_1003.sh    &{tc_server}[passwd]
+    Write Sudo Cmd    sh show.sh    &{tc_server}[passwd]
+    close connection
+
+restart_alertManage
+    ssh login    &{manager_server}[ip]    &{manager_server}[ctrl_port]    &{manager_server}[user]    &{manager_server}[passwd]
+    Write Sudo Cmd    supervisorctl restart alertmanager    &{manager_server}[passwd]
+    close connection

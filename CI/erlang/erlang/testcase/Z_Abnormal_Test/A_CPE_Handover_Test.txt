@@ -1,0 +1,359 @@
+*** Settings ***
+Suite Setup
+Suite Teardown    teardown
+Resource          ../resource/UranusKeyword.txt
+Resource          ../resource/SshKeyword.txt
+Library           ../../libs/uranus/UranusKeyword.py
+Library           ../../libs/relay/RelayControlCli.py
+Resource          ../resource/SwitchKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+
+*** Variables ***
+${exec_time}      100
+${ping_num}       60
+${check_num}      5
+${handover_sideway_log}    handover_cpe.log
+${ha_cpe_port_log}    ha_cpe_port.log
+
+*** Test Cases ***
+start_low_pri_HA_CPE_first_Master
+    [Tags]    SDWANDEV-2053
+    cmd_cpe    nanjing    stop
+    cmd_cpe    nanjing_slave    stop
+    cmd_cpe    nanjing_slave    start
+    sleep    3
+    cmd_cpe    nanjing    start
+    Wait Until Keyword Succeeds    20s    1s    Check_CPE_Status    nanjing_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing    ha    standby
+
+restart_HA_CPE_High_Pri_Master
+    [Tags]    SDWANDEV-2052
+    reboot_cpe    nanjing
+    reboot_cpe    nanjing_slave
+    sleep    25s
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing_slave    ha    standby
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing    ha    master
+
+Handover_CPE_manually
+    [Tags]    SDWANDEV-2055    SDWANDEV-3176
+    [Setup]    enshare_nanjing_cpe_master
+    Check_CPE_Status    nanjing    ha    master
+    Check Callhome Netconf and OF    nanjing    master
+    Check Callhome Netconf and OF    nanjing_slave    standby
+    set Test variable    ${exec_time}    420
+    ssh_pc    nanjing
+    Write    rm -rf ${handover_sideway_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${handover_sideway_log} 2>&1 &
+    Set_CPE_Standby_Status    nanjing    touch
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing_slave    ha    master
+    wait until keyword succeeds    40s    200ms    Check Callhome Netconf and OF    nanjing_slave    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing    ha    standby
+    wait until keyword succeeds    15s    200ms    Check Callhome Netconf and OF    nanjing    standby
+    ssh_pc    nanjing
+    Get Valid Ping Logs_loss_less_than    ${handover_sideway_log}    85
+    close connection
+    [Teardown]    set_nanjing_cpe_back_to_master
+
+Handover_CPE_When_Master_CPE_Port_Down
+    [Tags]    SDWANDEV-2057
+    [Setup]    enshare_nanjing_cpe_master
+    Check_CPE_Status    nanjing    ha    master
+    set Test variable    ${exec_time}    420
+    ssh_pc    nanjing
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    shutdown_nanjing_wan
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing    ha    standby
+    ssh_pc    nanjing
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    85
+    close connection
+    [Teardown]    unshutdown_nanjing_wan
+
+Handover_CPE_When_Master_switch_reset
+    [Tags]    SDWANDEV-2056
+    [Setup]    enshare_nanjing_cpe_master
+    Check_CPE_Status    nanjing    ha    master
+    set Test variable    ${exec_time}    400
+    ssh_pc    nanjing
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    shutdown_nanjing_lan
+    shutdown_nanjing_wan
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing    ha    standby
+    ssh_pc    nanjing
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    75
+    close connection
+    [Teardown]    run keywords    unshutdown_nanjing_wan
+    ...    AND    unshutdown_nanjing_lan
+
+No_Handover_CPE_When_SLAVE_CPE_Port_Down
+    [Tags]    SDWANDEV-2058
+    [Setup]    enshare_nanjing_cpe_master
+    Check_CPE_Status    nanjing    ha    master
+    set Test variable    ${exec_time}    100
+    ssh_pc    nanjing
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    shutdown_nanjing_slave_lan
+    ssh_pc    nanjing
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    5
+    close connection
+    Check_CPE_Status    nanjing    ha    master
+    Check_CPE_Status    nanjing_slave    ha    standby
+    [Teardown]    unshutdown_nanjing_slave_lan
+
+Handover_CPE_When_Master_CPE_App_Down
+    [Tags]    SDWANDEV-2061
+    [Setup]    enshare_nanjing_cpe_master
+    Check_CPE_Status    nanjing    ha    master
+    set Test variable    ${exec_time}    440
+    ssh_pc    nanjing
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    cmd_cpe    nanjing    stop
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing    ha    standby
+    ssh_pc    nanjing
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    90
+    close connection
+    [Teardown]    cmd_cpe    nanjing    start
+
+Handover_CPE_When_Master_CPE_All_Link_Down
+    [Tags]    SDWANDEV-2048
+    [Setup]    enshare_nanjing_cpe_master
+    Check_CPE_Status    nanjing    ha    master
+    ${c_id}=    packet_filter_switch_port    m_242    &{mirror_switch_242}[nanjing_wan]    &{mirror_switch_242}[nanjing_wan_acl]
+    Wait Until Keyword Succeeds    200s    5s    Check_CPE_Status    nanjing_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing    ha    standby
+    [Teardown]    undo_packet_filter_switch_port    ${c_id}    &{mirror_switch_242}[nanjing_wan]    &{mirror_switch_242}[nanjing_wan_acl]
+
+Handover_CPE_When_One_of_Fault_CPE_Recover
+    [Tags]    SDWANDEV-2059
+    [Setup]    enshare_nanjing_cpe_master
+    Check_CPE_Status    nanjing    ha    master
+    set Test variable    ${exec_time}    30
+    shutdown_nanjing_slave_lan
+    shutdown_nanjing_wan
+    Check_CPE_Status    nanjing    ha    standby
+    Check_CPE_Status    nanjing_slave    ha    standby
+    unshutdown_nanjing_slave_lan
+    Check_CPE_Status    nanjing    ha    standby
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanjing_slave    ha    master
+    Wait Until Keyword Succeeds    10x    2s    nanjing_ping_wuhan_check    ${exec_time}
+    [Teardown]    run keywords    unshutdown_nanjing_wan
+    ...    AND    run keyword and ignore error    unshutdown_nanjing_slave_lan
+    ...    AND    enshare_nanjing_cpe_master
+
+restart_HA_GW_CPE_High_Pri_Master
+    [Tags]    SDWANDEV-4342
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    set Test variable    ${exec_time}    400
+    ssh_pc    nanchang
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    reboot_cpe    nanchang
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang_slave    ha    master
+    ssh_pc    nanchang
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    75
+    close connection
+    Wait Until Keyword Succeeds    25s    1s    Check_CPE_Status    nanchang    ha    standby
+    [Teardown]
+
+Handover_GW_CPE_manually
+    [Tags]    SDWANDEV-2055    SDWANDEV-3176
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    wait until keyword succeeds    15s    1    Check Callhome Netconf and OF    nanchang    master
+    wait until keyword succeeds    5s    1    Check Callhome Netconf and OF    nanchang_slave    standby
+    check_openwrt_cpe_dhcp    nanchang    0
+    check_openwrt_cpe_dhcp    nanchang_slave    1
+    set Test variable    ${exec_time}    400
+    ssh_pc    nanchang
+    Write    rm -rf ${handover_sideway_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${handover_sideway_log} 2>&1 &
+    Set_CPE_Standby_Status    nanchang    touch
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang_slave    ha    master
+    wait until keyword succeeds    40s    200ms    Check Callhome Netconf and OF    nanchang_slave    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang    ha    standby
+    wait until keyword succeeds    15s    200ms    Check Callhome Netconf and OF    nanchang    standby
+    check_openwrt_cpe_dhcp    nanchang    1
+    check_openwrt_cpe_dhcp    nanchang_slave    0
+    ssh_pc    nanchang
+    Get Valid Ping Logs_loss_less_than    ${handover_sideway_log}    79
+    close connection
+    [Teardown]    set_nanchang_cpe_back_to_master
+
+Handover_GW_CPE_When_Master_CPE_Wan1_Port_Down
+    [Tags]    SDWANDEV-4336
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    set Test variable    ${exec_time}    400
+    ssh_pc    nanchang
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    shutdown_openwrt_cpe_wan    nanchang    wan
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang    ha    standby
+    ssh_pc    nanchang
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    75
+    close connection
+    [Teardown]    unshutdown_openwrt_cpe_wan    nanchang    wan
+
+Handover_GW_CPE_When_Master_CPE_Wan2_Port_Down
+    [Tags]    SDWANDEV-4337
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    set Test variable    ${exec_time}    400
+    ssh_pc    nanchang
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    shutdown_openwrt_cpe_wan    nanchang    wan2
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang    ha    standby
+    ssh_pc    nanchang
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    75
+    close connection
+    [Teardown]    unshutdown_openwrt_cpe_wan    nanchang    wan2
+
+Handover_GW_CPE_When_Master_CPE_Lan_Port_Down
+    [Tags]    SDWANDEV-4338
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    set Test variable    ${exec_time}    400
+    ssh_pc    nanchang
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    shutdown_nanchang_lan
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang    ha    standby
+    ssh_pc    nanchang
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    75
+    close connection
+    [Teardown]    unshutdown_nanchang_lan
+
+No_Handover_GW_CPE_When_SLAVE_CPE_Port_Down
+    [Tags]    SDWANDEV-4335
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    wait until keyword succeeds    15s    1    check_openwrt_cpe_dhcp    nanchang    0
+    ssh_pc    nanchang
+    write sudo cmd    service ospfd restart
+    close connection
+    set Test variable    ${exec_time}    400
+    traceroute from linux pc    nanchang    &{wuhan_pc}[inner_ip]
+    ssh_pc    nanchang
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    shutdown_openwrt_cpe_wan    nanchang_slave    wan
+    ssh_pc    nanchang
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    20
+    close connection
+    Check_CPE_Status    nanchang    ha    master
+    Check_CPE_Status    nanchang_slave    ha    standby
+    [Teardown]    unshutdown_openwrt_cpe_wan    nanchang_slave    wan
+
+Handover_GW_CPE_When_Master_CPE_App_Down
+    [Tags]    SDWANDEV-4339
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    set Test variable    ${exec_time}    400
+    ssh_pc    nanchang
+    Write    rm -rf ${ha_cpe_port_log}
+    Write    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2 > ${ha_cpe_port_log} 2>&1 &
+    cmd_cpe    nanchang    stop
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang    ha    standby
+    ssh_pc    nanchang
+    Get Valid Ping Logs_loss_less_than    ${ha_cpe_port_log}    75
+    close connection
+    [Teardown]    teardown_cpe_start_state_init
+
+Handover_GW_CPE_When_Master_CPE_All_Link_Down
+    [Tags]    SDWANDEV-4342
+    [Setup]    enshare_cpe_master    nanchang
+    Check_CPE_Status    nanchang    ha    master
+    Block_openwrt_cpe_wan_udp    nanchang
+    Wait Until Keyword Succeeds    350s    5s    Check_CPE_Status    nanchang_slave    ha    master
+    Wait Until Keyword Succeeds    15s    1s    Check_CPE_Status    nanchang    ha    standby
+    [Teardown]    UnBlock_openwrt_cpe_wan_udp    nanchang
+
+*** Keywords ***
+set_nanjing_cpe_back_to_master
+    Set_CPE_Standby_Status    nanjing    rm -rf
+
+set_nanchang_cpe_back_to_master
+    Set_CPE_Standby_Status    nanchang    rm -rf
+
+nanjing_cpe_back_to_master
+    Wait Until Keyword Succeeds    35s    2s    Check_CPE_Status    nanjing    ha    master
+    Check_CPE_Status    nanjing_slave    ha    standby
+
+shutdown_nanjing_wan
+    ${c_nj_id}=    shutdown_switch_port    m_242    &{mirror_switch_242}[nanjing_wan]
+    set suite variable    ${s_c_nj_id}    ${c_nj_id}
+
+unshutdown_nanjing_wan
+    unshutdown_switch_port    ${s_c_nj_id}    &{mirror_switch_242}[nanjing_wan]
+
+shutdown_nanjing_lan
+    ${c_nj_l_id}=    shutdown_switch_port    m_241    &{mirror_switch_241}[nanjing_lan]
+    set suite variable    ${s_c_nj_l_id}    ${c_nj_l_id}
+
+unshutdown_nanjing_lan
+    unshutdown_switch_port    ${s_c_nj_l_id}    &{mirror_switch_241}[nanjing_lan]
+
+shutdown_nanjing_slave_lan
+    ${c_nj_sl_id}=    shutdown_switch_port    m_241    &{mirror_switch_241}[nanjing_slave_lan]
+    set suite variable    ${s_c_nj_sl_id}    ${c_nj_sl_id}
+
+unshutdown_nanjing_slave_lan
+    unshutdown_switch_port    ${s_c_nj_sl_id}    &{mirror_switch_241}[nanjing_slave_lan]
+
+teardown
+    enshare_nanjing_cpe_master
+    wait until keyword succeeds    70s    2s    Ensure_CPE_Flow_Work    nanjing    office
+
+nanjing_ping_wuhan_check
+    [Arguments]    ${exec_time}
+    ssh_pc    nanjing
+    Write    rm -rf ${ha_cpe_port_log}
+    ssh_write_command_and_check_string    ping -M do -s 512 &{wuhan_pc}[inner_ip] -c ${exec_time} -i 0.2    0% packet loss
+    close connection
+
+shutdown_openwrt_cpe_wan
+    [Arguments]    ${cpe}    ${wan}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    ifdown ${wan}    ifdown ${wan}    ${pwd}
+    close connection
+
+unshutdown_openwrt_cpe_wan
+    [Arguments]    ${cpe}    ${wan}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    ifup ${wan}    ifup ${wan}    ${pwd}
+    close connection
+
+shutdown_nanchang_lan
+    ${c_nc_l_id}=    shutdown_switch_port    m_245    &{mirror_switch_245}[nanchang_A_cpe_if_lan]
+    set suite variable    ${s_c_nc_l_id}    ${c_nc_l_id}
+
+unshutdown_nanchang_lan
+    unshutdown_switch_port    ${s_c_nc_l_id}    &{mirror_switch_245}[nanchang_A_cpe_if_lan]
+
+Block_openwrt_cpe_wan_udp
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    iptables -I OUTPUT -p udp -j DROP    iptables -I OUTPUT -p udp -j DROP    ${pwd}
+    close connection
+
+UnBlock_openwrt_cpe_wan_udp
+    [Arguments]    ${cpe}
+    ${pwd}=    ssh_cpe    ${cpe}
+    ${res}=    write cpe cmd    ${cpe}    iptables -D OUTPUT -p udp -j DROP    iptables -D OUTPUT -p udp -j DROP    ${pwd}
+    close connection
+
+teardown_cpe_start_state_init
+    cmd_cpe    nanchang    start
+    Wait Until Keyword Succeeds    200s    5s    Check_CPE_Status    nanchang    state    init

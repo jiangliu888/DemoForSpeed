@@ -1,0 +1,106 @@
+*** Settings ***
+Library           SSHLibrary
+Library           Collections
+Library           OperatingSystem
+Library           String
+Library           HttpLibrary.HTTP
+Resource          ../../testcase/resource/SshKeyword.txt
+Library           ../../libs/configCenter/ConsulKeyword.py
+Library           ../../libs/fake_ne/topo/loadTopo.py
+Library           ../../libs/uranus/UranusKeyword.py
+
+*** Variables ***
+##USER_HOME used for public key
+${USER_HOME}      %{HOME}
+##ONOS_HOME is where the onos dist will be deployed on the controller vm
+${ONOS_HOME}      /var/log/uranus/onos/karaf*
+${RESTCONFPORT}    8181
+${LINUX_PROMPT}    \#
+${GAEA_HOME}      /var/log/uranus/gaea/service.log
+${ne_wait_time}    10s
+
+*** Keywords ***
+Start_Ne_with_topo
+    [Arguments]    ${topo}    ${ne_list}    ${cpes}=${None}
+    ${sites_id_list}=    run keyword if    ${cpes}    create_company1_relation    ${cpes}    ELSE    set variable    ${None}
+    start_topo    ${topo}
+    wait until keyword succeeds    ${ne_wait_time}    1s    Check_Ne_At_Low_Level    ${ne_list}
+    [Return]    ${sites_id_list}
+
+Stop_Ne_Topo
+    stop_topo
+
+Check_Ne_At_Low_Level
+    [Arguments]    ${ne_list}
+    ${c_ne_list}=    get_all_device_id_from_cnf
+    ${results}=    create list
+    : FOR    ${ne}    IN    @{ne_list}
+    \    ${ret}=    evaluate    ${ne} in ${c_ne_list}
+    \    append to list    ${results}    ${ret}
+    ${r_all}    evaluate    all(${results})
+    should be true    ${r_all}
+
+Get Karaf Logs
+    [Arguments]    ${controller}
+    [Documentation]    Compresses all the karaf log files on each controler and puts them on your pybot execution machine (in /tmp)
+    ${output}=    run    tar -zcvf /tmp/${TEST NAME}.${controller}.tar.gz ${ONOS_HOME} ${GAEA_HOME}
+
+Start_A_Ne
+    [Arguments]    ${ne_type}    ${neid_str}    ${cac}    ${eac}    ${port_num}    ${use_group}=${False}
+    ${name}=    set variable    ${ne_type}_${neid_str}-${cac}-${eac}
+    start_a_fakene    ${name}    ${port_num}    ${use_group}
+    ${ne_id}=    evaluate    '${neid_str}'.split('.')[0]
+    ${ne_list}=    create list    ${ne_id}
+    wait until keyword succeeds    ${ne_wait_time}    1s    Check_Ne_At_Low_Level    ${ne_list}
+
+Start_A_CPE
+    [Arguments]    ${neid_str}    ${cac}    ${eac}    ${port_num}    ${use_group}=${False}
+    ${ne_id}=    evaluate    '${neid_str}'.split('.')[0]
+    ${site_id}=    create_company_sites    ${suite_company_id}    ${ne_id}    ${ne_id}    ${None}
+    \    ...    &{cpe_net}[${ne_id}]
+    Start_A_Ne    CPE    ${neid_str}    ${cac}    ${eac}    ${port_num}    ${use_group}
+    [Return]    ${site_id}
+
+Stop_A_Ne
+    [Arguments]    ${ne_type}    ${neid_str}    ${cac}    ${eac}    ${site_id}=${None}
+    ${is_pop}=    evaluate    '${ne_type}' in ['CR', 'ER']
+    ${is_cpe}=    evaluate    not ${is_pop}
+    ${ne_id}=    evaluate    '${neid_str}'.split('.')[0]
+    run keyword if    ${is_pop}    Set_POP_Status    ${ne_id}    MAINTENANCE
+    ${name}=    set variable    ${ne_type}_${neid_str}-${cac}-${eac}
+    stop_a_fakene    ${name}
+    unregister_ne    ${ne_id}
+    run keyword if    ${is_cpe}   delete_company_sites    ${suite_company_id}    ${site_id}
+    delete_ne    ${ne_id}    ${ne_type}
+
+Abnormal_Stop_A_Ne
+    [Arguments]    ${ne_type}    ${neid_str}    ${cac}    ${eac}
+    ${name}=    set variable    ${ne_type}_${neid_str}-${cac}-${eac}
+    stop_a_fakene    ${name}
+
+Ne_change_Port_Num
+    [Arguments]    ${ne_type}    ${ne_id}    ${cac}    ${eac}    ${port_num}
+    Restart_A_Ne    ${ne_type}    ${ne_id}    ${cac}    ${eac}    ${port_num}
+
+Restart_A_Ne
+    [Arguments]    ${ne_type}    ${neid_str}    ${cac}    ${eac}    ${port_num}
+    ${name}=    set variable    ${ne_type}_${neid_str}-${cac}-${eac}
+    stop_a_fakene    ${name}
+    start_a_fakene    ${name}    ${port_num}    ${False}
+    ${ne_id}=    evaluate    '${neid_str}'.split('.')[0]
+    ${ne_list}=    create list    ${ne_id}
+    wait until keyword succeeds    ${ne_wait_time}    1s    Check_Ne_At_Low_Level    ${ne_list}
+
+Case_tear_down
+    Unregister_all_ne_from_controller    CPE
+    Unregister_all_ne_from_controller    ER
+    Unregister_all_ne_from_controller    CR
+    ${exists}=    Run Keyword And return status    Variable Should Exist    ${suite_company_id}
+    run keyword if    ${exists}    delete_company_unions  ${suite_company_id}
+    run keyword if    ${exists}    delete_company_sites  ${suite_company_id}
+    delete_all_config
+    Stop_Ne_Topo
+    get karaf logs    &{uranus_host}[ip]
+
+Case_Setup
+    put_gaea_openflow_global_config    &{consul_test}[openflow_ip_list][1]    &{consul_test}[openflow_port_list][1]
