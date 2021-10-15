@@ -1,8 +1,0 @@
-requests
-prettytable
-aiohttp
-scipy
-pillow
-numy
-aiofiles
-
