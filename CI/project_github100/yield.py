@@ -31,4 +31,4 @@ class FloatRange:
             yield t
             t -= self.step
 for x in reversed(FloatRange(1, 20, 2)):
-    print x
+    print(x)
