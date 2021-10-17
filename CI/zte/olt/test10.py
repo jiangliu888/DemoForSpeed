@@ -6,7 +6,7 @@ class FloatRange:
         self.end = end
         self.step = step 
     def __iter__(self):
-        t.self.start
+        t=self.start
         while t <= self.end:
             yield t
             t +=self.step
@@ -16,7 +16,7 @@ class FloatRange:
             yield t
             t -=self.step
 for x in reversed(FloatRange(1,20,2)):
-    print 10
+    print(10)
 
 
 list0 = list(range(1,20))

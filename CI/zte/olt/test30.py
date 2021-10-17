@@ -1,6 +1,7 @@
 # -*- coding: UTF-8 -*-
 from functools import wraps
 import time
+import logging
 
 def warn(timeout):
     timeout = [timeout]
@@ -9,8 +10,8 @@ def warn(timeout):
             start = time.time()
             res = func(*arg,**karg)
             userd = time.time() - start
-            if used >timeout:
-                msg = '"%s":%s > %s' % (func.__name__,used,timeout)
+            if userd >timeout:
+                msg = '"%s":%s > %s' % (func.__name__,userd,timeout)
                 logging.warn(msg)
             return res      
 

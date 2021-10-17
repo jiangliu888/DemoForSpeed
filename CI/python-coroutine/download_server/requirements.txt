@@ -1,0 +1,7 @@
+prettytable
+requests
+aiohttp
+aiofiles
+scipy
+pillow
+numpy

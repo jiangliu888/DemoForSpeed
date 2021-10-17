@@ -11,6 +11,6 @@ def singleton(cls):
         if cls not in instances:
             with locker:
                 if cls not in instances:
-                    instances[cls] = cls(*args, **kwargs)
+                    instances[cls] = cls(*args, **kwarg)
         return instances[cls]
     return wrapper               
